@@ -46,6 +46,18 @@ export interface WikiPageDocument {
   markdown: string;
 }
 
+export interface WikiPageReference {
+  pageId: string;
+  title: string;
+  relativePath: string;
+}
+
+export interface WikiPageGraph {
+  links: WikiPageReference[];
+  backlinks: WikiPageReference[];
+  tags: string[];
+}
+
 export interface WikiRevision {
   id: string;
   pageId: string;
@@ -294,6 +306,11 @@ export async function createWikiPage(rootId: string, input: CreateWikiPageInput)
 export async function getWikiPage(pageId: string): Promise<WikiPageDocument> {
   const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}`);
   return asJson<WikiPageDocument>(res);
+}
+
+export async function getWikiPageGraph(pageId: string): Promise<WikiPageGraph> {
+  const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}/graph`);
+  return asJson<WikiPageGraph>(res);
 }
 
 export async function updateWikiPage(pageId: string, input: UpdateWikiPageInput): Promise<WikiPageDocument> {

@@ -62,6 +62,8 @@ public interface IWikiStore
 
     Task<WikiPageDocument?> GetPageAsync(string pageId, CancellationToken cancellationToken);
 
+    Task<WikiPageGraph?> GetPageGraphAsync(string pageId, CancellationToken cancellationToken);
+
     Task<WikiPageDocument?> UpdatePageAsync(
         string pageId,
         string markdown,

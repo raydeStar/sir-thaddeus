@@ -455,6 +455,79 @@ public sealed class LocalWikiStoreTests : IDisposable
         Assert.Empty(await store.SearchAsync(root.Id, "citadel", CancellationToken.None));
     }
 
+    [Fact]
+    public async Task Page_graph_indexes_links_tags_and_lifecycle_visibility()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Research", null, CancellationToken.None);
+        var atlas = await store.CreatePageAsync(root.Id, null, "Atlas", "# Atlas\n\nReference page.", CancellationToken.None);
+        var bridge = await store.CreatePageAsync(
+            root.Id,
+            null,
+            "Bridge",
+            "---\ntags: [Lore, worldbuilding]\n---\n# Bridge\n\nConnects to [[Atlas]] and [the file](atlas.md). #Field-Note",
+            CancellationToken.None);
+
+        var bridgeGraph = await store.GetPageGraphAsync(bridge.Page.Id, CancellationToken.None);
+        var atlasGraph = await store.GetPageGraphAsync(atlas.Page.Id, CancellationToken.None);
+
+        Assert.NotNull(bridgeGraph);
+        var link = Assert.Single(bridgeGraph!.Links);
+        Assert.Equal(atlas.Page.Id, link.PageId);
+        Assert.Contains("field-note", bridgeGraph.Tags);
+        Assert.Contains("lore", bridgeGraph.Tags);
+        Assert.Contains("worldbuilding", bridgeGraph.Tags);
+        Assert.NotNull(atlasGraph);
+        var backlink = Assert.Single(atlasGraph!.Backlinks);
+        Assert.Equal(bridge.Page.Id, backlink.PageId);
+
+        var tagged = Assert.Single(await store.SearchAsync(root.Id, "#lore", CancellationToken.None));
+        Assert.Equal(bridge.Page.Id, tagged.PageId);
+
+        Assert.True(await store.DeletePageAsync(bridge.Page.Id, CancellationToken.None));
+        Assert.Empty((await store.GetPageGraphAsync(atlas.Page.Id, CancellationToken.None))!.Backlinks);
+        Assert.Empty(await store.SearchAsync(root.Id, "#lore", CancellationToken.None));
+
+        var restored = await store.RestorePageAsync(bridge.Page.Id, CancellationToken.None);
+
+        Assert.NotNull(restored);
+        var restoredBacklink = Assert.Single((await store.GetPageGraphAsync(atlas.Page.Id, CancellationToken.None))!.Backlinks);
+        Assert.Equal(bridge.Page.Id, restoredBacklink.PageId);
+        Assert.Single(await store.SearchAsync(root.Id, "#lore", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RebuildIndex_restores_page_graph_metadata()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Research", null, CancellationToken.None);
+        var target = await store.CreatePageAsync(root.Id, null, "Target", "# Target", CancellationToken.None);
+        var source = await store.CreatePageAsync(root.Id, null, "Source", "See [[Target]]. #indexed", CancellationToken.None);
+
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(root.Path, ".sir-thaddeus", "wiki.sqlite")}"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                delete from page_links;
+                delete from page_tags;
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        Assert.Empty((await store.GetPageGraphAsync(target.Page.Id, CancellationToken.None))!.Backlinks);
+        Assert.Empty(await store.SearchAsync(root.Id, "#indexed", CancellationToken.None));
+
+        var rebuilt = await store.RebuildIndexAsync(root.Id, CancellationToken.None);
+
+        Assert.NotNull(rebuilt);
+        Assert.Equal(2, rebuilt!.PageCount);
+        var backlink = Assert.Single((await store.GetPageGraphAsync(target.Page.Id, CancellationToken.None))!.Backlinks);
+        Assert.Equal(source.Page.Id, backlink.PageId);
+        var tagged = Assert.Single(await store.SearchAsync(root.Id, "#indexed", CancellationToken.None));
+        Assert.Equal(source.Page.Id, tagged.PageId);
+    }
+
     private LocalWikiStore NewStore() =>
         new(_tempDir, NullLogger<LocalWikiStore>.Instance);
 }

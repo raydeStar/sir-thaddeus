@@ -34,6 +34,16 @@ public sealed record WikiPage(
 
 public sealed record WikiPageDocument(WikiPage Page, string Markdown);
 
+public sealed record WikiPageReference(
+    string PageId,
+    string Title,
+    string RelativePath);
+
+public sealed record WikiPageGraph(
+    IReadOnlyList<WikiPageReference> Links,
+    IReadOnlyList<WikiPageReference> Backlinks,
+    IReadOnlyList<string> Tags);
+
 public sealed record WikiRevision(
     string Id,
     string PageId,

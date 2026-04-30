@@ -250,6 +250,12 @@ public static class WikiApi
             return page is null ? Results.NotFound() : Results.Json(page, WikiJsonContext.Default.WikiPageDocument);
         });
 
+        app.MapGet("/api/wiki/pages/{pageId}/graph", async (string pageId, IWikiStore store, CancellationToken ct) =>
+        {
+            var graph = await store.GetPageGraphAsync(pageId, ct).ConfigureAwait(false);
+            return graph is null ? Results.NotFound() : Results.Json(graph, WikiJsonContext.Default.WikiPageGraph);
+        });
+
         app.MapPatch("/api/wiki/pages/{pageId}", async (string pageId, HttpContext ctx, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
         {
             var req = await ReadAsync(ctx, WikiJsonContext.Default.UpdateWikiPageRequest, ct).ConfigureAwait(false);
@@ -543,6 +549,8 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(WikiRevision))]
 [JsonSerializable(typeof(WikiTree))]
 [JsonSerializable(typeof(WikiPageDocument))]
+[JsonSerializable(typeof(WikiPageReference))]
+[JsonSerializable(typeof(WikiPageGraph))]
 [JsonSerializable(typeof(WikiSearchResult))]
 [JsonSerializable(typeof(WikiTrashItem))]
 [JsonSerializable(typeof(WikiIndexRebuildResult))]

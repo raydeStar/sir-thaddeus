@@ -16,7 +16,7 @@ import { test, expect, type Dialog } from '@playwright/test';
 test.describe('wiki canvas smoke', () => {
   test.setTimeout(120_000);
 
-  test('renders the wiki canvas, supports workspace/page lifecycle, search, and editor', async ({ page, context }) => {
+  test('renders the wiki canvas, supports workspace/page lifecycle, search, and editor', async ({ page, context, request }) => {
     const baseUrl = process.env.RUNTIME_BASE_URL;
     const token = process.env.RUNTIME_TOKEN;
     expect(baseUrl, 'global-setup must populate RUNTIME_BASE_URL').toBeTruthy();
@@ -172,6 +172,45 @@ test.describe('wiki canvas smoke', () => {
     ).toBeVisible({ timeout: 10_000 });
     await page.screenshot({ path: 'test-results/wiki-05-search.png', fullPage: true });
     await searchInput.fill('');
+
+    // ---------- Phase 6b: backlinks/tags knowledge panel ----------
+    const rootId = await workspaceSelect.inputValue();
+    const authHeaders = { Authorization: `Bearer ${token}` };
+    const targetResponse = await request.post(`${baseUrl}/api/wiki/roots/${encodeURIComponent(rootId)}/pages`, {
+      headers: authHeaders,
+      data: {
+        title: 'Graph Target',
+        folderId: null,
+        markdown: '# Graph Target\n\nKnowledge target page.',
+      },
+    });
+    expect(targetResponse.ok()).toBeTruthy();
+    const sourceResponse = await request.post(`${baseUrl}/api/wiki/roots/${encodeURIComponent(rootId)}/pages`, {
+      headers: authHeaders,
+      data: {
+        title: 'Graph Source',
+        folderId: null,
+        markdown: '# Graph Source\n\nConnects to [[Graph Target]]. #graph-e2e',
+      },
+    });
+    expect(sourceResponse.ok()).toBeTruthy();
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(workspaceSelect).toBeVisible({ timeout: 15_000 });
+  await workspaceSelect.selectOption(rootId);
+    await expect(page.getByRole('button', { name: /Graph Source/ })).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: /Graph Source/ }).click();
+    const knowledgePanel = page.getByTestId('wiki-knowledge-panel');
+    await expect(knowledgePanel.getByRole('button', { name: '#graph-e2e' })).toBeVisible({ timeout: 10_000 });
+    await expect(knowledgePanel.getByRole('button', { name: /Graph Target/ })).toBeVisible({ timeout: 10_000 });
+    await knowledgePanel.getByRole('button', { name: '#graph-e2e' }).click();
+    await expect(searchInput).toHaveValue('#graph-e2e');
+    await expect(page.getByRole('button', { name: /Graph Source/ })).toBeVisible({ timeout: 10_000 });
+    await searchInput.fill('');
+    await knowledgePanel.getByRole('button', { name: /Graph Target/ }).click();
+    await expect(page.getByLabel('Page title', { exact: true })).toHaveValue('Graph Target', { timeout: 10_000 });
+
+    await page.screenshot({ path: 'test-results/wiki-05b-knowledge-panel.png', fullPage: true });
 
     // ---------- Phase 7: collapse/expand panels ----------
     // Left "Pages" panel: aria-label flips between "Collapse Pages" and "Open Pages".

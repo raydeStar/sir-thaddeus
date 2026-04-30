@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
@@ -12,6 +13,9 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
     private const string RegistryFileName = "wiki-registry.sqlite";
     private const string RootDatabaseFileName = "wiki.sqlite";
     private const int SearchResultLimit = 50;
+    private static readonly Regex WikiLinkPattern = new(@"\[\[(?<target>[^\]\|#]+)(?:[#|][^\]]*)?\]\]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex MarkdownPageLinkPattern = new(@"\]\((?<target>[^)\s]+\.md(?:#[^)]*)?)\)", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex InlineTagPattern = new(@"(?<![\p{L}\p{Nd}_/-])#(?<tag>[\p{L}\p{Nd}][\p{L}\p{Nd}_-]{0,63})", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly string _libraryDirectory;
     private readonly string _registryPath;
     private readonly ILogger<LocalWikiStore> _logger;
@@ -292,7 +296,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
                 }
 
                 await UpdatePageMetadataAsync(connection, updatedPage, cancellationToken).ConfigureAwait(false);
-                await UpsertPageSearchIndexAsync(connection, updatedPage, pageBodies[page.Id], cancellationToken).ConfigureAwait(false);
+                await UpsertPageIndexesAsync(connection, updatedPage, pageBodies[page.Id], cancellationToken).ConfigureAwait(false);
             }
 
             return renamed;
@@ -385,7 +389,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
                 }
 
                 await UpdatePageMetadataAsync(connection, updatedPage, cancellationToken).ConfigureAwait(false);
-                await UpsertPageSearchIndexAsync(connection, updatedPage, pageBodies[page.Id], cancellationToken).ConfigureAwait(false);
+                await UpsertPageIndexesAsync(connection, updatedPage, pageBodies[page.Id], cancellationToken).ConfigureAwait(false);
             }
 
             return moved;
@@ -479,7 +483,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
                 await RestorePageRowAsync(connection, page.Id, restoredAt, cancellationToken).ConfigureAwait(false);
                 var restoredPage = page with { UpdatedAt = restoredAt, DeletedAt = null };
                 var markdown = await ReadPageBodyAsync(root, page, cancellationToken).ConfigureAwait(false);
-                await UpsertPageSearchIndexAsync(connection, restoredPage, markdown, cancellationToken).ConfigureAwait(false);
+                await UpsertPageIndexesAsync(connection, restoredPage, markdown, cancellationToken).ConfigureAwait(false);
             }
 
             return true;
@@ -571,7 +575,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
 
             await WritePageFileAsync(root, page, markdown, cancellationToken).ConfigureAwait(false);
             await InsertPageAsync(connection, page, cancellationToken).ConfigureAwait(false);
-            await UpsertPageSearchIndexAsync(connection, page, markdown, cancellationToken).ConfigureAwait(false);
+            await UpsertPageIndexesAsync(connection, page, markdown, cancellationToken).ConfigureAwait(false);
             await InsertRevisionAsync(connection, page.Id, page.Version, "user", now, "Created page", markdown, cancellationToken).ConfigureAwait(false);
             return new WikiPageDocument(page, markdown ?? string.Empty);
         }
@@ -588,6 +592,19 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
 
         var markdown = await ReadPageBodyAsync(located.Value.Root, located.Value.Page, cancellationToken).ConfigureAwait(false);
         return new WikiPageDocument(located.Value.Page, markdown);
+    }
+
+    public async Task<WikiPageGraph?> GetPageGraphAsync(string pageId, CancellationToken cancellationToken)
+    {
+        var located = await FindPageAsync(pageId, cancellationToken).ConfigureAwait(false);
+        if (located is null) return null;
+
+        await EnsureRootDatabaseAsync(located.Value.Root, cancellationToken).ConfigureAwait(false);
+        await using var connection = await OpenRootAsync(located.Value.Root, cancellationToken).ConfigureAwait(false);
+        var links = await ListOutgoingLinksAsync(connection, pageId, cancellationToken).ConfigureAwait(false);
+        var backlinks = await ListBacklinksAsync(connection, pageId, cancellationToken).ConfigureAwait(false);
+        var tags = await ListPageTagsAsync(connection, pageId, cancellationToken).ConfigureAwait(false);
+        return new WikiPageGraph(links, backlinks, tags);
     }
 
     public async Task<WikiPageDocument?> UpdatePageAsync(
@@ -623,7 +640,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             await WritePageFileAsync(root, updated, markdown, cancellationToken).ConfigureAwait(false);
             await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
             await UpdatePageMetadataAsync(connection, updated, cancellationToken).ConfigureAwait(false);
-            await UpsertPageSearchIndexAsync(connection, updated, markdown, cancellationToken).ConfigureAwait(false);
+            await UpsertPageIndexesAsync(connection, updated, markdown, cancellationToken).ConfigureAwait(false);
             await InsertRevisionAsync(
                 connection,
                 updated.Id,
@@ -693,7 +710,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             }
 
             await UpdatePageMetadataAsync(connection, updated, cancellationToken).ConfigureAwait(false);
-            await UpsertPageSearchIndexAsync(connection, updated, markdown, cancellationToken).ConfigureAwait(false);
+            await UpsertPageIndexesAsync(connection, updated, markdown, cancellationToken).ConfigureAwait(false);
             await InsertRevisionAsync(
                 connection,
                 updated.Id,
@@ -771,7 +788,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             }
 
             await UpdatePageMetadataAsync(connection, updated, cancellationToken).ConfigureAwait(false);
-            await UpsertPageSearchIndexAsync(connection, updated, markdown, cancellationToken).ConfigureAwait(false);
+            await UpsertPageIndexesAsync(connection, updated, markdown, cancellationToken).ConfigureAwait(false);
             await InsertRevisionAsync(
                 connection,
                 updated.Id,
@@ -836,7 +853,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             var restored = page with { UpdatedAt = restoredAt, DeletedAt = null };
             var markdown = await ReadPageBodyAsync(root, page, cancellationToken).ConfigureAwait(false);
             await WritePageFileAsync(root, restored, markdown, cancellationToken).ConfigureAwait(false);
-            await UpsertPageSearchIndexAsync(connection, restored, markdown, cancellationToken).ConfigureAwait(false);
+            await UpsertPageIndexesAsync(connection, restored, markdown, cancellationToken).ConfigureAwait(false);
             return new WikiPageDocument(restored, markdown);
         }
         finally
@@ -913,7 +930,8 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         var normalizedQuery = (query ?? string.Empty).Trim();
         if (normalizedQuery.Length == 0) return Array.Empty<WikiSearchResult>();
 
-        var ftsQuery = BuildFtsQuery(normalizedQuery);
+        var tagQuery = TryParseTagQuery(normalizedQuery, out var parsedTag) ? parsedTag : null;
+        var ftsQuery = tagQuery is null ? BuildFtsQuery(normalizedQuery) : string.Empty;
 
         var roots = string.IsNullOrWhiteSpace(rootId)
             ? await ListRootsAsync(cancellationToken).ConfigureAwait(false)
@@ -926,7 +944,11 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             {
                 await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
                 await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
-                if (ftsQuery.Length > 0)
+                if (tagQuery is not null)
+                {
+                    results.AddRange(await SearchRootByTagAsync(connection, tagQuery, cancellationToken).ConfigureAwait(false));
+                }
+                else if (ftsQuery.Length > 0)
                 {
                     results.AddRange(await SearchRootWithFtsAsync(connection, root, ftsQuery, cancellationToken).ConfigureAwait(false));
                 }
@@ -1012,7 +1034,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         {
             await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
             await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
-            var count = await RebuildSearchIndexAsync(connection, root, cancellationToken).ConfigureAwait(false);
+            var count = await RebuildPageIndexesAsync(connection, root, cancellationToken).ConfigureAwait(false);
             return new WikiIndexRebuildResult(rootId, count, DateTimeOffset.UtcNow);
         }
         finally
@@ -1112,9 +1134,29 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
                 tokenize = 'unicode61'
             );
 
+            create table if not exists page_links (
+                source_page_id text not null,
+                target_page_id text not null,
+                label text not null,
+                primary key (source_page_id, target_page_id, label)
+            );
+
+            create table if not exists page_tags (
+                page_id text not null,
+                tag text not null,
+                primary key (page_id, tag)
+            );
+
+            create table if not exists page_index_state (
+                page_id text primary key,
+                version integer not null
+            );
+
             create index if not exists idx_folders_parent on folders(parent_folder_id, sort_order);
             create index if not exists idx_pages_folder on pages(folder_id, updated_at);
             create index if not exists idx_revisions_page on revisions(page_id, version desc);
+            create index if not exists idx_page_links_target on page_links(target_page_id);
+            create index if not exists idx_page_tags_tag on page_tags(tag);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "folders", "deleted_at", "text null", cancellationToken).ConfigureAwait(false);
@@ -1125,10 +1167,10 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             create index if not exists idx_pages_deleted on pages(deleted_at, folder_id, updated_at);
             """;
         await indexCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        await EnsureSearchIndexPopulatedAsync(connection, root, cancellationToken).ConfigureAwait(false);
+        await EnsurePageIndexesPopulatedAsync(connection, root, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task EnsureSearchIndexPopulatedAsync(
+    private async Task EnsurePageIndexesPopulatedAsync(
         SqliteConnection connection,
         WikiRoot root,
         CancellationToken cancellationToken)
@@ -1139,7 +1181,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         var indexedCount = await CountIndexedActivePagesAsync(connection, cancellationToken).ConfigureAwait(false);
         if (indexedCount == activeCount) return;
 
-        await RebuildSearchIndexAsync(connection, root, cancellationToken).ConfigureAwait(false);
+        await RebuildPageIndexesAsync(connection, root, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<int> CountActivePagesAsync(SqliteConnection connection, CancellationToken cancellationToken)
@@ -1155,22 +1197,28 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = """
             select count(*)
-            from page_search
-            join pages on pages.id = page_search.page_id
+            from pages
+            join page_search on page_search.page_id = pages.id
+            join page_index_state on page_index_state.page_id = pages.id and page_index_state.version = pages.version
             where pages.deleted_at is null
             """;
         var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return Convert.ToInt32(result, CultureInfo.InvariantCulture);
     }
 
-    private async Task<int> RebuildSearchIndexAsync(
+    private async Task<int> RebuildPageIndexesAsync(
         SqliteConnection connection,
         WikiRoot root,
         CancellationToken cancellationToken)
     {
         using (var clear = connection.CreateCommand())
         {
-            clear.CommandText = "delete from page_search";
+            clear.CommandText = """
+                delete from page_search;
+                delete from page_links;
+                delete from page_tags;
+                delete from page_index_state;
+                """;
             await clear.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -1178,10 +1226,24 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         foreach (var page in pages)
         {
             var markdown = await ReadPageBodyAsync(root, page, cancellationToken).ConfigureAwait(false);
-            await UpsertPageSearchIndexAsync(connection, page, markdown, cancellationToken).ConfigureAwait(false);
+            await UpsertPageIndexesAsync(connection, page, markdown, cancellationToken).ConfigureAwait(false);
         }
 
         return pages.Count;
+    }
+
+    private async Task UpsertPageIndexesAsync(
+        SqliteConnection connection,
+        WikiPage page,
+        string markdown,
+        CancellationToken cancellationToken)
+    {
+        await DeletePageIndexesAsync(connection, page.Id, deleteIncomingLinks: false, cancellationToken).ConfigureAwait(false);
+        if (page.DeletedAt is not null) return;
+
+        await UpsertPageSearchIndexAsync(connection, page, markdown, cancellationToken).ConfigureAwait(false);
+        await UpsertPageKnowledgeIndexAsync(connection, page, markdown, cancellationToken).ConfigureAwait(false);
+        await UpsertPageIndexStateAsync(connection, page, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task UpsertPageSearchIndexAsync(
@@ -1216,6 +1278,165 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         delete.CommandText = "delete from page_search where page_id = $pageId";
         Add(delete, "$pageId", pageId);
         await delete.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task UpsertPageKnowledgeIndexAsync(
+        SqliteConnection connection,
+        WikiPage page,
+        string markdown,
+        CancellationToken cancellationToken)
+    {
+        var metadata = ParseWikiMetadata(markdown);
+        var activePages = await ListPagesAsync(connection, cancellationToken).ConfigureAwait(false);
+        var resolvedLinks = ResolveWikiLinks(metadata.LinkTargets, activePages, page.Id);
+
+        foreach (var link in resolvedLinks)
+        {
+            using var insert = connection.CreateCommand();
+            insert.CommandText = """
+                insert or ignore into page_links (source_page_id, target_page_id, label)
+                values ($sourcePageId, $targetPageId, $label)
+                """;
+            Add(insert, "$sourcePageId", page.Id);
+            Add(insert, "$targetPageId", link.PageId);
+            Add(insert, "$label", link.Label);
+            await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var tag in metadata.Tags)
+        {
+            using var insert = connection.CreateCommand();
+            insert.CommandText = """
+                insert or ignore into page_tags (page_id, tag)
+                values ($pageId, $tag)
+                """;
+            Add(insert, "$pageId", page.Id);
+            Add(insert, "$tag", tag);
+            await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task UpsertPageIndexStateAsync(
+        SqliteConnection connection,
+        WikiPage page,
+        CancellationToken cancellationToken)
+    {
+        using var upsert = connection.CreateCommand();
+        upsert.CommandText = """
+            insert into page_index_state (page_id, version)
+            values ($pageId, $version)
+            on conflict(page_id) do update set version = excluded.version
+            """;
+        Add(upsert, "$pageId", page.Id);
+        Add(upsert, "$version", page.Version);
+        await upsert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task DeletePageIndexesAsync(
+        SqliteConnection connection,
+        string pageId,
+        bool deleteIncomingLinks,
+        CancellationToken cancellationToken)
+    {
+        await DeletePageSearchIndexAsync(connection, pageId, cancellationToken).ConfigureAwait(false);
+
+        using (var deleteLinks = connection.CreateCommand())
+        {
+            deleteLinks.CommandText = deleteIncomingLinks
+                ? "delete from page_links where source_page_id = $pageId or target_page_id = $pageId"
+                : "delete from page_links where source_page_id = $pageId";
+            Add(deleteLinks, "$pageId", pageId);
+            await deleteLinks.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        using (var deleteTags = connection.CreateCommand())
+        {
+            deleteTags.CommandText = "delete from page_tags where page_id = $pageId";
+            Add(deleteTags, "$pageId", pageId);
+            await deleteTags.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        using (var deleteState = connection.CreateCommand())
+        {
+            deleteState.CommandText = "delete from page_index_state where page_id = $pageId";
+            Add(deleteState, "$pageId", pageId);
+            await deleteState.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<IReadOnlyList<WikiPageReference>> ListOutgoingLinksAsync(
+        SqliteConnection connection,
+        string pageId,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            select target.id, target.title, target.relative_path
+            from page_links
+            join pages target on target.id = page_links.target_page_id
+            where page_links.source_page_id = $pageId
+              and target.deleted_at is null
+            order by target.title collate nocase, target.relative_path collate nocase
+            """;
+        Add(command, "$pageId", pageId);
+        return await ReadPageReferencesAsync(command, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IReadOnlyList<WikiPageReference>> ListBacklinksAsync(
+        SqliteConnection connection,
+        string pageId,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            select source.id, source.title, source.relative_path
+            from page_links
+            join pages source on source.id = page_links.source_page_id
+            join pages target on target.id = page_links.target_page_id
+            where page_links.target_page_id = $pageId
+              and source.deleted_at is null
+              and target.deleted_at is null
+            order by source.title collate nocase, source.relative_path collate nocase
+            """;
+        Add(command, "$pageId", pageId);
+        return await ReadPageReferencesAsync(command, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<IReadOnlyList<string>> ListPageTagsAsync(
+        SqliteConnection connection,
+        string pageId,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            select page_tags.tag
+            from page_tags
+            join pages on pages.id = page_tags.page_id
+            where page_tags.page_id = $pageId
+              and pages.deleted_at is null
+            order by page_tags.tag collate nocase
+            """;
+        Add(command, "$pageId", pageId);
+        var tags = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            tags.Add(reader.GetString(0));
+        }
+        return tags;
+    }
+
+    private static async Task<IReadOnlyList<WikiPageReference>> ReadPageReferencesAsync(
+        SqliteCommand command,
+        CancellationToken cancellationToken)
+    {
+        var references = new List<WikiPageReference>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            references.Add(new WikiPageReference(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+        }
+        return references;
     }
 
     private static string BuildFtsQuery(string query)
@@ -1318,6 +1539,46 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return results;
     }
 
+    private static async Task<IReadOnlyList<(WikiSearchResult Result, double Rank)>> SearchRootByTagAsync(
+        SqliteConnection connection,
+        string tag,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            select p.root_id,
+                   p.id,
+                   p.title,
+                   p.excerpt,
+                   p.relative_path,
+                   p.version
+            from page_tags
+            join pages p on p.id = page_tags.page_id
+            where page_tags.tag = $tag
+              and p.deleted_at is null
+            order by p.updated_at desc, p.title collate nocase
+            limit $limit
+            """;
+        Add(command, "$tag", tag);
+        Add(command, "$limit", SearchResultLimit);
+
+        var results = new List<(WikiSearchResult Result, double Rank)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            results.Add((
+                new WikiSearchResult(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    reader.GetString(4),
+                    reader.GetInt64(5)),
+                0));
+        }
+        return results;
+    }
+
     private static string BuildScanExcerpt(string markdown, string fallbackExcerpt, string query)
     {
         if (string.IsNullOrWhiteSpace(markdown)) return fallbackExcerpt;
@@ -1329,6 +1590,150 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         if (start > 0) excerpt = "... " + excerpt;
         if (start + length < markdown.Length) excerpt += " ...";
         return excerpt;
+    }
+
+    private static bool TryParseTagQuery(string query, out string tag)
+    {
+        tag = string.Empty;
+        var candidate = query.Trim();
+        if (candidate.StartsWith('#'))
+        {
+            candidate = candidate[1..];
+        }
+        else if (candidate.StartsWith("tag:", StringComparison.OrdinalIgnoreCase))
+        {
+            candidate = candidate[4..];
+        }
+        else
+        {
+            return false;
+        }
+
+        tag = NormalizeTag(candidate);
+        return tag.Length > 0;
+    }
+
+    private static ParsedWikiMetadata ParseWikiMetadata(string markdown)
+    {
+        var linkTargets = new List<string>();
+        var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var source = markdown ?? string.Empty;
+
+        foreach (Match match in WikiLinkPattern.Matches(source))
+        {
+            var target = NormalizeLinkTarget(match.Groups["target"].Value);
+            if (target.Length > 0) linkTargets.Add(target);
+        }
+
+        foreach (Match match in MarkdownPageLinkPattern.Matches(source))
+        {
+            var target = NormalizeLinkTarget(match.Groups["target"].Value);
+            if (target.Length > 0) linkTargets.Add(target);
+        }
+
+        foreach (var frontmatterTag in ExtractFrontmatterTags(source))
+        {
+            tags.Add(frontmatterTag);
+        }
+
+        foreach (Match match in InlineTagPattern.Matches(source))
+        {
+            var tag = NormalizeTag(match.Groups["tag"].Value);
+            if (tag.Length > 0) tags.Add(tag);
+        }
+
+        return new ParsedWikiMetadata(linkTargets, tags.OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
+    private static IEnumerable<ResolvedWikiLink> ResolveWikiLinks(
+        IReadOnlyList<string> linkTargets,
+        IReadOnlyList<WikiPage> activePages,
+        string sourcePageId)
+    {
+        var byTitle = new Dictionary<string, WikiPage>(StringComparer.OrdinalIgnoreCase);
+        var byPath = new Dictionary<string, WikiPage>(StringComparer.OrdinalIgnoreCase);
+        foreach (var page in activePages)
+        {
+            byTitle.TryAdd(NormalizeLinkKey(page.Title), page);
+            byPath.TryAdd(NormalizePathKey(page.RelativePath), page);
+            var withoutExtension = Path.ChangeExtension(page.RelativePath, null) ?? page.RelativePath;
+            byPath.TryAdd(NormalizePathKey(withoutExtension), page);
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var target in linkTargets)
+        {
+            var key = NormalizeLinkKey(target);
+            var pathKey = NormalizePathKey(target);
+            if (!byTitle.TryGetValue(key, out var page) && !byPath.TryGetValue(pathKey, out page)) continue;
+            if (string.Equals(page.Id, sourcePageId, StringComparison.Ordinal)) continue;
+            if (!seen.Add(page.Id)) continue;
+            yield return new ResolvedWikiLink(page.Id, target);
+        }
+    }
+
+    private static IEnumerable<string> ExtractFrontmatterTags(string markdown)
+    {
+        var normalized = (markdown ?? string.Empty).Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (!normalized.StartsWith("---\n", StringComparison.Ordinal)) yield break;
+
+        var end = normalized.IndexOf("\n---\n", 4, StringComparison.Ordinal);
+        if (end < 0) yield break;
+
+        var lines = normalized[4..end].Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].Trim();
+            if (!line.StartsWith("tags:", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var value = line[5..].Trim();
+            if (value.Length > 0)
+            {
+                foreach (var tag in SplitTagValues(value)) yield return tag;
+                continue;
+            }
+
+            for (var j = i + 1; j < lines.Length; j++)
+            {
+                var listItem = lines[j].Trim();
+                if (!listItem.StartsWith("-", StringComparison.Ordinal)) break;
+                foreach (var tag in SplitTagValues(listItem[1..])) yield return tag;
+            }
+        }
+    }
+
+    private static IEnumerable<string> SplitTagValues(string value)
+    {
+        var normalized = value.Trim().Trim('[', ']');
+        foreach (var part in normalized.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var tag = NormalizeTag(part.Trim('"', '\'', '#'));
+            if (tag.Length > 0) yield return tag;
+        }
+    }
+
+    private static string NormalizeLinkTarget(string target)
+    {
+        var trimmed = (target ?? string.Empty).Trim();
+        var anchorIndex = trimmed.IndexOf('#', StringComparison.Ordinal);
+        if (anchorIndex >= 0) trimmed = trimmed[..anchorIndex];
+        return trimmed.Trim();
+    }
+
+    private static string NormalizeLinkKey(string value) =>
+        (value ?? string.Empty).Trim().ToLowerInvariant();
+
+    private static string NormalizePathKey(string value) =>
+        (value ?? string.Empty).Trim().Replace('\\', '/').ToLowerInvariant();
+
+    private static string NormalizeTag(string value)
+    {
+        var builder = new StringBuilder();
+        foreach (var ch in (value ?? string.Empty).Trim().TrimStart('#').ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(ch) || ch is '_' or '-') builder.Append(ch);
+        }
+        return builder.ToString();
     }
 
     private async Task<WikiRoot> RequireRootAsync(string rootId, CancellationToken cancellationToken) =>
@@ -1577,7 +1982,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         Add(command, "$id", pageId);
         Add(command, "$deletedAt", Format(deletedAt));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        await DeletePageSearchIndexAsync(connection, pageId, cancellationToken).ConfigureAwait(false);
+        await DeletePageIndexesAsync(connection, pageId, deleteIncomingLinks: false, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task RestoreFolderRowAsync(
@@ -1622,7 +2027,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         WikiPage page,
         CancellationToken cancellationToken)
     {
-        await DeletePageSearchIndexAsync(connection, page.Id, cancellationToken).ConfigureAwait(false);
+        await DeletePageIndexesAsync(connection, page.Id, deleteIncomingLinks: true, cancellationToken).ConfigureAwait(false);
 
         var path = ResolvePagePath(root, page.RelativePath);
         if (File.Exists(path))
@@ -2006,4 +2411,8 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             CultureInfo.InvariantCulture,
             $"{prefix}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds():x}_{Convert.ToHexString(bytes).ToLowerInvariant()}");
     }
+
+    private sealed record ParsedWikiMetadata(IReadOnlyList<string> LinkTargets, IReadOnlyList<string> Tags);
+
+    private sealed record ResolvedWikiLink(string PageId, string Label);
 }

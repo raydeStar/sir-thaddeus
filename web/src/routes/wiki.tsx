@@ -21,13 +21,14 @@ import {
   Search,
   Send,
   Settings2,
+  Tags,
   Trash2,
   Undo2,
   WandSparkles,
   X,
 } from 'lucide-react';
 import { useWikiStore, type WikiPageChatMessage, type WikiScope, type WikiSearchScope } from '../stores/wikiStore';
-import type { WikiAssistantSource, WikiFolder, WikiPage, WikiRevision, WikiSearchResult, WikiTrashItem } from '../lib/wikiApi';
+import type { WikiAssistantSource, WikiFolder, WikiPage, WikiPageGraph, WikiPageReference, WikiRevision, WikiSearchResult, WikiTrashItem } from '../lib/wikiApi';
 
 const WikiMarkdownEditor = lazy(() =>
   import('../components/wiki/WikiMarkdownEditor').then((module) => ({
@@ -65,6 +66,7 @@ function WikiRoute() {
     roots,
     tree,
     page,
+    pageGraph,
     revisions,
     selectedRootId,
     selectedFolderId,
@@ -828,6 +830,7 @@ function WikiRoute() {
           {!rightCollapsed ? (
             <div className="flex min-h-0 flex-1 flex-col">
               {page ? (
+                <>
                 <details className="shrink-0 border-b border-line" open={false}>
                   <summary className="cursor-pointer list-none px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle hover:text-ink">
                     Revisions <span className="ml-1 normal-case tracking-normal text-ink-subtle">({revisions.length})</span>
@@ -859,6 +862,15 @@ function WikiRoute() {
                     ) : null}
                   </div>
                 </details>
+                <WikiKnowledgePanel
+                  graph={pageGraph}
+                  onPageSelect={(pageId) => void selectPage(pageId)}
+                  onTagSelect={(tag) => {
+                    setSearch(`#${tag}`);
+                    setSearchScope('root');
+                  }}
+                />
+                </>
               ) : null}
               {selectedRoot ? (
                 <section className="flex min-h-0 flex-1 flex-col" aria-label="Page chat">
@@ -1246,6 +1258,89 @@ function describePendingAction(action: PendingWikiAction): {
     confirmLabel: 'Delete forever',
     destructive: true,
   };
+}
+
+function WikiKnowledgePanel({
+  graph,
+  onPageSelect,
+  onTagSelect,
+}: {
+  graph: WikiPageGraph | null;
+  onPageSelect: (pageId: string) => void;
+  onTagSelect: (tag: string) => void;
+}) {
+  if (!graph) return null;
+  const hasTags = graph.tags.length > 0;
+  const hasLinks = graph.links.length > 0;
+  const hasBacklinks = graph.backlinks.length > 0;
+
+  return (
+    <section className="shrink-0 space-y-3 border-b border-line px-4 py-3" data-testid="wiki-knowledge-panel">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-subtle">Knowledge</h3>
+        <span className="text-[11px] text-ink-subtle">{graph.tags.length + graph.links.length + graph.backlinks.length}</span>
+      </div>
+      {hasTags ? (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+            <Tags className="h-3.5 w-3.5" strokeWidth={1.8} />
+            Tags
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {graph.tags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className="inline-flex max-w-full items-center rounded-full border border-line bg-canvas-raised px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:border-accent/40 hover:bg-accent-soft hover:text-ink"
+                onClick={() => onTagSelect(tag)}
+                title={`Search #${tag}`}
+              >
+                #{tag}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {hasLinks ? <WikiPageReferenceGroup title="Links" references={graph.links} onPageSelect={onPageSelect} /> : null}
+      {hasBacklinks ? <WikiPageReferenceGroup title="Backlinks" references={graph.backlinks} onPageSelect={onPageSelect} /> : null}
+      {!hasTags && !hasLinks && !hasBacklinks ? (
+        <p className="text-xs text-ink-subtle">No links or tags</p>
+      ) : null}
+    </section>
+  );
+}
+
+function WikiPageReferenceGroup({
+  title,
+  references,
+  onPageSelect,
+}: {
+  title: string;
+  references: WikiPageReference[];
+  onPageSelect: (pageId: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+        <BookOpenText className="h-3.5 w-3.5" strokeWidth={1.8} />
+        {title}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {references.slice(0, 6).map((reference) => (
+          <button
+            key={`${title}:${reference.pageId}`}
+            type="button"
+            className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-canvas-raised px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:border-accent/40 hover:bg-accent-soft hover:text-ink"
+            title={reference.relativePath}
+            onClick={() => onPageSelect(reference.pageId)}
+          >
+            <FileText className="h-3 w-3 shrink-0 text-accent" strokeWidth={1.8} />
+            <span className="max-w-[13rem] truncate">{reference.title}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function PageChatBubble({ message, onSourceSelect }: { message: WikiPageChatMessage; onSourceSelect: (pageId: string) => void }) {
