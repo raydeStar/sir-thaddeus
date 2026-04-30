@@ -27,7 +27,7 @@ import {
   X,
 } from 'lucide-react';
 import { useWikiStore, type WikiPageChatMessage, type WikiScope, type WikiSearchScope } from '../stores/wikiStore';
-import type { WikiFolder, WikiPage, WikiRevision, WikiSearchResult, WikiTrashItem } from '../lib/wikiApi';
+import type { WikiAssistantSource, WikiFolder, WikiPage, WikiRevision, WikiSearchResult, WikiTrashItem } from '../lib/wikiApi';
 
 const WikiMarkdownEditor = lazy(() =>
   import('../components/wiki/WikiMarkdownEditor').then((module) => ({
@@ -864,7 +864,7 @@ function WikiRoute() {
                 <section className="flex min-h-0 flex-1 flex-col" aria-label="Page chat">
                   <div ref={chatScrollRef} aria-live="polite" className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
                     {pageChatMessages.length > 0 ? (
-                      pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} />)
+                      pageChatMessages.map((message) => <PageChatBubble key={message.id} message={message} onSourceSelect={(pageId) => void selectPage(pageId)} />)
                     ) : (
                       <p className="text-xs text-ink-subtle">
                         {!page
@@ -1248,21 +1248,46 @@ function describePendingAction(action: PendingWikiAction): {
   };
 }
 
-function PageChatBubble({ message }: { message: WikiPageChatMessage }) {
+function PageChatBubble({ message, onSourceSelect }: { message: WikiPageChatMessage; onSourceSelect: (pageId: string) => void }) {
   if (message.kind === 'canvas') {
     return (
-      <div className="flex items-center gap-2 self-start rounded-full border border-accent/40 bg-accent-soft px-3 py-1.5 text-xs text-ink">
-        <WandSparkles className="h-3.5 w-3.5 text-accent" strokeWidth={2} />
-        <span className="font-medium">Added to canvas</span>
-        {message.summary ? (
-          <span className="truncate text-ink-muted" title={message.summary}>— {message.summary}</span>
-        ) : null}
+      <div className="max-w-full self-start rounded-xl border border-accent/35 bg-accent-soft px-3 py-2 text-xs text-ink">
+        <div className="flex items-center gap-2">
+          <WandSparkles className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={2} />
+          <span className="font-medium">Added to canvas</span>
+          {message.summary ? (
+            <span className="truncate text-ink-muted" title={message.summary}>— {message.summary}</span>
+          ) : null}
+        </div>
+        <WikiAssistantSourceChips sources={message.sources ?? []} onSourceSelect={onSourceSelect} />
       </div>
     );
   }
   return (
-    <div className={`rounded-xl px-3 py-2 text-sm ${message.role === 'user' ? 'self-end bg-accent-soft text-ink' : 'self-start bg-canvas-raised text-ink'}`}>
+    <div className={`max-w-full rounded-xl px-3 py-2 text-sm ${message.role === 'user' ? 'self-end bg-accent-soft text-ink' : 'self-start bg-canvas-raised text-ink'}`}>
       <p className="whitespace-pre-wrap leading-5">{message.text}</p>
+      {message.role === 'assistant' ? <WikiAssistantSourceChips sources={message.sources ?? []} onSourceSelect={onSourceSelect} /> : null}
+    </div>
+  );
+}
+
+function WikiAssistantSourceChips({ sources, onSourceSelect }: { sources: WikiAssistantSource[]; onSourceSelect: (pageId: string) => void }) {
+  if (sources.length === 0) return null;
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5" data-testid="wiki-assistant-sources">
+      {sources.slice(0, 5).map((source) => (
+        <button
+          key={source.pageId}
+          type="button"
+          className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-canvas/80 px-2 py-1 text-[11px] font-medium text-ink-muted transition hover:border-accent/40 hover:bg-canvas-raised hover:text-ink"
+          title={`${source.relativePath}\n\n${source.snippet}`}
+          onClick={() => onSourceSelect(source.pageId)}
+        >
+          <BookOpenText className="h-3 w-3 shrink-0 text-accent" strokeWidth={1.8} />
+          <span className="max-w-[13rem] truncate">{source.title}</span>
+        </button>
+      ))}
     </div>
   );
 }

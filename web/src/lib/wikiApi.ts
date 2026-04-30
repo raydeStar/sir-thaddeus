@@ -82,10 +82,19 @@ export interface WikiTrashItem {
   pageCount: number;
 }
 
+export interface WikiAssistantSource {
+  pageId: string;
+  title: string;
+  relativePath: string;
+  snippet: string;
+  score: number;
+}
+
 export interface WikiPageAssistantReply {
   answer: string;
   createdAt: string;
   messageId: string;
+  sources: WikiAssistantSource[];
 }
 
 export interface WikiPageDraft {
@@ -94,6 +103,7 @@ export interface WikiPageDraft {
   summary: string;
   createdAt: string;
   messageId: string;
+  sources: WikiAssistantSource[];
 }
 
 export interface WikiSelectionRewriteDraft {
@@ -104,6 +114,7 @@ export interface WikiSelectionRewriteDraft {
   summary: string;
   createdAt: string;
   messageId: string;
+  sources: WikiAssistantSource[];
 }
 
 interface WikiRootsResponse {

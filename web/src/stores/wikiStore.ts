@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as api from '../lib/wikiApi';
-import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiSearchResult, WikiSelectionRewriteDraft, WikiTrashItem, WikiTree } from '../lib/wikiApi';
+import type { WikiAssistantSource, WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiSearchResult, WikiSelectionRewriteDraft, WikiTrashItem, WikiTree } from '../lib/wikiApi';
 
 export type WikiScope = 'root' | 'folder' | 'page';
 export type WikiSearchScope = 'root' | 'all';
@@ -70,6 +70,7 @@ export interface WikiPageChatMessage {
   // don't echo the entire edited page back into the transcript).
   kind?: 'message' | 'canvas';
   summary?: string;
+  sources?: WikiAssistantSource[];
 }
 
 interface WikiStoreState {
@@ -865,7 +866,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       set((state) => ({
         pageChatMessages: [
           ...state.pageChatMessages,
-          { id: reply.messageId, role: 'assistant', text: reply.answer, createdAt: reply.createdAt },
+          { id: reply.messageId, role: 'assistant', text: reply.answer, createdAt: reply.createdAt, sources: reply.sources ?? [] },
         ],
       }));
     } catch (error) {
@@ -958,6 +959,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
               role: 'assistant',
               text: aiDraft.assistantText || 'No content was generated, so nothing was saved.',
               createdAt: aiDraft.createdAt,
+              sources: aiDraft.sources ?? [],
             },
           ],
         }));
@@ -1008,6 +1010,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
             summary: aiDraft.summary || aiDraft.assistantText || 'Updated the page.',
             kind: 'canvas',
             createdAt: aiDraft.createdAt,
+            sources: aiDraft.sources ?? [],
           },
         ],
       }));
@@ -1126,6 +1129,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
             summary: rewriteDraft.summary || rewriteDraft.assistantText || 'Rewrote the selection.',
             kind: 'canvas',
             createdAt: rewriteDraft.createdAt,
+            sources: rewriteDraft.sources ?? [],
           },
         ],
       }));

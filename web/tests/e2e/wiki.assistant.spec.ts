@@ -65,6 +65,15 @@ test.describe('wiki assistant flow', () => {
 
     let draftReply = clarenceMarkdown;
     let draftSummary = 'Wrote a section about Clarence the cat';
+    const stubSources = [
+      {
+        pageId: 'playwright-source-page',
+        title: 'Cat Reference Notes',
+        relativePath: 'cat-reference-notes.md',
+        snippet: 'Clarence reference material used by the assistant.',
+        score: 12.5,
+      },
+    ];
     await page.route('**/api/wiki/pages/*/draft', async (route: Route) => {
       await route.fulfill({
         status: 200,
@@ -75,6 +84,7 @@ test.describe('wiki assistant flow', () => {
           summary: draftSummary,
           createdAt: new Date().toISOString(),
           messageId: `playwright-draft-${Date.now()}`,
+          sources: stubSources,
         }),
       });
     });
@@ -85,6 +95,7 @@ test.describe('wiki assistant flow', () => {
 
     await expect(editorContent).toContainText('Clarence', { timeout: 20_000 });
     await expect(editorContent).toContainText('windowsill', { timeout: 20_000 });
+    await expect(page.getByTestId('wiki-assistant-sources').getByText('Cat Reference Notes')).toBeVisible({ timeout: 10_000 });
     await page.screenshot({ path: 'test-results/wiki-assistant-02-clarence.png', fullPage: true });
 
     // ---------- Step 3: full rewrite via Write again with new content. ----------
@@ -132,6 +143,7 @@ test.describe('wiki assistant flow', () => {
           summary: 'Rewrote the selected paragraph',
           createdAt: new Date().toISOString(),
           messageId: `playwright-selection-${Date.now()}`,
+          sources: stubSources,
         }),
       });
     });

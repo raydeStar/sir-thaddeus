@@ -48,7 +48,7 @@ public sealed class WikiPageAssistantService
         var siblings = await RetrieveSiblingsAsync(page, prompt, cancellationToken).ConfigureAwait(false);
         var userText = BuildPageChatPrompt(page, prompt, scope, siblings);
         var reply = await RunEphemeralThreadAsync(page.Page.Title, userText, cancellationToken).ConfigureAwait(false);
-        return new WikiPageAssistantReply(reply.Text, reply.CreatedAt, reply.Id);
+        return new WikiPageAssistantReply(reply.Text, reply.CreatedAt, reply.Id, ToSources(siblings));
     }
 
     public async Task<WikiPageDraft?> DraftAsync(
@@ -64,7 +64,7 @@ public sealed class WikiPageAssistantService
         var userText = BuildDraftPrompt(page, instruction, scope, siblings);
         var reply = await RunEphemeralThreadAsync(page.Page.Title, userText, cancellationToken).ConfigureAwait(false);
         var markdown = ExtractMarkdownDraft(reply.Text, page.Markdown);
-        return new WikiPageDraft(markdown, reply.Text, BuildDraftSummary(instruction), reply.CreatedAt, reply.Id);
+        return new WikiPageDraft(markdown, reply.Text, BuildDraftSummary(instruction), reply.CreatedAt, reply.Id, ToSources(siblings));
     }
 
     public async Task<WikiSelectionRewriteDraft?> RewriteSelectionAsync(
@@ -115,7 +115,8 @@ public sealed class WikiPageAssistantService
             reply.Text,
             BuildSelectionRewriteSummary(instruction),
             reply.CreatedAt,
-            reply.Id);
+            reply.Id,
+            ToSources(siblings));
     }
 
     private async Task<ChatMessage> RunEphemeralThreadAsync(string pageTitle, string userText, CancellationToken cancellationToken)
@@ -251,6 +252,16 @@ public sealed class WikiPageAssistantService
             builder.AppendLine(sibling.Snippet);
         }
     }
+
+    private static IReadOnlyList<WikiAssistantSource> ToSources(IReadOnlyList<RetrievedSiblingPage> siblings) =>
+        siblings
+            .Select(sibling => new WikiAssistantSource(
+                sibling.Page.Id,
+                sibling.Page.Title,
+                sibling.Page.RelativePath,
+                sibling.Snippet,
+                sibling.Score))
+            .ToArray();
 
     private static string ExtractMarkdownDraft(string assistantText, string fallbackMarkdown)
     {
@@ -583,14 +594,26 @@ public sealed class WikiPageAssistantService
         "msg_" + Convert.ToHexString(Guid.NewGuid().ToByteArray().AsSpan(0, 8)).ToLowerInvariant();
 }
 
-public sealed record WikiPageAssistantReply(string Answer, DateTimeOffset CreatedAt, string MessageId);
+public sealed record WikiAssistantSource(
+    string PageId,
+    string Title,
+    string RelativePath,
+    string Snippet,
+    double Score);
+
+public sealed record WikiPageAssistantReply(
+    string Answer,
+    DateTimeOffset CreatedAt,
+    string MessageId,
+    IReadOnlyList<WikiAssistantSource> Sources);
 
 public sealed record WikiPageDraft(
     string Markdown,
     string AssistantText,
     string Summary,
     DateTimeOffset CreatedAt,
-    string MessageId);
+    string MessageId,
+    IReadOnlyList<WikiAssistantSource> Sources);
 
 public sealed record WikiSelectionRewriteDraft(
     string SelectedText,
@@ -599,7 +622,8 @@ public sealed record WikiSelectionRewriteDraft(
     string AssistantText,
     string Summary,
     DateTimeOffset CreatedAt,
-    string MessageId);
+    string MessageId,
+    IReadOnlyList<WikiAssistantSource> Sources);
 
 public sealed class WikiSelectionRewriteException : InvalidOperationException
 {

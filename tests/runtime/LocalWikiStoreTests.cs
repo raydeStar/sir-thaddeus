@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Data.Sqlite;
 using SirThaddeus.Wiki;
 using SirThaddeus.Wiki.Storage;
 
@@ -408,6 +409,50 @@ public sealed class LocalWikiStoreTests : IDisposable
         var result = Assert.Single(results);
         Assert.Equal(firstRoot.Id, result.RootId);
         Assert.Equal(firstPage.Page.Id, result.PageId);
+    }
+
+    [Fact]
+    public async Task Search_uses_rebuilt_index_when_search_table_is_empty()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Research", null, CancellationToken.None);
+        var page = await store.CreatePageAsync(root.Id, null, "Phoenix Notes", "The phoenix archive mentions copper bells.", CancellationToken.None);
+
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(root.Path, ".sir-thaddeus", "wiki.sqlite")}"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "delete from page_search";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var results = await store.SearchAsync(root.Id, "phoenix", CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.Equal(page.Page.Id, result.PageId);
+    }
+
+    [Fact]
+    public async Task Search_hides_trashed_pages_and_restore_reindexes_them()
+    {
+        using var store = NewStore();
+        var root = await store.CreateRootAsync("Research", null, CancellationToken.None);
+        var page = await store.CreatePageAsync(root.Id, null, "Archive", "The citadel keyword should be searchable.", CancellationToken.None);
+
+        Assert.Single(await store.SearchAsync(root.Id, "citadel", CancellationToken.None));
+
+        Assert.True(await store.DeletePageAsync(page.Page.Id, CancellationToken.None));
+        Assert.Empty(await store.SearchAsync(root.Id, "citadel", CancellationToken.None));
+
+        var restored = await store.RestorePageAsync(page.Page.Id, CancellationToken.None);
+
+        Assert.NotNull(restored);
+        var restoredResult = Assert.Single(await store.SearchAsync(root.Id, "citadel", CancellationToken.None));
+        Assert.Equal(page.Page.Id, restoredResult.PageId);
+
+        Assert.True(await store.DeletePageAsync(page.Page.Id, CancellationToken.None));
+        Assert.True(await store.PurgePageAsync(page.Page.Id, CancellationToken.None));
+        Assert.Empty(await store.SearchAsync(root.Id, "citadel", CancellationToken.None));
     }
 
     private LocalWikiStore NewStore() =>

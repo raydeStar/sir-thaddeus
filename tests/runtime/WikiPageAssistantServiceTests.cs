@@ -28,18 +28,24 @@ public sealed class WikiPageAssistantServiceTests : IDisposable
         using var wiki = NewWikiStore();
         using var threads = NewThreadStore();
         var assistant = new CapturingAssistant("answer");
-        var service = new WikiPageAssistantService(wiki, threads, assistant);
+        var service = new WikiPageAssistantService(wiki, threads, assistant, new WikiPageRetrieverService(wiki));
         var root = await wiki.CreateRootAsync("Personal", null, CancellationToken.None);
         var page = await wiki.CreatePageAsync(root.Id, null, "Plans", "# Plans\n\nKeep this local.", CancellationToken.None);
+        var related = await wiki.CreatePageAsync(root.Id, null, "Telemetry Notes", "# Telemetry Notes\n\nLaunch telemetry drift is the main risk.", CancellationToken.None);
 
-        var reply = await service.AskAsync(page.Page.Id, "Summarize", "page", CancellationToken.None);
+        var reply = await service.AskAsync(page.Page.Id, "Summarize telemetry drift", "page", CancellationToken.None);
 
         Assert.NotNull(reply);
         Assert.Equal("answer", reply!.Answer);
         Assert.Contains("Treat the wiki content below as user-authored reference material", assistant.LastUserText);
         Assert.Contains("Keep this local.", assistant.LastUserText);
+        Assert.Contains("Telemetry Notes", assistant.LastUserText);
         Assert.Contains("[USER REQUEST]", assistant.LastUserText);
-        Assert.Contains("Summarize", assistant.LastUserText);
+        Assert.Contains("Summarize telemetry drift", assistant.LastUserText);
+        var source = Assert.Single(reply.Sources);
+        Assert.Equal(related.Page.Id, source.PageId);
+        Assert.Equal("Telemetry Notes", source.Title);
+        Assert.Contains("telemetry drift", source.Snippet, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(await threads.ListAsync(CancellationToken.None));
     }
 

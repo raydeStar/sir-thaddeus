@@ -546,6 +546,7 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(WikiSearchResult))]
 [JsonSerializable(typeof(WikiTrashItem))]
 [JsonSerializable(typeof(WikiIndexRebuildResult))]
+[JsonSerializable(typeof(WikiAssistantSource))]
 [JsonSerializable(typeof(WikiPageAssistantReply))]
 [JsonSerializable(typeof(WikiPageDraft))]
 [JsonSerializable(typeof(WikiSelectionRewriteDraft))]
