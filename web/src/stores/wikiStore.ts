@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as api from '../lib/wikiApi';
-import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiSearchResult, WikiSelectionRewriteDraft, WikiTree } from '../lib/wikiApi';
+import type { WikiPageDocument, WikiPageDraft, WikiRevision, WikiRoot, WikiSearchResult, WikiSelectionRewriteDraft, WikiTrashItem, WikiTree } from '../lib/wikiApi';
 
 export type WikiScope = 'root' | 'folder' | 'page';
 export type WikiSearchScope = 'root' | 'all';
@@ -51,7 +51,7 @@ async function purgeLegacyUntitledPages(roots: WikiRoot[]): Promise<void> {
       const tree = await api.getWikiTree(root.id);
       const offending = tree.pages.filter((p) => p.title === LEGACY_UNTITLED_TITLE);
       for (const page of offending) {
-        try { await api.deleteWikiPage(page.id); } catch { /* ignore individual failures */ }
+        try { await api.purgeWikiPage(page.id); } catch { /* ignore individual failures */ }
       }
     } catch {
       // tree fetch failed; skip this root
@@ -90,6 +90,7 @@ interface WikiStoreState {
   searchScope: WikiSearchScope;
   search: string;
   searchResults: WikiSearchResult[];
+  trashItems: WikiTrashItem[];
   draft: string;
   pageChatMessages: WikiPageChatMessage[];
   pageChatDraft: WikiPageDraft | null;
@@ -107,6 +108,7 @@ interface WikiStoreState {
   loading: boolean;
   saving: boolean;
   searching: boolean;
+  trashLoading: boolean;
   pageAssistantBusy: boolean;
   error: string | null;
 
@@ -121,6 +123,9 @@ interface WikiStoreState {
   renameFolder: (folderId: string, name: string) => Promise<void>;
   moveFolder: (folderId: string, parentFolderId: string | null) => Promise<void>;
   deleteFolder: (folderId: string) => Promise<void>;
+  loadTrash: () => Promise<void>;
+  restoreTrashItem: (item: WikiTrashItem) => Promise<void>;
+  purgeTrashItem: (item: WikiTrashItem) => Promise<void>;
   createPage: () => Promise<void>;
   savePage: () => Promise<void>;
   renamePage: (title: string) => Promise<void>;
@@ -159,6 +164,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   searchScope: 'root',
   search: '',
   searchResults: [],
+  trashItems: [],
   draft: '',
   pageChatMessages: [],
   pageChatDraft: null,
@@ -170,6 +176,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
   loading: false,
   saving: false,
   searching: false,
+  trashLoading: false,
   pageAssistantBusy: false,
   error: null,
 
@@ -204,7 +211,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       set({ error: 'Save or discard changes before switching workspaces.' });
       return;
     }
-    set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], search: '', searchResults: [], searching: false, draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false, isDraftPage: false, draftTitle: '', draftFolderId: null, scope: 'root' });
+    set({ loading: true, error: null, selectedRootId: rootId, selectedFolderId: null, selectedPageId: null, page: null, revisions: [], search: '', searchResults: [], trashItems: [], searching: false, trashLoading: false, draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false, isDraftPage: false, draftTitle: '', draftFolderId: null, scope: 'root' });
     try {
       const tree = await api.getWikiTree(rootId);
       const firstPage = tree.pages[0];
@@ -350,7 +357,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         return;
       }
 
-      set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', searchScope: 'root', search: '', searchResults: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
+      set({ tree: null, page: null, revisions: [], selectedRootId: null, selectedFolderId: null, selectedPageId: null, scope: 'root', searchScope: 'root', search: '', searchResults: [], trashItems: [], draft: '', pageChatMessages: [], pageChatDraft: null, selectedText: '', selectionRewriteDraft: null, dirty: false });
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {
@@ -474,6 +481,96 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         dirty: false,
         scope: currentFolder.parentFolderId ? 'folder' : 'root',
       });
+      await get().loadTrash();
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  loadTrash: async () => {
+    const rootId = get().selectedRootId;
+    if (!rootId) {
+      set({ trashItems: [], trashLoading: false });
+      return;
+    }
+
+    set({ trashLoading: true, error: null });
+    try {
+      const trashItems = await api.listWikiTrash(rootId);
+      if (get().selectedRootId === rootId) {
+        set({ trashItems, trashLoading: false });
+      }
+    } catch (error) {
+      if (get().selectedRootId === rootId) {
+        set({ error: (error as Error).message, trashItems: [], trashLoading: false });
+      }
+    }
+  },
+
+  restoreTrashItem: async (item: WikiTrashItem) => {
+    if (!item || get().dirty) {
+      if (get().dirty) set({ error: 'Save or discard changes before restoring from trash.' });
+      return;
+    }
+
+    set({ saving: true, error: null });
+    try {
+      if (item.type === 'page') {
+        const restored = await api.restoreWikiPage(item.id);
+        const tree = await api.getWikiTree(restored.page.rootId);
+        const revisions = await api.listWikiRevisions(restored.page.id);
+        const trashItems = await api.listWikiTrash(restored.page.rootId);
+        set({
+          tree,
+          page: restored,
+          revisions,
+          selectedRootId: restored.page.rootId,
+          selectedFolderId: restored.page.folderId,
+          selectedPageId: restored.page.id,
+          draft: restored.markdown,
+          pageChatMessages: [],
+          pageChatDraft: null,
+          selectedText: '',
+          selectionRewriteDraft: null,
+          dirty: false,
+          isDraftPage: false,
+          draftTitle: '',
+          draftFolderId: null,
+          scope: 'page',
+          trashItems,
+        });
+        return;
+      }
+
+      await api.restoreWikiFolder(item.rootId, item.id);
+      const tree = await api.getWikiTree(item.rootId);
+      const trashItems = await api.listWikiTrash(item.rootId);
+      set({ tree, selectedFolderId: item.id, selectedPageId: null, page: null, revisions: [], draft: '', selectedText: '', selectionRewriteDraft: null, dirty: false, scope: 'folder', trashItems });
+    } catch (error) {
+      set({ error: (error as Error).message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  purgeTrashItem: async (item: WikiTrashItem) => {
+    if (!item || get().dirty) {
+      if (get().dirty) set({ error: 'Save or discard changes before deleting from trash.' });
+      return;
+    }
+
+    set({ saving: true, error: null });
+    try {
+      if (item.type === 'page') {
+        await api.purgeWikiPage(item.id);
+      } else {
+        await api.purgeWikiFolder(item.rootId, item.id);
+      }
+      const tree = await api.getWikiTree(item.rootId);
+      const trashItems = await api.listWikiTrash(item.rootId);
+      set({ tree, trashItems });
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {
@@ -667,6 +764,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
         dirty: false,
         scope: current.page.folderId ? 'folder' : 'root',
       });
+      await get().loadTrash();
     } catch (error) {
       set({ error: (error as Error).message });
     } finally {
@@ -841,7 +939,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       // Empty AI output on a brand-new page would leave a blank row behind.
       // Roll the bootstrap back so the user sees nothing was saved.
       if (bootstrappedPageId && !aiDraft.markdown.trim()) {
-        try { await api.deleteWikiPage(bootstrappedPageId); } catch { /* best-effort */ }
+        try { await api.purgeWikiPage(bootstrappedPageId); } catch { /* best-effort */ }
         const tree = await api.getWikiTree(current.page.rootId);
         set((state) => ({
           tree,
@@ -917,7 +1015,7 @@ export const useWikiStore = create<WikiStoreState>((set, get) => ({
       // If the AI call failed during bootstrap, delete the placeholder page so
       // we don't leave a blank row behind.
       if (bootstrappedPageId) {
-        try { await api.deleteWikiPage(bootstrappedPageId); } catch { /* best-effort */ }
+        try { await api.purgeWikiPage(bootstrappedPageId); } catch { /* best-effort */ }
         const rootId = get().selectedRootId;
         const tree = rootId ? await api.getWikiTree(rootId).catch(() => get().tree) : get().tree;
         set({

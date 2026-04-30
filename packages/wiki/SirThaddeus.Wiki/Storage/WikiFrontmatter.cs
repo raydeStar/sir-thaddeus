@@ -19,6 +19,10 @@ internal static class WikiFrontmatter
         builder.AppendLine(CultureInfo.InvariantCulture, $"version: {page.Version}");
         builder.AppendLine(CultureInfo.InvariantCulture, $"createdAt: {page.CreatedAt:O}");
         builder.AppendLine(CultureInfo.InvariantCulture, $"updatedAt: {page.UpdatedAt:O}");
+        if (page.DeletedAt.HasValue)
+        {
+            builder.AppendLine(CultureInfo.InvariantCulture, $"deletedAt: {page.DeletedAt.Value:O}");
+        }
         builder.AppendLine("---");
         builder.Append(NormalizeBody(markdown));
         return builder.ToString();

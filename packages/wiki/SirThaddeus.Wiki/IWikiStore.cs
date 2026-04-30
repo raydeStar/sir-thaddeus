@@ -43,6 +43,16 @@ public interface IWikiStore
         string folderId,
         CancellationToken cancellationToken);
 
+    Task<bool> RestoreFolderAsync(
+        string rootId,
+        string folderId,
+        CancellationToken cancellationToken);
+
+    Task<bool> PurgeFolderAsync(
+        string rootId,
+        string folderId,
+        CancellationToken cancellationToken);
+
     Task<WikiPageDocument> CreatePageAsync(
         string rootId,
         string? folderId,
@@ -76,6 +86,14 @@ public interface IWikiStore
         string pageId,
         CancellationToken cancellationToken);
 
+    Task<WikiPageDocument?> RestorePageAsync(
+        string pageId,
+        CancellationToken cancellationToken);
+
+    Task<bool> PurgePageAsync(
+        string pageId,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<WikiRevision>> ListRevisionsAsync(
         string pageId,
         CancellationToken cancellationToken);
@@ -89,6 +107,10 @@ public interface IWikiStore
     Task<IReadOnlyList<WikiSearchResult>> SearchAsync(
         string? rootId,
         string query,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<WikiTrashItem>> ListTrashAsync(
+        string rootId,
         CancellationToken cancellationToken);
 
     Task<WikiIndexRebuildResult?> RebuildIndexAsync(

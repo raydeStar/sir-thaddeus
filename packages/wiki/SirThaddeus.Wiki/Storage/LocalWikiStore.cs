@@ -414,25 +414,101 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             var affectedPages = (await ListPagesAsync(connection, cancellationToken).ConfigureAwait(false))
                 .Where(page => page.FolderId is not null && affectedFolderIds.Contains(page.FolderId))
                 .ToArray();
+            var deletedAt = DateTimeOffset.UtcNow;
 
             foreach (var page in affectedPages)
             {
-                var path = ResolvePagePath(root, page.RelativePath);
-                if (File.Exists(path))
+                await SoftDeletePageAsync(connection, page.Id, deletedAt, cancellationToken).ConfigureAwait(false);
+            }
+
+            foreach (var id in affectedFolderIds)
+            {
+                await SoftDeleteFolderAsync(connection, id, deletedAt, cancellationToken).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public async Task<bool> RestoreFolderAsync(string rootId, string folderId, CancellationToken cancellationToken)
+    {
+        var root = await RequireRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        var gate = LockForRoot(root.Id);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            var current = await GetFolderAsync(connection, folderId, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+            if (current is null || current.DeletedAt is null) return false;
+            if (!string.Equals(current.RootId, root.Id, StringComparison.Ordinal))
+            {
+                throw new WikiPathException("Folder belongs to a different wiki root.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(current.ParentFolderId))
+            {
+                var parent = await GetFolderAsync(connection, current.ParentFolderId, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+                if (parent?.DeletedAt is not null)
                 {
-                    File.Delete(path);
-                    DeleteEmptyDirectoriesUpToRoot(root.Path, Path.GetDirectoryName(path));
+                    throw new WikiPathException("Restore the parent folder before restoring this folder.");
                 }
+            }
 
-                using var deleteRevisions = connection.CreateCommand();
-                deleteRevisions.CommandText = "delete from revisions where page_id = $pageId";
-                Add(deleteRevisions, "$pageId", page.Id);
-                await deleteRevisions.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            var folders = await ListFoldersAsync(connection, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+            var affectedFolderIds = DescendantFolderIds(folders, current.Id);
+            var affectedPages = (await ListPagesAsync(connection, cancellationToken, includeDeleted: true).ConfigureAwait(false))
+                .Where(page => page.FolderId is not null && affectedFolderIds.Contains(page.FolderId))
+                .ToArray();
+            var restoredAt = DateTimeOffset.UtcNow;
 
-                using var deletePage = connection.CreateCommand();
-                deletePage.CommandText = "delete from pages where id = $pageId";
-                Add(deletePage, "$pageId", page.Id);
-                await deletePage.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var id in affectedFolderIds)
+            {
+                await RestoreFolderRowAsync(connection, id, restoredAt, cancellationToken).ConfigureAwait(false);
+            }
+
+            foreach (var page in affectedPages)
+            {
+                await RestorePageRowAsync(connection, page.Id, restoredAt, cancellationToken).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public async Task<bool> PurgeFolderAsync(string rootId, string folderId, CancellationToken cancellationToken)
+    {
+        var root = await RequireRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        var gate = LockForRoot(root.Id);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            var current = await GetFolderAsync(connection, folderId, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+            if (current is null) return false;
+            if (!string.Equals(current.RootId, root.Id, StringComparison.Ordinal))
+            {
+                throw new WikiPathException("Folder belongs to a different wiki root.");
+            }
+
+            var folders = await ListFoldersAsync(connection, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+            var affectedFolderIds = DescendantFolderIds(folders, current.Id);
+            var affectedPages = (await ListPagesAsync(connection, cancellationToken, includeDeleted: true).ConfigureAwait(false))
+                .Where(page => page.FolderId is not null && affectedFolderIds.Contains(page.FolderId))
+                .ToArray();
+
+            foreach (var page in affectedPages)
+            {
+                await PurgePageAsync(connection, root, page, cancellationToken).ConfigureAwait(false);
             }
 
             foreach (var id in affectedFolderIds)
@@ -715,22 +791,59 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             var root = located.Value.Root;
             var page = located.Value.Page;
             await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
-            var path = ResolvePagePath(root, page.RelativePath);
-            if (File.Exists(path))
+            await SoftDeletePageAsync(connection, page.Id, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public async Task<WikiPageDocument?> RestorePageAsync(string pageId, CancellationToken cancellationToken)
+    {
+        var gate = LockForPage(pageId);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var located = await FindPageAsync(pageId, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+            if (located is null || located.Value.Page.DeletedAt is null) return null;
+
+            var root = located.Value.Root;
+            var page = located.Value.Page;
+            await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(page.FolderId))
             {
-                File.Delete(path);
-                DeleteEmptyDirectoriesUpToRoot(root.Path, Path.GetDirectoryName(path));
+                var folder = await GetFolderAsync(connection, page.FolderId, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+                if (folder?.DeletedAt is not null)
+                {
+                    throw new WikiPathException("Restore the containing folder before restoring this page.");
+                }
             }
 
-            using var deleteRevisions = connection.CreateCommand();
-            deleteRevisions.CommandText = "delete from revisions where page_id = $pageId";
-            Add(deleteRevisions, "$pageId", pageId);
-            await deleteRevisions.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            var restoredAt = DateTimeOffset.UtcNow;
+            await RestorePageRowAsync(connection, page.Id, restoredAt, cancellationToken).ConfigureAwait(false);
+            var restored = page with { UpdatedAt = restoredAt, DeletedAt = null };
+            var markdown = await ReadPageBodyAsync(root, page, cancellationToken).ConfigureAwait(false);
+            await WritePageFileAsync(root, restored, markdown, cancellationToken).ConfigureAwait(false);
+            return new WikiPageDocument(restored, markdown);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
 
-            using var deletePage = connection.CreateCommand();
-            deletePage.CommandText = "delete from pages where id = $pageId";
-            Add(deletePage, "$pageId", pageId);
-            await deletePage.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    public async Task<bool> PurgePageAsync(string pageId, CancellationToken cancellationToken)
+    {
+        var gate = LockForPage(pageId);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var located = await FindPageAsync(pageId, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+            if (located is null) return false;
+            await using var connection = await OpenRootAsync(located.Value.Root, cancellationToken).ConfigureAwait(false);
+            await PurgePageAsync(connection, located.Value.Root, located.Value.Page, cancellationToken).ConfigureAwait(false);
             return true;
         }
         finally
@@ -817,6 +930,57 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<WikiTrashItem>> ListTrashAsync(string rootId, CancellationToken cancellationToken)
+    {
+        var root = await RequireRootAsync(rootId, cancellationToken).ConfigureAwait(false);
+        await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
+        await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
+        var folders = await ListFoldersAsync(connection, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+        var pages = await ListPagesAsync(connection, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+        var deletedFolderIds = folders
+            .Where(folder => folder.DeletedAt is not null)
+            .Select(folder => folder.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        var topLevelDeletedFolders = folders
+            .Where(folder => folder.DeletedAt is not null && (folder.ParentFolderId is null || !deletedFolderIds.Contains(folder.ParentFolderId)))
+            .ToArray();
+        var items = new List<WikiTrashItem>();
+        foreach (var folder in topLevelDeletedFolders)
+        {
+            var affectedFolderIds = DescendantFolderIds(folders, folder.Id);
+            var pageCount = pages.Count(page => page.FolderId is not null && affectedFolderIds.Contains(page.FolderId));
+            var relativePath = await BuildFolderRelativePathAsync(connection, folder.Id, cancellationToken, includeDeleted: true).ConfigureAwait(false);
+            items.Add(new WikiTrashItem(
+                folder.Id,
+                folder.RootId,
+                "folder",
+                folder.Name,
+                relativePath,
+                folder.DeletedAt!.Value,
+                affectedFolderIds.Count,
+                pageCount));
+        }
+
+        foreach (var page in pages.Where(page => page.DeletedAt is not null))
+        {
+            if (page.FolderId is not null && deletedFolderIds.Contains(page.FolderId)) continue;
+            items.Add(new WikiTrashItem(
+                page.Id,
+                page.RootId,
+                "page",
+                page.Title,
+                page.RelativePath,
+                page.DeletedAt!.Value,
+                0,
+                1));
+        }
+
+        return items
+            .OrderByDescending(item => item.DeletedAt)
+            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     public async Task<WikiIndexRebuildResult?> RebuildIndexAsync(string rootId, CancellationToken cancellationToken)
     {
         var tree = await GetTreeAsync(rootId, cancellationToken).ConfigureAwait(false);
@@ -877,7 +1041,8 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
                 slug text not null,
                 sort_order integer not null,
                 created_at text not null,
-                updated_at text not null
+                updated_at text not null,
+                deleted_at text null
             );
 
             create table if not exists pages (
@@ -891,7 +1056,8 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
                 created_at text not null,
                 updated_at text not null,
                 excerpt text not null,
-                word_count integer not null
+                word_count integer not null,
+                deleted_at text null
             );
 
             create table if not exists revisions (
@@ -909,6 +1075,14 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             create index if not exists idx_revisions_page on revisions(page_id, version desc);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "folders", "deleted_at", "text null", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "pages", "deleted_at", "text null", cancellationToken).ConfigureAwait(false);
+        using var indexCommand = connection.CreateCommand();
+        indexCommand.CommandText = """
+            create index if not exists idx_folders_deleted on folders(deleted_at, parent_folder_id, sort_order);
+            create index if not exists idx_pages_deleted on pages(deleted_at, folder_id, updated_at);
+            """;
+        await indexCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<WikiRoot> RequireRootAsync(string rootId, CancellationToken cancellationToken) =>
@@ -926,25 +1100,34 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadRoot(reader) : null;
     }
 
-    private async Task<(WikiRoot Root, WikiPage Page)?> FindPageAsync(string pageId, CancellationToken cancellationToken)
+    private async Task<(WikiRoot Root, WikiPage Page)?> FindPageAsync(
+        string pageId,
+        CancellationToken cancellationToken,
+        bool includeDeleted = false)
     {
         foreach (var root in await ListRootsAsync(cancellationToken).ConfigureAwait(false))
         {
             await EnsureRootDatabaseAsync(root, cancellationToken).ConfigureAwait(false);
             await using var connection = await OpenRootAsync(root, cancellationToken).ConfigureAwait(false);
-            var page = await GetPageMetadataAsync(connection, pageId, cancellationToken).ConfigureAwait(false);
+            var page = await GetPageMetadataAsync(connection, pageId, cancellationToken, includeDeleted).ConfigureAwait(false);
             if (page is not null) return (root, page);
         }
 
         return null;
     }
 
-    private async Task<IReadOnlyList<WikiFolder>> ListFoldersAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<WikiFolder>> ListFoldersAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken,
+        bool includeDeleted = false,
+        bool deletedOnly = false)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            select id, root_id, parent_folder_id, name, slug, sort_order, created_at, updated_at
+        var where = deletedOnly ? "where deleted_at is not null" : includeDeleted ? string.Empty : "where deleted_at is null";
+        command.CommandText = $"""
+            select id, root_id, parent_folder_id, name, slug, sort_order, created_at, updated_at, deleted_at
             from folders
+            {where}
             order by parent_folder_id, sort_order, name
             """;
         var folders = new List<WikiFolder>();
@@ -956,12 +1139,18 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return folders;
     }
 
-    private async Task<IReadOnlyList<WikiPage>> ListPagesAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<WikiPage>> ListPagesAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken,
+        bool includeDeleted = false,
+        bool deletedOnly = false)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            select id, root_id, folder_id, title, slug, relative_path, version, created_at, updated_at, excerpt, word_count
+        var where = deletedOnly ? "where deleted_at is not null" : includeDeleted ? string.Empty : "where deleted_at is null";
+        command.CommandText = $"""
+            select id, root_id, folder_id, title, slug, relative_path, version, created_at, updated_at, excerpt, word_count, deleted_at
             from pages
+            {where}
             order by title
             """;
         var pages = new List<WikiPage>();
@@ -973,14 +1162,24 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return pages;
     }
 
-    private async Task<WikiFolder?> GetFolderAsync(SqliteConnection connection, string folderId, CancellationToken cancellationToken)
+    private async Task<WikiFolder?> GetFolderAsync(
+        SqliteConnection connection,
+        string folderId,
+        CancellationToken cancellationToken,
+        bool includeDeleted = false)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            select id, root_id, parent_folder_id, name, slug, sort_order, created_at, updated_at
-            from folders
-            where id = $id
-            """;
+        command.CommandText = includeDeleted
+            ? """
+                select id, root_id, parent_folder_id, name, slug, sort_order, created_at, updated_at, deleted_at
+                from folders
+                where id = $id
+                """
+            : """
+                select id, root_id, parent_folder_id, name, slug, sort_order, created_at, updated_at, deleted_at
+                from folders
+                where id = $id and deleted_at is null
+                """;
         Add(command, "$id", folderId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadFolder(reader) : null;
@@ -1005,14 +1204,24 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return ids;
     }
 
-    private async Task<WikiPage?> GetPageMetadataAsync(SqliteConnection connection, string pageId, CancellationToken cancellationToken)
+    private async Task<WikiPage?> GetPageMetadataAsync(
+        SqliteConnection connection,
+        string pageId,
+        CancellationToken cancellationToken,
+        bool includeDeleted = false)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            select id, root_id, folder_id, title, slug, relative_path, version, created_at, updated_at, excerpt, word_count
-            from pages
-            where id = $id
-            """;
+        command.CommandText = includeDeleted
+            ? """
+                select id, root_id, folder_id, title, slug, relative_path, version, created_at, updated_at, excerpt, word_count, deleted_at
+                from pages
+                where id = $id
+                """
+            : """
+                select id, root_id, folder_id, title, slug, relative_path, version, created_at, updated_at, excerpt, word_count, deleted_at
+                from pages
+                where id = $id and deleted_at is null
+                """;
         Add(command, "$id", pageId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadPage(reader) : null;
@@ -1027,7 +1236,8 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
                 name = $name,
                 slug = $slug,
                 sort_order = $sortOrder,
-                updated_at = $updatedAt
+                updated_at = $updatedAt,
+                deleted_at = $deletedAt
             where id = $id
             """;
         Add(command, "$id", folder.Id);
@@ -1036,6 +1246,7 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         Add(command, "$slug", folder.Slug);
         Add(command, "$sortOrder", folder.SortOrder);
         Add(command, "$updatedAt", Format(folder.UpdatedAt));
+        AddNullable(command, "$deletedAt", folder.DeletedAt.HasValue ? Format(folder.DeletedAt.Value) : null);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -1043,8 +1254,8 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
     {
         using var command = connection.CreateCommand();
         command.CommandText = """
-            insert into pages (id, root_id, folder_id, title, slug, relative_path, version, created_at, updated_at, excerpt, word_count)
-            values ($id, $rootId, $folderId, $title, $slug, $relativePath, $version, $createdAt, $updatedAt, $excerpt, $wordCount)
+            insert into pages (id, root_id, folder_id, title, slug, relative_path, version, created_at, updated_at, excerpt, word_count, deleted_at)
+            values ($id, $rootId, $folderId, $title, $slug, $relativePath, $version, $createdAt, $updatedAt, $excerpt, $wordCount, $deletedAt)
             """;
         AddPageParameters(command, page);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -1062,7 +1273,8 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
                 version = $version,
                 updated_at = $updatedAt,
                 excerpt = $excerpt,
-                word_count = $wordCount
+                word_count = $wordCount,
+                deleted_at = $deletedAt
             where id = $id
             """;
         AddPageParameters(command, page);
@@ -1082,6 +1294,103 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         Add(command, "$updatedAt", Format(page.UpdatedAt));
         Add(command, "$excerpt", page.Excerpt);
         Add(command, "$wordCount", page.WordCount);
+        AddNullable(command, "$deletedAt", page.DeletedAt.HasValue ? Format(page.DeletedAt.Value) : null);
+    }
+
+    private static async Task SoftDeleteFolderAsync(
+        SqliteConnection connection,
+        string folderId,
+        DateTimeOffset deletedAt,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            update folders
+            set deleted_at = $deletedAt,
+                updated_at = $deletedAt
+            where id = $id and deleted_at is null
+            """;
+        Add(command, "$id", folderId);
+        Add(command, "$deletedAt", Format(deletedAt));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task SoftDeletePageAsync(
+        SqliteConnection connection,
+        string pageId,
+        DateTimeOffset deletedAt,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            update pages
+            set deleted_at = $deletedAt,
+                updated_at = $deletedAt
+            where id = $id and deleted_at is null
+            """;
+        Add(command, "$id", pageId);
+        Add(command, "$deletedAt", Format(deletedAt));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task RestoreFolderRowAsync(
+        SqliteConnection connection,
+        string folderId,
+        DateTimeOffset restoredAt,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            update folders
+            set deleted_at = null,
+                updated_at = $restoredAt
+            where id = $id
+            """;
+        Add(command, "$id", folderId);
+        Add(command, "$restoredAt", Format(restoredAt));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task RestorePageRowAsync(
+        SqliteConnection connection,
+        string pageId,
+        DateTimeOffset restoredAt,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            update pages
+            set deleted_at = null,
+                updated_at = $restoredAt
+            where id = $id
+            """;
+        Add(command, "$id", pageId);
+        Add(command, "$restoredAt", Format(restoredAt));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task PurgePageAsync(
+        SqliteConnection connection,
+        WikiRoot root,
+        WikiPage page,
+        CancellationToken cancellationToken)
+    {
+        var path = ResolvePagePath(root, page.RelativePath);
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+            DeleteEmptyDirectoriesUpToRoot(root.Path, Path.GetDirectoryName(path));
+        }
+
+        using var deleteRevisions = connection.CreateCommand();
+        deleteRevisions.CommandText = "delete from revisions where page_id = $pageId";
+        Add(deleteRevisions, "$pageId", page.Id);
+        await deleteRevisions.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+        using var deletePage = connection.CreateCommand();
+        deletePage.CommandText = "delete from pages where id = $pageId";
+        Add(deletePage, "$pageId", page.Id);
+        await deletePage.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task InsertRevisionAsync(
@@ -1178,7 +1487,11 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return Convert.ToInt32(result, CultureInfo.InvariantCulture);
     }
 
-    private async Task<string> BuildPageRelativePathAsync(SqliteConnection connection, string? folderId, string pageSlug, CancellationToken cancellationToken)
+    private async Task<string> BuildPageRelativePathAsync(
+        SqliteConnection connection,
+        string? folderId,
+        string pageSlug,
+        CancellationToken cancellationToken)
     {
         var fileName = pageSlug + ".md";
         if (string.IsNullOrWhiteSpace(folderId)) return fileName;
@@ -1187,13 +1500,17 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return string.IsNullOrWhiteSpace(folderPath) ? fileName : Path.Combine(folderPath, fileName);
     }
 
-    private async Task<string> BuildFolderRelativePathAsync(SqliteConnection connection, string folderId, CancellationToken cancellationToken)
+    private async Task<string> BuildFolderRelativePathAsync(
+        SqliteConnection connection,
+        string folderId,
+        CancellationToken cancellationToken,
+        bool includeDeleted = false)
     {
         var segments = new Stack<string>();
         var currentId = folderId;
         while (!string.IsNullOrWhiteSpace(currentId))
         {
-            var folder = await GetFolderAsync(connection, currentId, cancellationToken).ConfigureAwait(false)
+            var folder = await GetFolderAsync(connection, currentId, cancellationToken, includeDeleted).ConfigureAwait(false)
                 ?? throw new KeyNotFoundException($"Folder '{currentId}' not found.");
             segments.Push(folder.Slug);
             currentId = folder.ParentFolderId;
@@ -1290,6 +1607,28 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
         return connection;
     }
 
+    private static async Task EnsureColumnAsync(
+        SqliteConnection connection,
+        string table,
+        string column,
+        string definition,
+        CancellationToken cancellationToken)
+    {
+        using (var readColumns = connection.CreateCommand())
+        {
+            readColumns.CommandText = $"pragma table_info({table})";
+            await using var reader = await readColumns.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase)) return;
+            }
+        }
+
+        using var addColumn = connection.CreateCommand();
+        addColumn.CommandText = $"alter table {table} add column {column} {definition}";
+        await addColumn.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     private static string ConnectionString(string path) =>
         new SqliteConnectionStringBuilder { DataSource = path }.ToString();
 
@@ -1316,7 +1655,8 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             reader.GetString(4),
             reader.GetInt32(5),
             ParseDate(reader.GetString(6)),
-            ParseDate(reader.GetString(7)));
+            ParseDate(reader.GetString(7)),
+            reader.IsDBNull(8) ? null : ParseDate(reader.GetString(8)));
 
     private static WikiPage ReadPage(SqliteDataReader reader) =>
         new(
@@ -1330,7 +1670,8 @@ public sealed class LocalWikiStore : IWikiStore, IDisposable
             ParseDate(reader.GetString(7)),
             ParseDate(reader.GetString(8)),
             reader.GetString(9),
-            reader.GetInt32(10));
+            reader.GetInt32(10),
+            reader.IsDBNull(11) ? null : ParseDate(reader.GetString(11)));
 
     private static WikiRevision ReadRevision(SqliteDataReader reader) =>
         new(

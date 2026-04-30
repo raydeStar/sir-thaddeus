@@ -27,13 +27,18 @@ import {
   X,
 } from 'lucide-react';
 import { useWikiStore, type WikiPageChatMessage, type WikiScope, type WikiSearchScope } from '../stores/wikiStore';
-import type { WikiFolder, WikiPage, WikiRevision, WikiSearchResult } from '../lib/wikiApi';
+import type { WikiFolder, WikiPage, WikiRevision, WikiSearchResult, WikiTrashItem } from '../lib/wikiApi';
 
 const WikiMarkdownEditor = lazy(() =>
   import('../components/wiki/WikiMarkdownEditor').then((module) => ({
     default: module.WikiMarkdownEditor,
   })),
 );
+
+type PendingWikiAction =
+  | { kind: 'deletePage'; title: string }
+  | { kind: 'deleteFolder'; folder: WikiFolder }
+  | { kind: 'purgeTrashItem'; item: WikiTrashItem };
 
 export const Route = createFileRoute('/wiki')({
   component: WikiRoute,
@@ -48,6 +53,8 @@ function WikiRoute() {
   const [rootNameDraft, setRootNameDraft] = useState('');
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderNameDraft, setFolderNameDraft] = useState('');
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingWikiAction | null>(null);
   // Folder id currently being hovered as a drop target during a drag, or
   // the sentinel '__root__' for the workspace-root drop zone. null when no
   // drag is in progress over a target.
@@ -68,6 +75,7 @@ function WikiRoute() {
     searchScope,
     search,
     searchResults,
+    trashItems,
     draft,
     pageChatMessages,
     selectedText,
@@ -75,6 +83,7 @@ function WikiRoute() {
     loading,
     saving,
     searching,
+    trashLoading,
     pageAssistantBusy,
     error,
     loadRoots,
@@ -88,6 +97,9 @@ function WikiRoute() {
     renameFolder,
     moveFolder,
     deleteFolder,
+    loadTrash,
+    restoreTrashItem,
+    purgeTrashItem,
     createPage,
     savePage,
     renamePage,
@@ -110,6 +122,10 @@ function WikiRoute() {
   useEffect(() => {
     void loadRoots();
   }, [loadRoots]);
+
+  useEffect(() => {
+    if (trashOpen && selectedRootId) void loadTrash();
+  }, [trashOpen, selectedRootId, loadTrash]);
 
   useEffect(() => {
     if (isDraftPage) {
@@ -303,16 +319,30 @@ function WikiRoute() {
     cancelFolderRename();
   };
   const confirmFolderDelete = (folder: WikiFolder) => {
-    if (window.confirm(`Delete ${folder.name} and everything inside?`)) {
-      void deleteFolder(folder.id);
-    }
+    setPendingAction({ kind: 'deleteFolder', folder });
   };
+  const runPendingAction = () => {
+    const action = pendingAction;
+    setPendingAction(null);
+    if (!action) return;
+    if (action.kind === 'deletePage') {
+      void deletePage();
+      return;
+    }
+    if (action.kind === 'deleteFolder') {
+      void deleteFolder(action.folder.id);
+      return;
+    }
+    void purgeTrashItem(action.item);
+  };
+  const pendingDialog = pendingAction ? describePendingAction(pendingAction) : null;
 
   return (
-    // Pin to exactly the viewport height under the 44px AppShell titlebar.
-    // A min-h here lets the page grow taller than the viewport, which makes
-    // AppShell's <main> scroll and pushes the right-pane chat composer off
-    // the bottom of the screen.
+    <>
+    {/* Pin to exactly the viewport height under the 44px AppShell titlebar.
+        A min-h here lets the page grow taller than the viewport, which makes
+        AppShell's <main> scroll and pushes the right-pane chat composer off
+        the bottom of the screen. */}
     <section className="flex h-[calc(100vh-2.75rem)] flex-col bg-canvas" data-testid="route-wiki">
       <header className="flex shrink-0 flex-col gap-3 border-b border-line px-4 py-4 md:flex-row md:items-start md:justify-between md:gap-6 md:px-6">
         <div className="min-w-0 flex-1">
@@ -659,6 +689,15 @@ function WikiRoute() {
                   Loading pages
                 </div>
               )}
+              <TrashPanel
+                open={trashOpen}
+                items={trashItems}
+                loading={trashLoading}
+                disabled={busy || dirty || !selectedRootId}
+                onOpenChange={setTrashOpen}
+                onRestore={(item) => void restoreTrashItem(item)}
+                onPurge={(item) => setPendingAction({ kind: 'purgeTrashItem', item })}
+              />
             </div>
           ) : null}
         </aside>
@@ -725,11 +764,7 @@ function WikiRoute() {
                   title="Delete page"
                   aria-label="Delete page"
                   disabled={!page || busy || dirty}
-                  onClick={() => {
-                    if (window.confirm(`Delete ${page?.page.title ?? 'this page'}?`)) {
-                      void deletePage();
-                    }
-                  }}
+                  onClick={() => setPendingAction({ kind: 'deletePage', title: page?.page.title ?? 'this page' })}
                 >
                   <Trash2 className="h-4 w-4" strokeWidth={1.8} />
                 </button>
@@ -847,6 +882,22 @@ function WikiRoute() {
                     ) : null}
                   </div>
                   <div className="shrink-0 space-y-2 border-t border-line bg-canvas px-3 pt-3 pb-3">
+                    <div className="grid grid-cols-3 rounded-xl border border-line bg-canvas-raised p-1" aria-label="Wiki assistant scope">
+                      {(['root', 'folder', 'page'] as WikiScope[]).map((candidate) => {
+                        const unavailable = candidate === 'folder' ? !selectedFolder : candidate === 'page' ? !page : false;
+                        return (
+                          <button
+                            key={candidate}
+                            type="button"
+                            className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition ${scope === candidate ? 'border-accent bg-accent-soft text-ink shadow-soft' : 'border-transparent text-ink-muted hover:text-ink'}`}
+                            disabled={busy || unavailable}
+                            onClick={() => setScope(candidate)}
+                          >
+                            {candidate}
+                          </button>
+                        );
+                      })}
+                    </div>
                     {selectedText ? (
                       <div className="rounded-lg border border-accent bg-accent-soft px-3 py-2">
                         <div className="flex items-start justify-between gap-2">
@@ -898,7 +949,7 @@ function WikiRoute() {
                     />
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
-                        {!selectedText.trim() && page ? (
+                        {!selectedText.trim() ? (
                           <button
                             type="button"
                             className="rounded px-1.5 py-0.5 hover:bg-canvas hover:text-ink disabled:cursor-not-allowed disabled:opacity-55"
@@ -956,6 +1007,18 @@ function WikiRoute() {
         </aside>
       </div>
     </section>
+    {pendingDialog ? (
+      <WikiConfirmDialog
+        title={pendingDialog.title}
+        body={pendingDialog.body}
+        confirmLabel={pendingDialog.confirmLabel}
+        destructive={pendingDialog.destructive}
+        disabled={busy}
+        onCancel={() => setPendingAction(null)}
+        onConfirm={runPendingAction}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -1014,6 +1077,175 @@ function SearchResultsList({
       ))}
     </nav>
   );
+}
+
+function TrashPanel({
+  open,
+  items,
+  loading,
+  disabled,
+  onOpenChange,
+  onRestore,
+  onPurge,
+}: {
+  open: boolean;
+  items: WikiTrashItem[];
+  loading: boolean;
+  disabled: boolean;
+  onOpenChange: (open: boolean) => void;
+  onRestore: (item: WikiTrashItem) => void;
+  onPurge: (item: WikiTrashItem) => void;
+}) {
+  return (
+    <section className="rounded-xl border border-line bg-canvas-raised">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium text-ink transition hover:bg-canvas/70 disabled:cursor-not-allowed disabled:opacity-55"
+        disabled={disabled && !open}
+        onClick={() => onOpenChange(!open)}
+        aria-expanded={open}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <Trash2 className="h-4 w-4 shrink-0 text-ink-subtle" strokeWidth={1.8} />
+          <span>Trash</span>
+        </span>
+        <span className="text-xs text-ink-subtle">{loading ? '...' : items.length}</span>
+      </button>
+      {open ? (
+        <div className="space-y-2 border-t border-line px-2 py-2">
+          {loading ? (
+            <div className="flex items-center gap-2 px-2 py-3 text-sm text-ink-muted">
+              <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.8} />
+              Loading
+            </div>
+          ) : items.length === 0 ? (
+            <p className="px-2 py-3 text-sm text-ink-muted">Empty</p>
+          ) : (
+            items.map((item) => (
+              <div key={`${item.type}:${item.id}`} className="rounded-lg border border-line bg-canvas px-2 py-2">
+                <div className="flex items-start gap-2">
+                  {item.type === 'folder' ? (
+                    <Folder className="mt-0.5 h-4 w-4 shrink-0 text-ink-subtle" strokeWidth={1.8} />
+                  ) : (
+                    <FileText className="mt-0.5 h-4 w-4 shrink-0 text-ink-subtle" strokeWidth={1.8} />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-ink">{item.name}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-ink-subtle">{item.relativePath}</p>
+                    {item.type === 'folder' ? (
+                      <p className="mt-1 text-[11px] text-ink-muted">
+                        {item.folderCount} folders / {item.pageCount} pages
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center justify-end gap-1.5">
+                  <button
+                    type="button"
+                    className="wiki-icon-button h-7 w-7"
+                    title="Restore"
+                    aria-label={`Restore ${item.name}`}
+                    disabled={disabled}
+                    onClick={() => onRestore(item)}
+                  >
+                    <Undo2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  </button>
+                  <button
+                    type="button"
+                    className="wiki-icon-button h-7 w-7 text-rose-600 hover:bg-rose-500/10"
+                    title="Delete forever"
+                    aria-label={`Delete ${item.name} forever`}
+                    disabled={disabled}
+                    onClick={() => onPurge(item)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function WikiConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  destructive = false,
+  disabled,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  disabled: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4" role="presentation" onMouseDown={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wiki-confirm-title"
+        className="w-full max-w-sm rounded-xl border border-line bg-canvas p-4 shadow-xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <h2 id="wiki-confirm-title" className="text-base font-semibold text-ink">{title}</h2>
+        <p className="mt-2 text-sm leading-5 text-ink-muted">{body}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="wiki-command-button" disabled={disabled} onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={`wiki-command-button ${destructive ? 'border-rose-500 bg-rose-600 text-white hover:bg-rose-600 hover:border-rose-500' : 'border-accent bg-accent text-white hover:bg-accent hover:border-accent'}`}
+            disabled={disabled}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function describePendingAction(action: PendingWikiAction): {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  destructive: boolean;
+} {
+  if (action.kind === 'deletePage') {
+    return {
+      title: 'Move page to trash',
+      body: `${action.title} will leave the page tree and can be restored from Trash. Its Markdown file and revisions stay on disk.`,
+      confirmLabel: 'Move to trash',
+      destructive: false,
+    };
+  }
+
+  if (action.kind === 'deleteFolder') {
+    return {
+      title: 'Move folder to trash',
+      body: `${action.folder.name} and everything inside it will leave the page tree and can be restored from Trash.`,
+      confirmLabel: 'Move to trash',
+      destructive: false,
+    };
+  }
+
+  return {
+    title: 'Delete forever',
+    body: `${action.item.name} will be removed from disk with its stored revisions. This cannot be restored from Trash.`,
+    confirmLabel: 'Delete forever',
+    destructive: true,
+  };
 }
 
 function PageChatBubble({ message }: { message: WikiPageChatMessage }) {

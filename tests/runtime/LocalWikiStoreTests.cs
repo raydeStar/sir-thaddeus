@@ -210,7 +210,7 @@ public sealed class LocalWikiStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Delete_page_removes_file_metadata_and_revisions()
+    public async Task Delete_page_moves_to_trash_restore_recovers_and_purge_removes_file()
     {
         using var store = NewStore();
         var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
@@ -224,13 +224,32 @@ public sealed class LocalWikiStoreTests : IDisposable
         var deleted = await store.DeletePageAsync(page.Page.Id, CancellationToken.None);
 
         Assert.True(deleted);
-        Assert.False(File.Exists(filePath));
+        Assert.True(File.Exists(filePath));
         Assert.Null(await store.GetPageAsync(page.Page.Id, CancellationToken.None));
-        Assert.Empty(await store.ListRevisionsAsync(page.Page.Id, CancellationToken.None));
         var tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
         Assert.NotNull(tree);
         Assert.DoesNotContain(tree!.Pages, candidate => candidate.Id == page.Page.Id);
+        var trashed = Assert.Single(await store.ListTrashAsync(root.Id, CancellationToken.None));
+        Assert.Equal("page", trashed.Type);
+        Assert.Equal(page.Page.Id, trashed.Id);
         Assert.False(await store.DeletePageAsync(page.Page.Id, CancellationToken.None));
+
+        var restored = await store.RestorePageAsync(page.Page.Id, CancellationToken.None);
+
+        Assert.NotNull(restored);
+        Assert.Equal("second", restored!.Markdown);
+        Assert.Null(restored.Page.DeletedAt);
+        Assert.NotEmpty(await store.ListRevisionsAsync(page.Page.Id, CancellationToken.None));
+        tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
+        Assert.NotNull(tree);
+        Assert.Contains(tree!.Pages, candidate => candidate.Id == page.Page.Id);
+        Assert.Empty(await store.ListTrashAsync(root.Id, CancellationToken.None));
+
+        Assert.True(await store.DeletePageAsync(page.Page.Id, CancellationToken.None));
+        Assert.True(await store.PurgePageAsync(page.Page.Id, CancellationToken.None));
+        Assert.False(File.Exists(filePath));
+        Assert.Null(await store.GetPageAsync(page.Page.Id, CancellationToken.None));
+        Assert.Empty(await store.ListTrashAsync(root.Id, CancellationToken.None));
     }
 
     [Fact]
@@ -306,7 +325,7 @@ public sealed class LocalWikiStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Delete_folder_removes_descendant_pages_folders_files_and_revisions()
+    public async Task Delete_folder_moves_subtree_to_trash_restore_recovers_and_purge_removes_files()
     {
         using var store = NewStore();
         var root = await store.CreateRootAsync("Personal", null, CancellationToken.None);
@@ -322,13 +341,11 @@ public sealed class LocalWikiStoreTests : IDisposable
         var deleted = await store.DeleteFolderAsync(root.Id, parent.Id, CancellationToken.None);
 
         Assert.True(deleted);
-        Assert.False(File.Exists(parentPath));
-        Assert.False(File.Exists(childPath));
+        Assert.True(File.Exists(parentPath));
+        Assert.True(File.Exists(childPath));
         Assert.Null(await store.GetPageAsync(parentPage.Page.Id, CancellationToken.None));
         Assert.Null(await store.GetPageAsync(childPage.Page.Id, CancellationToken.None));
         Assert.NotNull(await store.GetPageAsync(outsidePage.Page.Id, CancellationToken.None));
-        Assert.Empty(await store.ListRevisionsAsync(parentPage.Page.Id, CancellationToken.None));
-        Assert.Empty(await store.ListRevisionsAsync(childPage.Page.Id, CancellationToken.None));
 
         var tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
         Assert.NotNull(tree);
@@ -336,7 +353,33 @@ public sealed class LocalWikiStoreTests : IDisposable
         Assert.DoesNotContain(tree.Pages, page => page.Id == parentPage.Page.Id || page.Id == childPage.Page.Id);
         Assert.Contains(tree.Folders, folder => folder.Id == outside.Id);
         Assert.Contains(tree.Pages, page => page.Id == outsidePage.Page.Id);
+        var trashed = Assert.Single(await store.ListTrashAsync(root.Id, CancellationToken.None));
+        Assert.Equal("folder", trashed.Type);
+        Assert.Equal(parent.Id, trashed.Id);
+        Assert.Equal(2, trashed.FolderCount);
+        Assert.Equal(2, trashed.PageCount);
         Assert.False(await store.DeleteFolderAsync(root.Id, parent.Id, CancellationToken.None));
+
+        Assert.True(await store.RestoreFolderAsync(root.Id, parent.Id, CancellationToken.None));
+        Assert.NotNull(await store.GetPageAsync(parentPage.Page.Id, CancellationToken.None));
+        Assert.NotNull(await store.GetPageAsync(childPage.Page.Id, CancellationToken.None));
+        Assert.NotEmpty(await store.ListRevisionsAsync(parentPage.Page.Id, CancellationToken.None));
+        Assert.NotEmpty(await store.ListRevisionsAsync(childPage.Page.Id, CancellationToken.None));
+        tree = await store.GetTreeAsync(root.Id, CancellationToken.None);
+        Assert.NotNull(tree);
+        Assert.Contains(tree!.Folders, folder => folder.Id == parent.Id);
+        Assert.Contains(tree.Folders, folder => folder.Id == child.Id);
+        Assert.Contains(tree.Pages, page => page.Id == parentPage.Page.Id);
+        Assert.Contains(tree.Pages, page => page.Id == childPage.Page.Id);
+        Assert.Empty(await store.ListTrashAsync(root.Id, CancellationToken.None));
+
+        Assert.True(await store.DeleteFolderAsync(root.Id, parent.Id, CancellationToken.None));
+        Assert.True(await store.PurgeFolderAsync(root.Id, parent.Id, CancellationToken.None));
+        Assert.False(File.Exists(parentPath));
+        Assert.False(File.Exists(childPath));
+        Assert.Null(await store.GetPageAsync(parentPage.Page.Id, CancellationToken.None));
+        Assert.Null(await store.GetPageAsync(childPage.Page.Id, CancellationToken.None));
+        Assert.Empty(await store.ListTrashAsync(root.Id, CancellationToken.None));
     }
 
     [Fact]

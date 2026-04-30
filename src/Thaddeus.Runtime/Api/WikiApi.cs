@@ -179,6 +179,50 @@ public static class WikiApi
             }
         });
 
+        app.MapPost("/api/wiki/roots/{rootId}/folders/{folderId}/restore", async (string rootId, string folderId, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            try
+            {
+                var restored = await store.RestoreFolderAsync(rootId, folderId, ct).ConfigureAwait(false);
+                if (!restored) return Results.NotFound();
+
+                audit.Append(new AuditEvent
+                {
+                    Actor = "user",
+                    Action = "WIKI_FOLDER_RESTORED",
+                    Target = folderId,
+                    Details = new() { ["rootId"] = rootId },
+                });
+                return Results.NoContent();
+            }
+            catch (WikiPathException ex)
+            {
+                return Results.BadRequest(new WikiErrorResponse("invalid_path", ex.Message));
+            }
+        });
+
+        app.MapDelete("/api/wiki/roots/{rootId}/folders/{folderId}/purge", async (string rootId, string folderId, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            try
+            {
+                var purged = await store.PurgeFolderAsync(rootId, folderId, ct).ConfigureAwait(false);
+                if (!purged) return Results.NotFound();
+
+                audit.Append(new AuditEvent
+                {
+                    Actor = "user",
+                    Action = "WIKI_FOLDER_PURGED",
+                    Target = folderId,
+                    Details = new() { ["rootId"] = rootId },
+                });
+                return Results.NoContent();
+            }
+            catch (WikiPathException ex)
+            {
+                return Results.BadRequest(new WikiErrorResponse("invalid_path", ex.Message));
+            }
+        });
+
         app.MapPost("/api/wiki/roots/{rootId}/pages", async (string rootId, HttpContext ctx, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
         {
             var req = await ReadAsync(ctx, WikiJsonContext.Default.CreateWikiPageRequest, ct).ConfigureAwait(false);
@@ -288,6 +332,37 @@ public static class WikiApi
             if (!deleted) return Results.NotFound();
 
             audit.Append(new AuditEvent { Actor = "user", Action = "WIKI_PAGE_DELETED", Target = pageId });
+            return Results.NoContent();
+        });
+
+        app.MapPost("/api/wiki/pages/{pageId}/restore", async (string pageId, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            try
+            {
+                var restored = await store.RestorePageAsync(pageId, ct).ConfigureAwait(false);
+                if (restored is null) return Results.NotFound();
+
+                audit.Append(new AuditEvent
+                {
+                    Actor = "user",
+                    Action = "WIKI_PAGE_RESTORED",
+                    Target = pageId,
+                    Details = new() { ["version"] = restored.Page.Version, ["title"] = restored.Page.Title },
+                });
+                return Results.Json(restored, WikiJsonContext.Default.WikiPageDocument);
+            }
+            catch (WikiPathException ex)
+            {
+                return Results.BadRequest(new WikiErrorResponse("invalid_path", ex.Message));
+            }
+        });
+
+        app.MapDelete("/api/wiki/pages/{pageId}/purge", async (string pageId, IWikiStore store, IAuditLogger audit, CancellationToken ct) =>
+        {
+            var purged = await store.PurgePageAsync(pageId, ct).ConfigureAwait(false);
+            if (!purged) return Results.NotFound();
+
+            audit.Append(new AuditEvent { Actor = "user", Action = "WIKI_PAGE_PURGED", Target = pageId });
             return Results.NoContent();
         });
 
@@ -407,6 +482,19 @@ public static class WikiApi
             return Results.Json(new WikiSearchResponse(results), WikiJsonContext.Default.WikiSearchResponse);
         });
 
+        app.MapGet("/api/wiki/roots/{rootId}/trash", async (string rootId, IWikiStore store, CancellationToken ct) =>
+        {
+            try
+            {
+                var items = await store.ListTrashAsync(rootId, ct).ConfigureAwait(false);
+                return Results.Json(new WikiTrashResponse(items), WikiJsonContext.Default.WikiTrashResponse);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
         app.MapPost("/api/wiki/roots/{rootId}/index/rebuild", async (string rootId, IWikiStore store, CancellationToken ct) =>
         {
             var result = await store.RebuildIndexAsync(rootId, ct).ConfigureAwait(false);
@@ -442,6 +530,7 @@ public sealed record WikiSelectionRewriteRequest(string? SelectedText, string? I
 public sealed record WikiRootsResponse(IReadOnlyList<WikiRoot> Roots);
 public sealed record WikiRevisionsResponse(IReadOnlyList<WikiRevision> Revisions);
 public sealed record WikiSearchResponse(IReadOnlyList<WikiSearchResult> Results);
+public sealed record WikiTrashResponse(IReadOnlyList<WikiTrashItem> Items);
 public sealed record WikiErrorResponse(string Error, string Message);
 public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, long CurrentVersion);
 
@@ -455,6 +544,7 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(WikiTree))]
 [JsonSerializable(typeof(WikiPageDocument))]
 [JsonSerializable(typeof(WikiSearchResult))]
+[JsonSerializable(typeof(WikiTrashItem))]
 [JsonSerializable(typeof(WikiIndexRebuildResult))]
 [JsonSerializable(typeof(WikiPageAssistantReply))]
 [JsonSerializable(typeof(WikiPageDraft))]
@@ -462,6 +552,7 @@ public sealed record WikiConflictResponse(string PageId, long ExpectedVersion, l
 [JsonSerializable(typeof(WikiRootsResponse))]
 [JsonSerializable(typeof(WikiRevisionsResponse))]
 [JsonSerializable(typeof(WikiSearchResponse))]
+[JsonSerializable(typeof(WikiTrashResponse))]
 [JsonSerializable(typeof(WikiErrorResponse))]
 [JsonSerializable(typeof(WikiConflictResponse))]
 [JsonSerializable(typeof(CreateWikiRootRequest))]

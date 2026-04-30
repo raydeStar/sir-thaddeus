@@ -23,6 +23,7 @@ export interface WikiFolder {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  deletedAt: string | null;
 }
 
 export interface WikiPage {
@@ -37,6 +38,7 @@ export interface WikiPage {
   updatedAt: string;
   excerpt: string;
   wordCount: number;
+  deletedAt: string | null;
 }
 
 export interface WikiPageDocument {
@@ -67,6 +69,17 @@ export interface WikiSearchResult {
   excerpt: string;
   relativePath: string;
   version: number;
+}
+
+export interface WikiTrashItem {
+  id: string;
+  rootId: string;
+  type: 'folder' | 'page';
+  name: string;
+  relativePath: string;
+  deletedAt: string;
+  folderCount: number;
+  pageCount: number;
 }
 
 export interface WikiPageAssistantReply {
@@ -103,6 +116,10 @@ interface WikiRevisionsResponse {
 
 interface WikiSearchResponse {
   results: WikiSearchResult[];
+}
+
+interface WikiTrashResponse {
+  items: WikiTrashItem[];
 }
 
 export interface CreateWikiRootInput {
@@ -352,4 +369,47 @@ export async function searchWiki(rootId: string | null, query: string): Promise<
   if (rootId) params.set('rootId', rootId);
   const res = await runtimeFetch(token(), `/api/wiki/search?${params.toString()}`);
   return (await asJson<WikiSearchResponse>(res)).results;
+}
+
+export async function restoreWikiFolder(rootId: string, folderId: string): Promise<void> {
+  const res = await runtimeFetch(
+    token(),
+    `/api/wiki/roots/${encodeURIComponent(rootId)}/folders/${encodeURIComponent(folderId)}/restore`,
+    { method: 'POST' },
+  );
+  if (!res.ok) {
+    await asJson<unknown>(res);
+  }
+}
+
+export async function purgeWikiFolder(rootId: string, folderId: string): Promise<void> {
+  const res = await runtimeFetch(
+    token(),
+    `/api/wiki/roots/${encodeURIComponent(rootId)}/folders/${encodeURIComponent(folderId)}/purge`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) {
+    await asJson<unknown>(res);
+  }
+}
+
+export async function restoreWikiPage(pageId: string): Promise<WikiPageDocument> {
+  const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}/restore`, {
+    method: 'POST',
+  });
+  return asJson<WikiPageDocument>(res);
+}
+
+export async function purgeWikiPage(pageId: string): Promise<void> {
+  const res = await runtimeFetch(token(), `/api/wiki/pages/${encodeURIComponent(pageId)}/purge`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    await asJson<unknown>(res);
+  }
+}
+
+export async function listWikiTrash(rootId: string): Promise<WikiTrashItem[]> {
+  const res = await runtimeFetch(token(), `/api/wiki/roots/${encodeURIComponent(rootId)}/trash`);
+  return (await asJson<WikiTrashResponse>(res)).items;
 }

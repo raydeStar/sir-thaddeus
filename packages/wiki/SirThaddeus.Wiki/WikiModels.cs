@@ -15,7 +15,8 @@ public sealed record WikiFolder(
     string Slug,
     int SortOrder,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? DeletedAt = null);
 
 public sealed record WikiPage(
     string Id,
@@ -28,7 +29,8 @@ public sealed record WikiPage(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     string Excerpt,
-    int WordCount);
+    int WordCount,
+    DateTimeOffset? DeletedAt = null);
 
 public sealed record WikiPageDocument(WikiPage Page, string Markdown);
 
@@ -53,6 +55,16 @@ public sealed record WikiSearchResult(
     string Excerpt,
     string RelativePath,
     long Version);
+
+public sealed record WikiTrashItem(
+    string Id,
+    string RootId,
+    string Type,
+    string Name,
+    string RelativePath,
+    DateTimeOffset DeletedAt,
+    int FolderCount,
+    int PageCount);
 
 public sealed record WikiIndexRebuildResult(
     string RootId,
