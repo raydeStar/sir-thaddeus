@@ -159,10 +159,24 @@ public static class Program
                 var libraryDir = builder.Configuration.GetValue<string>("Wiki:LibraryDirectory");
                 if (string.IsNullOrWhiteSpace(libraryDir))
                 {
-                    var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                    libraryDir = string.IsNullOrWhiteSpace(documents)
-                        ? Path.Combine(Path.GetDirectoryName(options.LockFilePath)!, "wiki-library")
-                        : Path.Combine(documents, "Sir Thaddeus Wiki");
+                    // Test mode must never share storage with the user's real wiki —
+                    // otherwise pages created via the API in one Playwright run
+                    // accumulate across runs and cause strict-mode locator collisions.
+                    // Scope the directory to the lock file so concurrent or
+                    // sequential test runtimes get independent sandboxes.
+                    if (options.TestMode)
+                    {
+                        var lockDir2 = Path.GetDirectoryName(options.LockFilePath)!;
+                        var lockName = Path.GetFileNameWithoutExtension(options.LockFilePath);
+                        libraryDir = Path.Combine(lockDir2, $"{lockName}-wiki");
+                    }
+                    else
+                    {
+                        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                        libraryDir = string.IsNullOrWhiteSpace(documents)
+                            ? Path.Combine(Path.GetDirectoryName(options.LockFilePath)!, "wiki-library")
+                            : Path.Combine(documents, "Sir Thaddeus Wiki");
+                    }
                 }
 
                 return new LocalWikiStore(

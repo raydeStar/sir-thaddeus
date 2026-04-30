@@ -1,7 +1,7 @@
 import { spawn, spawnSync, ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 interface LockFileShape {
@@ -18,6 +18,13 @@ const REPO_ROOT = join(__dirname_resolved, '..', '..', '..');
 const WEB_ROOT = join(REPO_ROOT, 'web');
 const RUNTIME_PROJECT = join(REPO_ROOT, 'src', 'Thaddeus.Runtime', 'Thaddeus.Runtime.csproj');
 const LOCK_PATH = join(tmpdir(), `thaddeus-playwright-${process.pid}.lock`);
+// Mirrors the runtime's test-mode wiki sandbox path (see Program.cs:
+// `${lockDir}/${lockNameWithoutExt}-wiki`). Kept in sync so setup/teardown
+// can wipe the sandbox without leaking pages between Playwright runs.
+const WIKI_SANDBOX_PATH = join(
+  tmpdir(),
+  `${basename(LOCK_PATH, '.lock')}-wiki`,
+);
 
 let runtime: ChildProcess | null = null;
 
@@ -64,6 +71,14 @@ export default async function globalSetup(): Promise<void> {
   if (existsSync(LOCK_PATH)) {
     try { unlinkSync(LOCK_PATH); } catch { /* ignore */ }
   }
+  // Pre-clean the per-pid wiki sandbox so each Playwright run starts from
+  // an empty library. Without this, pages created via the API in one run
+  // (e.g. the backlinks/tags fixture pages) accumulate and trip strict-mode
+  // locator collisions on subsequent runs.
+  if (existsSync(WIKI_SANDBOX_PATH)) {
+    try { rmSync(WIKI_SANDBOX_PATH, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+  process.env.RUNTIME_WIKI_SANDBOX = WIKI_SANDBOX_PATH;
 
   // The runtime serves built assets from src/Thaddeus.Runtime/wwwroot, not
   // raw web/src. Build the SPA first, then rebuild the runtime so the
