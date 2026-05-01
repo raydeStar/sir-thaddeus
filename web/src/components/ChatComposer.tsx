@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { getWikiTree, listWikiRoots } from '../lib/wikiApi';
 import type { WikiChatContextInput } from '../lib/chatApi';
+import { useWikiContextStore } from '../stores/wikiContextStore';
 
 export type WikiContextSelection = WikiChatContextInput;
 
@@ -108,7 +109,8 @@ export function ChatComposer({
   autoFocus,
 }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [wikiContextValue, setWikiContextValue] = useState('');
+  const wikiContextValue = useWikiContextStore((s) => s.value);
+  const setWikiContextValue = useWikiContextStore((s) => s.setValue);
   const [wikiContextOptions, setWikiContextOptions] = useState<WikiContextOption[]>([]);
   const [wikiContextLoading, setWikiContextLoading] = useState(false);
   const [highlightedCommandIndex, setHighlightedCommandIndex] = useState(0);
@@ -244,7 +246,7 @@ export function ChatComposer({
   };
 
   const wikiContextLabel = selectedWikiContextOption
-    ? 'Change wiki context'
+    ? selectedWikiContextOption.title
     : wikiContextLoading
       ? 'Loading wiki context'
       : wikiContextOptions.length > 0
@@ -305,16 +307,17 @@ export function ChatComposer({
 
       <div className="flex flex-wrap items-center gap-2 px-1 pt-1.5">
         {showWikiContext ? (
-          <label
-            className={`relative flex min-w-0 max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-all duration-200 ${
+          <div
+            className={`relative flex min-w-0 max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors duration-150 ${
               selectedWikiContextOption
-                ? 'border-accent bg-accent-soft text-ink'
+                ? 'border-line bg-canvas-sunken text-ink'
                 : 'border-line bg-canvas text-ink-muted hover:border-line-strong hover:text-ink'
             } ${
               sending || wikiContextLoading || wikiContextOptions.length === 0
                 ? 'cursor-not-allowed opacity-60'
-                : 'cursor-pointer'
+                : ''
             }`}
+            data-testid="chat-wiki-context-active"
             title={selectedWikiContextOption ? selectedWikiContextOption.title : 'Choose wiki context'}
           >
             {selectedWikiContextOption ? (
@@ -322,8 +325,17 @@ export function ChatComposer({
             ) : (
               <BookOpen className="h-3.5 w-3.5 shrink-0 text-ink-subtle" strokeWidth={1.75} aria-hidden />
             )}
-            <span className="min-w-0 truncate font-medium">{wikiContextLabel}</span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-subtle" strokeWidth={1.8} aria-hidden />
+            {selectedWikiContextOption ? (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 text-ink-subtle">{wikiContextKind(selectedWikiContextOption.mode)}</span>
+                <span className="min-w-0 truncate font-medium text-ink">{selectedWikiContextOption.title}</span>
+              </span>
+            ) : (
+              <span className="min-w-0 truncate font-medium">{wikiContextLabel}</span>
+            )}
+            {selectedWikiContextOption ? null : (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-subtle" strokeWidth={1.8} aria-hidden />
+            )}
             <select
               value={wikiContextValue}
               onChange={(event) => setWikiContextValue(event.target.value)}
@@ -339,7 +351,23 @@ export function ChatComposer({
                 </option>
               ))}
             </select>
-          </label>
+            {selectedWikiContextOption ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setWikiContextValue('');
+                }}
+                className="relative z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink"
+                aria-label="Clear wiki context"
+                title="Clear wiki context"
+                disabled={sending}
+              >
+                <X className="h-3 w-3" strokeWidth={2} />
+              </button>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="ml-auto flex items-center gap-1">
@@ -366,31 +394,6 @@ export function ChatComposer({
             )}
           </button>
         </div>
-
-        {selectedWikiContextOption ? (
-          <div
-            className={wikiContextChipClass(selectedWikiContextOption.mode)}
-            data-testid="chat-wiki-context-active"
-          >
-            <span className="flex min-w-0 items-center gap-1.5">
-              <WikiContextGlyph mode={selectedWikiContextOption.mode} />
-              <span className="shrink-0 font-medium text-ink-muted">
-                {wikiContextKind(selectedWikiContextOption.mode)}
-              </span>
-              <span className="truncate">{selectedWikiContextOption.title}</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => setWikiContextValue('')}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink"
-              aria-label="Clear wiki context"
-              title="Clear wiki context"
-              disabled={sending}
-            >
-              <X className="h-3.5 w-3.5" strokeWidth={1.9} />
-            </button>
-          </div>
-        ) : null}
       </div>
     </form>
   );
@@ -431,14 +434,6 @@ function wikiContextKind(mode: WikiContextOption['mode']) {
 function wikiContextOptionLabel(option: WikiContextOption) {
   if (option.mode === 'all') return 'All roots';
   return `${wikiContextKind(option.mode)} / ${option.title}`;
-}
-
-function wikiContextChipClass(mode: WikiContextOption['mode']) {
-  const base =
-    'flex min-w-0 basis-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs text-ink';
-  return mode === 'all'
-    ? `${base} border-amber-500/35 bg-amber-500/10`
-    : `${base} border-accent/25 bg-accent-soft`;
 }
 
 function WikiContextGlyph({ mode }: { mode: WikiContextOption['mode'] }) {
