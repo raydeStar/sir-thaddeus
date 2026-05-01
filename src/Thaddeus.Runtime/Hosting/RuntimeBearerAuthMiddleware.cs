@@ -6,12 +6,15 @@ namespace Thaddeus.Runtime.Hosting;
 
 /// <summary>
 /// Bearer-token authentication middleware for loopback API and WebSocket traffic.
-/// Tokens may be supplied via the standard <c>Authorization: Bearer</c> header or,
-/// for WebSocket clients that cannot set headers, via an <c>access_token</c> query
-/// parameter (per RFC 6750 §2.3, scoped only to the WebSocket upgrade endpoint).
+/// Tokens may be supplied via the standard <c>Authorization: Bearer</c> header, the
+/// browser-safe <c>X-Thaddeus-Token</c> header, the bootstrap cookie, or an
+/// <c>access_token</c> query parameter as a last-resort retry transport.
 /// </summary>
 public sealed class RuntimeBearerAuthMiddleware
 {
+    private const string BrowserTokenHeader = "X-Thaddeus-Token";
+    private const string BrowserTokenCookie = "thaddeus_runtime_token";
+
     /// <summary>Paths that bypass auth entirely. Currently: index.html (bootstrap) and health probe.</summary>
     private static readonly HashSet<string> AnonymousPaths = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -117,17 +120,27 @@ public sealed class RuntimeBearerAuthMiddleware
             return token.Length > 0;
         }
 
-        // WebSocket upgrade fallback (RFC 6750 §2.3) — only honoured on /ws.
-        // We can't rely on context.WebSockets.IsWebSocketRequest here because
-        // UseWebSockets() is registered after this middleware in the pipeline.
-        if (context.Request.Path.StartsWithSegments("/ws"))
+        // If the client explicitly retries with a query token, prefer that over
+        // any stale browser cookie/header state from a previous runtime launch.
+        var fromQuery = context.Request.Query["access_token"].ToString();
+        if (!string.IsNullOrEmpty(fromQuery))
         {
-            var fromQuery = context.Request.Query["access_token"].ToString();
-            if (!string.IsNullOrEmpty(fromQuery))
-            {
-                token = fromQuery;
-                return true;
-            }
+            token = fromQuery;
+            return true;
+        }
+
+        var browserHeader = context.Request.Headers[BrowserTokenHeader].ToString();
+        if (!string.IsNullOrWhiteSpace(browserHeader))
+        {
+            token = browserHeader.Trim();
+            return token.Length > 0;
+        }
+
+        var browserCookie = context.Request.Cookies[BrowserTokenCookie];
+        if (!string.IsNullOrWhiteSpace(browserCookie))
+        {
+            token = browserCookie.Trim();
+            return token.Length > 0;
         }
 
         token = string.Empty;

@@ -10,6 +10,8 @@ export interface RuntimeMetadata {
   route: string;
 }
 
+const BROWSER_TOKEN_HEADER = 'X-Thaddeus-Token';
+
 export function readRuntimeMetadata(): RuntimeMetadata {
   return {
     token: readMeta('thaddeus-runtime-token'),
@@ -40,11 +42,46 @@ export function buildRuntimeWebSocketUrl(token: string): string {
   return `${proto}//${host}${path}`;
 }
 
-/** Thin fetch wrapper that includes the bearer token. */
+/**
+ * Thin fetch wrapper that sends the runtime token through the primary browser-safe
+ * transports first, then retries once with ?access_token= when a browser strips
+ * or ignores those headers.
+ */
 export async function runtimeFetch(token: string, path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-  return fetch(path, { ...init, headers });
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+    headers.set(BROWSER_TOKEN_HEADER, token);
+  }
+  const response = await fetch(path, { ...init, headers });
+  if (response.status !== 401 || !token) {
+    return response;
+  }
+
+  const retryUrl = withAccessToken(path, token);
+  if (retryUrl === path) {
+    return response;
+  }
+
+  return fetch(retryUrl, { ...init, headers });
+}
+
+function withAccessToken(path: string, token: string): string {
+  if (!token) return path;
+
+  const base = typeof window === 'undefined' ? 'http://127.0.0.1/' : window.location.origin;
+  const url = new URL(path, base);
+  if (url.searchParams.has('access_token')) {
+    return path;
+  }
+
+  url.searchParams.set('access_token', token);
+  if (typeof window === 'undefined') {
+    return `${url.pathname}${url.search}${url.hash}`;
+  }
+  return url.origin === window.location.origin
+    ? `${url.pathname}${url.search}${url.hash}`
+    : url.toString();
 }
 
 /**

@@ -49,10 +49,11 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         // Stale lock file; the existing PID is gone or unresponsive.
         RuntimeLockFileReader.TryDelete(_lockFilePath);
 
-        var runtimePath = ResolveRuntimeExecutablePath();
+        var runtimePath = ResolveRuntimeLaunchInfo();
         var psi = new ProcessStartInfo
         {
             FileName = runtimePath.command,
+            WorkingDirectory = runtimePath.workingDirectory,
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = false,
@@ -61,7 +62,11 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         foreach (var arg in runtimePath.args) psi.ArgumentList.Add(arg);
         psi.ArgumentList.Add($"--parent-pid={Environment.ProcessId}");
 
-        _logger.LogInformation("runtime.spawning command={Cmd} args={Args}", psi.FileName, string.Join(' ', psi.ArgumentList));
+        _logger.LogInformation(
+            "runtime.spawning command={Cmd} workingDir={WorkingDirectory} args={Args}",
+            psi.FileName,
+            psi.WorkingDirectory,
+            string.Join(' ', psi.ArgumentList));
         _process = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to spawn runtime process.");
 
@@ -141,7 +146,7 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         throw new TimeoutException("Runtime did not become ready within 15 seconds.");
     }
 
-    private static (string command, IReadOnlyList<string> args) ResolveRuntimeExecutablePath()
+    private static (string command, string workingDirectory, IReadOnlyList<string> args) ResolveRuntimeLaunchInfo()
     {
         // The shell publishes alongside the runtime in the install layout. During
         // development we point at the runtime project directly via `dotnet run`.
@@ -152,7 +157,7 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         var prod = Path.Combine(shellDir, "Thaddeus.Runtime" + ext);
         if (File.Exists(prod))
         {
-            return (prod, Array.Empty<string>());
+            return (prod, shellDir, Array.Empty<string>());
         }
 
         // Dev layout: walk up to the repo root and `dotnet run` the runtime project.
@@ -160,7 +165,8 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         // so we match that here with --no-build for fast startup.
         var repoRoot = FindRepoRoot(shellDir);
         var runtimeProj = Path.Combine(repoRoot, "src", "Thaddeus.Runtime", "Thaddeus.Runtime.csproj");
-        return ("dotnet", new[] { "run", "--project", runtimeProj, "--no-build" });
+        var runtimeDir = Path.GetDirectoryName(runtimeProj)!;
+        return ("dotnet", runtimeDir, new[] { "run", "--project", runtimeProj, "--no-build" });
     }
 
     private static string FindRepoRoot(string startDir)
