@@ -14,10 +14,13 @@ using Thaddeus.Runtime.Settings;
 using Thaddeus.Runtime.State;
 using Thaddeus.Runtime.Tools;
 using Thaddeus.Runtime.Voice;
+using Thaddeus.Runtime.Wiki;
 using Thaddeus.Runtime.Ws;
 using Thaddeus.SharedTypes;
 using SirThaddeus.Agent;
 using SirThaddeus.AuditLog;
+using SirThaddeus.Wiki;
+using SirThaddeus.Wiki.Storage;
 
 namespace Thaddeus.Runtime;
 
@@ -109,6 +112,8 @@ public static class Program
             builder.Services.AddSingleton<ISpeechToTextProvider, SettingsDrivenSpeechToTextProvider>();
             builder.Services.AddSingleton<ITextToSpeechProvider, SettingsDrivenTextToSpeechProvider>();
             builder.Services.AddSingleton<VoiceModeController>();
+            builder.Services.AddSingleton<VoiceHostProcessSupervisor>();
+            builder.Services.AddSingleton<VoiceRuntimeStatusService>();
             builder.Services.AddSingleton<IThreadStore>(sp =>
             {
                 var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
@@ -149,6 +154,38 @@ public static class Program
                     dir,
                     sp.GetRequiredService<ILogger<JsonFileRoutineStore>>());
             });
+            builder.Services.AddSingleton<IWikiStore>(sp =>
+            {
+                var libraryDir = builder.Configuration.GetValue<string>("Wiki:LibraryDirectory");
+                if (string.IsNullOrWhiteSpace(libraryDir))
+                {
+                    // Test mode must never share storage with the user's real wiki —
+                    // otherwise pages created via the API in one Playwright run
+                    // accumulate across runs and cause strict-mode locator collisions.
+                    // Scope the directory to the lock file so concurrent or
+                    // sequential test runtimes get independent sandboxes.
+                    if (options.TestMode)
+                    {
+                        var lockDir2 = Path.GetDirectoryName(options.LockFilePath)!;
+                        var lockName = Path.GetFileNameWithoutExtension(options.LockFilePath);
+                        libraryDir = Path.Combine(lockDir2, $"{lockName}-wiki");
+                    }
+                    else
+                    {
+                        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                        libraryDir = string.IsNullOrWhiteSpace(documents)
+                            ? Path.Combine(Path.GetDirectoryName(options.LockFilePath)!, "wiki-library")
+                            : Path.Combine(documents, "Sir Thaddeus Wiki");
+                    }
+                }
+
+                return new LocalWikiStore(
+                    libraryDir,
+                    sp.GetRequiredService<ILogger<LocalWikiStore>>());
+            });
+                builder.Services.AddSingleton<WikiChatContextService>();
+                builder.Services.AddSingleton<WikiPageRetrieverService>();
+                builder.Services.AddSingleton<WikiPageAssistantService>();
             builder.Services.AddHostedService<RoutineSeeder>();
             // MCP tool client. Spawns the SirThaddeus.McpServer child process,
             // handshakes asynchronously, and exposes IMcpToolClient to the
@@ -162,6 +199,7 @@ public static class Program
             builder.Services.AddSingleton<IMcpToolClient>(sp => sp.GetRequiredService<McpClientHost>());
             builder.Services.AddHostedService(sp => sp.GetRequiredService<McpClientHost>());
             builder.Services.AddSingleton<RuntimeStopAllService>();
+            builder.Services.AddSingleton<VoicePttEventHub>();
 
             // Gate that wraps every MCP call with the user's permission policy.
             builder.Services.AddSingleton<ToolPermissionGate>();
@@ -241,6 +279,7 @@ public static class Program
             app.MapSettingsApi();
             app.MapMemoryApi();
             app.MapRoutinesApi();
+            app.MapWikiApi();
             app.MapAudioApi();
             app.MapVoiceApi();
             app.MapPermissionsApi();

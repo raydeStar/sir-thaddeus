@@ -129,12 +129,14 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         IDialogueStateAccessor dialogueAccessor = new ThreadScopedDialogueStateAccessor();
         string? fingerprint = null;
         string? gatekeeperFingerprint = null;
+        var footmanLlmTimeout = TimeSpan.FromMilliseconds(1500);
 
         return doc =>
         {
             var llm = doc.Llm;
             var fp = $"{llm.BaseUrl}|{llm.ModelId}|{llm.ApiKey}|{llm.MaxTokens}|{llm.ContextWindowTokens}|{llm.Temperature}";
-            var gfp = $"{llm.GatekeeperBaseUrl ?? llm.BaseUrl}|{llm.GatekeeperModelId}|{llm.ReusePrimaryForGatekeeperOnSharedEndpoint}|{llm.GatekeeperEnabled}";
+            var gatekeeperPolicy = ResolveGatekeeperPolicy(llm);
+            var gfp = gatekeeperPolicy.Fingerprint;
             lock (cacheLock)
             {
                 if (cached is null || fingerprint != fp)
@@ -164,6 +166,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     guardrailsCached = null;
                     validatorCached = null;
                     repairCached = null;
+                    memoryProviderCached = null;
                 }
 
                 // Gatekeeper client + footman router, rebuilt only when
@@ -171,35 +174,40 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                 // gatekeeper isn't configured (primary-model-only mode).
                 if (gatekeeperFingerprint != gfp)
                 {
-                    var gkOptions = BuildGatekeeperOptions(llm, cached);
-                    if (gkOptions is null)
+                    switch (gatekeeperPolicy.Mode)
                     {
-                        gatekeeperCached?.Dispose();
-                        gatekeeperCached = null;
-                        footmanCached = null;
-                    }
-                    else if (ReferenceEquals(gkOptions.SharedPrimaryClient, cached))
-                    {
-                        // Reuse primary client — no separate LM Studio session
-                        // to burn. Common on single-GPU setups where both
-                        // models point at the same endpoint.
-                        gatekeeperCached?.Dispose();
-                        gatekeeperCached = null;
-                        footmanCached = new FastLlmFootmanRouter(cached);
-                    }
-                    else
-                    {
-                        if (gatekeeperCached is null)
-                        {
-                            gatekeeperCached = new LmStudioClient(gkOptions.ClientOptions);
-                        }
-                        else
-                        {
-                            gatekeeperCached.UpdateOptions(gkOptions.ClientOptions);
-                        }
-                        footmanCached = new FastLlmFootmanRouter(gatekeeperCached);
+                        case GatekeeperPolicyMode.Off:
+                            gatekeeperCached?.Dispose();
+                            gatekeeperCached = null;
+                            footmanCached = null;
+                            break;
+                        case GatekeeperPolicyMode.HeuristicOnly:
+                            gatekeeperCached?.Dispose();
+                            gatekeeperCached = null;
+                            footmanCached = new HeuristicFootmanRouter();
+                            break;
+                        case GatekeeperPolicyMode.SharedPrimary:
+                            gatekeeperCached?.Dispose();
+                            gatekeeperCached = null;
+                            footmanCached = new FastLlmFootmanRouter(cached, timeout: footmanLlmTimeout);
+                            break;
+                        case GatekeeperPolicyMode.SeparateLlm:
+                            var options = gatekeeperPolicy.ToClientOptions();
+                            if (gatekeeperCached is null)
+                            {
+                                gatekeeperCached = new LmStudioClient(options);
+                            }
+                            else
+                            {
+                                gatekeeperCached.UpdateOptions(options);
+                            }
+                            footmanCached = new FastLlmFootmanRouter(gatekeeperCached, timeout: footmanLlmTimeout);
+                            break;
+                        default:
+                            throw new InvalidOperationException($"Unknown gatekeeper policy: {gatekeeperPolicy.Mode}");
                     }
                     gatekeeperFingerprint = gfp;
+                    memoryProviderCached = null;
                 }
 
                 var loc = doc.Location;
@@ -214,16 +222,18 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     profilesDirectory: SirThaddeus.Config.SettingsManager.GetPersonalityProfilesDirectory());
 
                 // Memory context provider reads facts from the MCP
-                // memory tools. Requires a gatekeeper LLM client for
-                // the smart intent classifier — use whichever LLM we
-                // have warm (the gatekeeper when configured, else the
-                // primary; either works for the light classification
-                // prompt the provider issues).
+                // memory tools. In heuristic-only/off gatekeeper modes,
+                // avoid a hidden helper LLM call that could trigger the
+                // same shared-endpoint model swap the Footman policy is
+                // trying to prevent.
                 var classifierLlm = gatekeeperCached ?? cached;
                 var memoryProvider = memoryProviderCached ??= new MemoryContextProvider(
                     mcp,
                     audit,
-                    new SmartIntentClassifier(classifierLlm, audit));
+                    new SmartIntentClassifier(
+                        classifierLlm,
+                        audit,
+                        allowLlmFallback: gatekeeperPolicy.AllowsHelperLlm));
 
                 // Search fallback: retries refusal-shaped drafts via the
                 // SearchOrchestrator. The orchestrator owns no session
@@ -266,55 +276,31 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         };
     }
 
-    /// <summary>
-    /// Decides how to build the gatekeeper client for the footman router:
-    /// skip entirely (null), reuse the primary client (when models match —
-    /// the primary IS the gatekeeper), or build a separate client pinned to
-    /// the configured gatekeeper model ID.
-    ///
-    /// We always respect <see cref="LlmSettings.GatekeeperModelId"/>. Reusing
-    /// the primary client is only safe when the primary and gatekeeper model
-    /// IDs are identical — otherwise the footman's prompt would silently
-    /// route to the primary model (often a large chat model), crushing
-    /// latency and tripping the footman timeout.
-    /// </summary>
-    private static GatekeeperBuildResult? BuildGatekeeperOptions(LlmSettings llm, LmStudioClient primary)
+    internal static GatekeeperPolicy ResolveGatekeeperPolicy(LlmSettings llm)
     {
-        // Explicit off-switch — skip all gatekeeper plumbing so the primary
-        // model gets the full tool menu on every turn. Cheaper + simpler
-        // than clearing the gatekeeper model id, because the id is
-        // preserved for when the user toggles the footman back on.
-        if (!llm.GatekeeperEnabled) return null;
-        if (string.IsNullOrWhiteSpace(llm.GatekeeperModelId)) return null;
+        if (!llm.GatekeeperEnabled || string.IsNullOrWhiteSpace(llm.GatekeeperModelId))
+            return GatekeeperPolicy.Off(llm);
 
         var gkBaseUrl = string.IsNullOrWhiteSpace(llm.GatekeeperBaseUrl)
             ? llm.BaseUrl
             : llm.GatekeeperBaseUrl;
-        if (string.IsNullOrWhiteSpace(gkBaseUrl)) return null;
+        if (string.IsNullOrWhiteSpace(gkBaseUrl))
+            return GatekeeperPolicy.Off(llm);
 
         var samePrimaryModel = string.Equals(llm.ModelId, llm.GatekeeperModelId, StringComparison.OrdinalIgnoreCase);
         var sameEndpoint = UriHostsMatch(llm.BaseUrl ?? "", gkBaseUrl);
 
-        // Reuse the primary client only when the gatekeeper model IS the
-        // primary model (no model swap, no wasted HTTP client). The
-        // ReusePrimaryForGatekeeperOnSharedEndpoint toggle is kept for
-        // backwards compatibility but no longer redirects a distinct
-        // gatekeeper model through the primary — that was silently making
-        // the footman run on a 70B model and time out.
         if (samePrimaryModel && sameEndpoint)
         {
-            return new GatekeeperBuildResult(SharedPrimaryClient: primary, ClientOptions: null!);
+            return GatekeeperPolicy.SharedPrimary(llm, gkBaseUrl);
         }
 
-        var options = new LlmClientOptions
+        if (sameEndpoint && llm.ReusePrimaryForGatekeeperOnSharedEndpoint)
         {
-            BaseUrl = gkBaseUrl!,
-            Model = llm.GatekeeperModelId!,
-            MaxTokens = 120,       // footman replies with a tiny JSON envelope
-            ContextWindowTokens = 2048,
-            Temperature = 0.0,
-        };
-        return new GatekeeperBuildResult(SharedPrimaryClient: null, ClientOptions: options);
+            return GatekeeperPolicy.HeuristicOnly(llm, gkBaseUrl);
+        }
+
+        return GatekeeperPolicy.SeparateLlm(llm, gkBaseUrl);
     }
 
     private static bool UriHostsMatch(string left, string right)
@@ -324,7 +310,68 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         return string.Equals(a.Host, b.Host, StringComparison.OrdinalIgnoreCase) && a.Port == b.Port;
     }
 
-    private sealed record GatekeeperBuildResult(LmStudioClient? SharedPrimaryClient, LlmClientOptions ClientOptions);
+    internal enum GatekeeperPolicyMode
+    {
+        Off,
+        HeuristicOnly,
+        SharedPrimary,
+        SeparateLlm
+    }
+
+    internal sealed record GatekeeperPolicy(
+        GatekeeperPolicyMode Mode,
+        string? BaseUrl,
+        string? ModelId,
+        string Fingerprint)
+    {
+        public bool AllowsHelperLlm => Mode is GatekeeperPolicyMode.SharedPrimary or GatekeeperPolicyMode.SeparateLlm;
+
+        public static GatekeeperPolicy Off(LlmSettings llm) => Create(GatekeeperPolicyMode.Off, llm, null, null);
+
+        public static GatekeeperPolicy HeuristicOnly(LlmSettings llm, string baseUrl) =>
+            Create(GatekeeperPolicyMode.HeuristicOnly, llm, baseUrl, llm.GatekeeperModelId);
+
+        public static GatekeeperPolicy SharedPrimary(LlmSettings llm, string baseUrl) =>
+            Create(GatekeeperPolicyMode.SharedPrimary, llm, baseUrl, llm.ModelId);
+
+        public static GatekeeperPolicy SeparateLlm(LlmSettings llm, string baseUrl) =>
+            Create(GatekeeperPolicyMode.SeparateLlm, llm, baseUrl, llm.GatekeeperModelId);
+
+        public LlmClientOptions ToClientOptions()
+        {
+            if (Mode is not GatekeeperPolicyMode.SeparateLlm || string.IsNullOrWhiteSpace(BaseUrl) || string.IsNullOrWhiteSpace(ModelId))
+                throw new InvalidOperationException("Separate gatekeeper LLM policy requires a base URL and model id.");
+
+            return new LlmClientOptions
+            {
+                BaseUrl = BaseUrl,
+                Model = ModelId,
+                MaxTokens = 120,
+                ContextWindowTokens = 2048,
+                Temperature = 0.0,
+            };
+        }
+
+        private static GatekeeperPolicy Create(
+            GatekeeperPolicyMode mode,
+            LlmSettings llm,
+            string? baseUrl,
+            string? modelId)
+        {
+            var fingerprint = string.Join('|',
+                mode,
+                llm.BaseUrl ?? string.Empty,
+                llm.ModelId ?? string.Empty,
+                baseUrl ?? string.Empty,
+                modelId ?? string.Empty,
+                llm.GatekeeperEnabled,
+                llm.GatekeeperBaseUrl ?? string.Empty,
+                llm.GatekeeperModelId ?? string.Empty,
+                llm.ReusePrimaryForGatekeeperOnSharedEndpoint);
+
+            return new GatekeeperPolicy(mode, baseUrl, modelId, fingerprint);
+        }
+    }
 
     private void OnSettingsChanged(SettingsDocument doc)
     {

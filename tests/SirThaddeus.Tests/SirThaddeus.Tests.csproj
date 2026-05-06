@@ -44,13 +44,5 @@
     <ProjectReference Include="..\..\tools\SirThaddeus.Harness\SirThaddeus.Harness.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="continuity\scripts\**\*.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Evals\*.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
 
 </Project>

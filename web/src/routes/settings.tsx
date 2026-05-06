@@ -11,10 +11,12 @@ import {
   Headphones,
   Loader2,
   MapPin,
+  Mic,
   Plug,
   Plus,
   RefreshCw,
   Sliders,
+  Square,
   X,
 } from 'lucide-react';
 import { PageScaffold } from '../components/PageScaffold';
@@ -36,6 +38,8 @@ import {
   type GatekeeperStatusResponse,
 } from '../lib/settingsApi';
 import { readRuntimeMetadata } from '../lib/runtime';
+import { acquireMicStream, clearMicResolutionCache, stopMicStream } from '../lib/micCapture';
+import { warmVoiceHost } from '../lib/voiceApi';
 import type {
   SettingsDocument,
   LocationSettings,
@@ -762,6 +766,59 @@ function ModelsTab({
 
 // ───────────────────────── Audio & Voice ─────────────────────────
 
+const KOKORO_VOICE_IDS: ReadonlyArray<string> = [
+  'af_alloy',
+  'af_aoede',
+  'af_bella',
+  'af_heart',
+  'af_jessica',
+  'af_kore',
+  'af_nicole',
+  'af_nova',
+  'af_river',
+  'af_sarah',
+  'af_sky',
+  'am_adam',
+  'am_echo',
+  'am_eric',
+  'am_fenrir',
+  'am_liam',
+  'am_michael',
+  'am_onyx',
+  'am_puck',
+  'am_santa',
+  'bf_alice',
+  'bf_emma',
+  'bf_isabella',
+  'bf_lily',
+  'bm_daniel',
+  'bm_fable',
+  'bm_george',
+  'bm_lewis',
+  'ef_dora',
+  'em_alex',
+  'em_santa',
+  'ff_siwis',
+  'hf_alpha',
+  'hf_beta',
+  'hm_omega',
+  'hm_psi',
+  'if_sara',
+  'im_nicola',
+  'jf_alpha',
+  'jf_gongitsune',
+  'jf_nezumi',
+  'jf_tebukuro',
+  'jm_kumo',
+  'pf_dora',
+  'pm_alex',
+  'pm_santa',
+  'zf_xiaobei',
+  'zf_xiaoni',
+  'zf_xiaoxiao',
+  'zf_xiaoyi',
+];
+
 function AudioTab({
   doc,
   setDoc,
@@ -777,6 +834,8 @@ function AudioTab({
   const [voicesError, setVoicesError] = useState<string | null>(null);
   const [hostHealth, setHostHealth] = useState<VoiceHostHealthResponse | null>(null);
   const [hostHealthChecking, setHostHealthChecking] = useState(false);
+  const ttsProvider = normalizeTtsProvider(doc.voice.ttsProvider);
+  const isPiperLegacy = ttsProvider === 'piper';
 
   const refreshDevices = async () => {
     if (devicesLoading) return;
@@ -793,6 +852,12 @@ function AudioTab({
 
   const refreshVoices = async () => {
     if (voicesLoading) return;
+    if (!isPiperLegacy) {
+      setVoices(null);
+      setVoicesError(null);
+      return;
+    }
+
     setVoicesLoading(true);
     setVoicesError(null);
     try {
@@ -809,7 +874,7 @@ function AudioTab({
     if (hostHealthChecking) return;
     setHostHealthChecking(true);
     try {
-      setHostHealth(await checkVoiceHostHealth());
+      setHostHealth(await checkVoiceHostHealth(true));
     } catch (e) {
       setHostHealth({ ok: false, message: (e as Error).message, body: null, elapsedMs: 0 });
     } finally {
@@ -819,7 +884,8 @@ function AudioTab({
 
   useEffect(() => {
     void refreshDevices();
-    void refreshVoices();
+    if (isPiperLegacy) void refreshVoices();
+    void warmVoiceHost().catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -832,8 +898,8 @@ function AudioTab({
     [devices, doc.audio.outputDeviceName],
   );
   const voiceOptions = useMemo(
-    () => buildVoiceOptions(voices, doc.voice.ttsVoiceId),
-    [voices, doc.voice.ttsVoiceId],
+    () => buildVoiceOptions(ttsProvider, voices, doc.voice.ttsVoiceId),
+    [ttsProvider, voices, doc.voice.ttsVoiceId],
   );
 
   return (
@@ -911,6 +977,8 @@ function AudioTab({
         </div>
       </Section>
 
+      <MicTester selectedInputName={doc.audio.inputDeviceName ?? null} />
+
       <Section
         title="Voice pipeline"
         description="Local VoiceHost orchestrates ASR and TTS through a single process."
@@ -985,18 +1053,26 @@ function AudioTab({
         <Field label="TTS engine">
           <Select
             testId="settings-voice-tts"
-            value={doc.voice.ttsProvider}
-            onChange={(v) => setDoc({ ...doc, voice: { ...doc.voice, ttsProvider: v } })}
+            value={ttsProvider}
+            onChange={(v) =>
+              setDoc({
+                ...doc,
+                voice: {
+                  ...doc.voice,
+                  ttsProvider: v,
+                  ttsVoiceId: defaultVoiceForTtsProvider(v, doc.voice.ttsVoiceId),
+                },
+              })
+            }
             options={[
-              { value: 'piper', label: 'Piper (local)' },
-              { value: 'windows', label: 'Windows SAPI' },
-              { value: 'kokoro', label: 'Kokoro' },
+              { value: 'kokoro-sharp', label: 'KokoroSharp' },
+              { value: 'piper', label: 'Piper (legacy fallback)' },
               { value: 'stub', label: 'Disabled' },
             ]}
           />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Piper voice">
+          <Field label="Voice">
             <Select
               testId="settings-voice-tts-voice-id"
               value={doc.voice.ttsVoiceId ?? ''}
@@ -1019,46 +1095,50 @@ function AudioTab({
             />
           </Field>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs text-ink-muted">
-          <button
-            type="button"
-            onClick={refreshVoices}
-            disabled={voicesLoading}
-            data-testid="settings-voice-refresh"
-            className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3.5 py-1.5 text-sm font-medium text-ink shadow-soft transition hover:bg-accent-soft disabled:opacity-50"
-          >
-            {voicesLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
-            ) : (
-              <RefreshCw className="h-4 w-4" strokeWidth={1.75} />
-            )}
-            Refresh voices
-          </button>
-          {voicesError ? (
-            <span className="text-rose-600" data-testid="settings-voice-voices-error">
-              {voicesError}
-            </span>
-          ) : voices ? (
-            <span>
-              {voices.filter((v) => v.isInstalled).length} installed · {voices.length} total
-            </span>
-          ) : null}
-        </div>
-        <Field label="Piper voice path (optional)">
-          <input
-            data-testid="settings-voice-piper-path"
-            type="text"
-            value={doc.voice.piperVoicePath ?? ''}
-            placeholder="C:\\path\\to\\voice.onnx"
-            onChange={(e) =>
-              setDoc({
-                ...doc,
-                voice: { ...doc.voice, piperVoicePath: e.target.value || null },
-              })
-            }
-            className={inputCls}
-          />
-        </Field>
+        {isPiperLegacy ? (
+          <div className="flex flex-wrap items-center gap-3 text-xs text-ink-muted">
+            <button
+              type="button"
+              onClick={refreshVoices}
+              disabled={voicesLoading}
+              data-testid="settings-voice-refresh"
+              className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3.5 py-1.5 text-sm font-medium text-ink shadow-soft transition hover:bg-accent-soft disabled:opacity-50"
+            >
+              {voicesLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+              ) : (
+                <RefreshCw className="h-4 w-4" strokeWidth={1.75} />
+              )}
+              Refresh legacy voices
+            </button>
+            {voicesError ? (
+              <span className="text-rose-600" data-testid="settings-voice-voices-error">
+                {voicesError}
+              </span>
+            ) : voices ? (
+              <span>
+                {voices.filter((v) => v.isInstalled).length} installed · {voices.length} total
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {isPiperLegacy ? (
+          <Field label="Legacy Piper voice path (optional)">
+            <input
+              data-testid="settings-voice-piper-path"
+              type="text"
+              value={doc.voice.piperVoicePath ?? ''}
+              placeholder="C:\\path\\to\\voice.onnx"
+              onChange={(e) =>
+                setDoc({
+                  ...doc,
+                  voice: { ...doc.voice, piperVoicePath: e.target.value || null },
+                })
+              }
+              className={inputCls}
+            />
+          </Field>
+        ) : null}
       </Section>
 
       <Section title="Speech-to-text" description="Transcription engine for voice input.">
@@ -1072,6 +1152,20 @@ function AudioTab({
                 { value: 'whisper-cpp', label: 'whisper.cpp (local)' },
                 { value: 'faster-whisper', label: 'faster-whisper' },
                 { value: 'stub', label: 'Disabled' },
+              ]}
+            />
+          </Field>
+          <Field label="STT model">
+            <Select
+              testId="settings-voice-stt-model"
+              value={doc.voice.sttModelId ?? 'base'}
+              onChange={(v) => setDoc({ ...doc, voice: { ...doc.voice, sttModelId: v } })}
+              options={[
+                { value: 'base', label: 'base (bundled)' },
+                { value: 'tiny.en', label: 'tiny.en (fast English)' },
+                { value: 'tiny', label: 'tiny (fast multilingual)' },
+                { value: 'base.en', label: 'base.en (English)' },
+                { value: 'small.en', label: 'small.en (slower, better)' },
               ]}
             />
           </Field>
@@ -1691,6 +1785,218 @@ function formatUptime(ms: number): string {
 const inputCls =
   'block w-full rounded-xl border border-line bg-canvas-raised px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-subtle transition-colors focus:border-accent-ring focus:outline-none focus:ring-2 focus:ring-accent/20';
 
+function MicTester({ selectedInputName }: { selectedInputName: string | null }) {
+  const [active, setActive] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [peak, setPeak] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<{ requested: string | null; resolved: string | null; usedDefault: boolean } | null>(null);
+  const [diag, setDiag] = useState<{ trackLabel: string; readyState: string; muted: boolean; deviceId: string; sampleRate: number; channelCount: number; ctxState: string } | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const stop = useCallbackRef(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      try { void audioCtxRef.current.close(); } catch { /* ignore */ }
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
+    if (streamRef.current) {
+      stopMicStream(streamRef.current);
+      streamRef.current = null;
+    }
+    setActive(false);
+    setLevel(0);
+    setDiag(null);
+  });
+
+  useEffect(() => () => { stop(); }, [stop]);
+
+  // If the user changes the selected input device while the tester is
+  // running, re-resolve so the next start picks up the new selection.
+  useEffect(() => {
+    clearMicResolutionCache();
+  }, [selectedInputName]);
+
+  const start = async () => {
+    setError(null);
+    setPeak(0);
+    try {
+      const acquired = await acquireMicStream();
+      streamRef.current = acquired.stream;
+      setInfo({
+        requested: acquired.requestedName,
+        resolved: acquired.resolvedLabel,
+        usedDefault: acquired.usedDefault,
+      });
+
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) {
+        throw new Error('Web Audio API is not available in this browser.');
+      }
+      const ctx = new AudioCtx();
+      audioCtxRef.current = ctx;
+      // WebView2 / Edge frequently starts AudioContext in 'suspended'
+      // state until a user gesture explicitly resumes it. Without this
+      // the analyser silently sees no samples and the meter stays at 0%.
+      if (ctx.state === 'suspended') {
+        try { await ctx.resume(); } catch { /* surfaced via diag below */ }
+      }
+      const source = ctx.createMediaStreamSource(acquired.stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.6;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const track = acquired.stream.getAudioTracks()[0];
+      const settings = track?.getSettings?.() ?? {};
+      setDiag({
+        trackLabel: track?.label ?? '(no track)',
+        readyState: track?.readyState ?? 'unknown',
+        muted: track?.muted ?? false,
+        deviceId: typeof settings.deviceId === 'string' ? settings.deviceId : '(unknown)',
+        sampleRate: typeof settings.sampleRate === 'number' ? settings.sampleRate : 0,
+        channelCount: typeof settings.channelCount === 'number' ? settings.channelCount : 0,
+        ctxState: ctx.state,
+      });
+
+      const buffer = new Uint8Array(analyser.fftSize);
+      let runningPeak = 0;
+      const tick = () => {
+        const a = analyserRef.current;
+        if (!a) return;
+        a.getByteTimeDomainData(buffer);
+        let sumSq = 0;
+        for (let i = 0; i < buffer.length; i++) {
+          const v = (buffer[i] - 128) / 128;
+          sumSq += v * v;
+        }
+        const rms = Math.sqrt(sumSq / buffer.length);
+        const normalized = Math.min(1, rms * 1.8);
+        setLevel(normalized);
+        if (normalized > runningPeak) {
+          runningPeak = normalized;
+          setPeak(runningPeak);
+        }
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      setActive(true);
+      rafRef.current = requestAnimationFrame(tick);
+    } catch (e) {
+      stop();
+      setError((e as Error).message || 'Could not start the microphone test.');
+    }
+  };
+
+  const levelPct = Math.round(level * 100);
+  const peakPct = Math.round(peak * 100);
+
+  return (
+    <Section
+      title="Test microphone"
+      description="Captures audio in the browser shell so you can confirm the selected device is actually picking up your voice before using push-to-talk."
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        {active ? (
+          <button
+            type="button"
+            onClick={stop}
+            data-testid="settings-mic-tester-stop"
+            className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3.5 py-1.5 text-sm font-medium text-ink shadow-soft transition hover:bg-accent-soft"
+          >
+            <Square className="h-4 w-4" strokeWidth={1.75} />
+            Stop test
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => { void start(); }}
+            data-testid="settings-mic-tester-start"
+            className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3.5 py-1.5 text-sm font-medium text-ink shadow-soft transition hover:bg-accent-soft"
+          >
+            <Mic className="h-4 w-4" strokeWidth={1.75} />
+            Start test
+          </button>
+        )}
+        {active ? (
+          <span className="text-xs text-ink-muted">Speak into your microphone &mdash; the bar should jump.</span>
+        ) : null}
+      </div>
+
+      <div className="space-y-2">
+        <div
+          className="relative h-3 w-full overflow-hidden rounded-full bg-canvas-raised border border-line"
+          data-testid="settings-mic-tester-level"
+        >
+          <div
+            className="absolute inset-y-0 left-0 bg-emerald-500 transition-[width] duration-75"
+            style={{ width: `${levelPct}%` }}
+          />
+          {peak > 0 ? (
+            <div
+              className="absolute top-0 bottom-0 w-px bg-emerald-700"
+              style={{ left: `${peakPct}%` }}
+              aria-hidden
+            />
+          ) : null}
+        </div>
+        <div className="flex justify-between text-[11px] text-ink-muted">
+          <span>Level: {levelPct}%</span>
+          <span>Peak: {peakPct}%</span>
+        </div>
+      </div>
+
+      {info ? (
+        <div className="rounded-md border border-line bg-canvas-raised p-3 text-xs space-y-1">
+          <div>
+            <span className="text-ink-muted">Selected in settings: </span>
+            <span className="text-ink">{info.requested ?? 'System default'}</span>
+          </div>
+          <div>
+            <span className="text-ink-muted">Browser opened: </span>
+            <span className="text-ink">{info.resolved ?? 'unknown'}</span>
+          </div>
+          {info.usedDefault && info.requested ? (
+            <div className="text-amber-600" data-testid="settings-mic-tester-fallback">
+              Selected device was not found in the browser; fell back to the system default.
+              Try clicking &ldquo;Refresh devices&rdquo; above and re-selecting.
+            </div>
+          ) : null}
+          {diag ? (
+            <div className="mt-2 border-t border-line pt-2 text-[11px] text-ink-muted space-y-0.5" data-testid="settings-mic-tester-diag">
+              <div>Track label: <span className="text-ink">{diag.trackLabel}</span></div>
+              <div>Track readyState: <span className="text-ink">{diag.readyState}</span>{diag.muted ? <span className="text-amber-600"> (muted by OS)</span> : null}</div>
+              <div>Audio context: <span className="text-ink">{diag.ctxState}</span></div>
+              <div>Sample rate: <span className="text-ink">{diag.sampleRate || 'unknown'}</span> &middot; channels: <span className="text-ink">{diag.channelCount || 'unknown'}</span></div>
+              <div>deviceId: <span className="text-ink break-all">{diag.deviceId}</span></div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="text-xs text-rose-600" data-testid="settings-mic-tester-error">
+          {error}
+        </div>
+      ) : null}
+    </Section>
+  );
+}
+
+// Stable callback ref so cleanup effects don't re-fire on every render.
+function useCallbackRef<T extends (...args: never[]) => unknown>(fn: T): T {
+  const ref = useRef(fn);
+  ref.current = fn;
+  return useRef(((...args: never[]) => ref.current(...args)) as T).current;
+}
+
 function Section({
   title,
   description,
@@ -2083,9 +2389,21 @@ function buildDeviceOptions(
 }
 
 function buildVoiceOptions(
+  provider: string,
   voices: ReadonlyArray<PiperVoiceEntry> | null | undefined,
   current: string | null | undefined,
 ): ReadonlyArray<{ value: string; label: string }> {
+  if (normalizeTtsProvider(provider) === 'kokoro-sharp') {
+    const opts = KOKORO_VOICE_IDS.map((voiceId) => ({
+      value: voiceId,
+      label: formatKokoroVoiceLabel(voiceId),
+    }));
+    if (current && current.includes('_') && !opts.some((o) => o.value === current)) {
+      opts.push({ value: current, label: `${current} (saved)` });
+    }
+    return opts;
+  }
+
   const opts: { value: string; label: string }[] = [];
   if (voices && voices.length > 0) {
     for (const v of voices) {
@@ -2100,6 +2418,37 @@ function buildVoiceOptions(
     opts.push({ value: '', label: '(no voices discovered — save to use manual ID)' });
   }
   return opts;
+}
+
+function normalizeTtsProvider(provider: string | null | undefined): string {
+  const value = (provider ?? '').trim().toLowerCase();
+  if (value === 'kokoro' || value === 'kokorosharp' || value === 'kokoro-sharp') {
+    return 'kokoro-sharp';
+  }
+  if (value === 'piper') return 'piper';
+  if (value === 'stub' || value === 'disabled' || value === 'none') return 'stub';
+  return 'kokoro-sharp';
+}
+
+function defaultVoiceForTtsProvider(provider: string, current: string | null | undefined): string | null {
+  const normalized = normalizeTtsProvider(provider);
+  if (normalized === 'kokoro-sharp') {
+    return !current || current.includes('-') || !current.includes('_') ? 'bm_lewis' : current;
+  }
+  if (normalized === 'piper') {
+    return !current || !current.includes('-') ? 'en_US-john-medium' : current;
+  }
+  return null;
+}
+
+function formatKokoroVoiceLabel(voiceId: string): string {
+  const name = voiceId.includes('_') ? voiceId.split('_').slice(1).join(' ') : voiceId;
+  const displayName = name
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+  return `${displayName || voiceId} (${voiceId})`;
 }
 
 function parsePositiveInt(raw: string, fallback: number): number {

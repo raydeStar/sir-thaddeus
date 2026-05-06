@@ -12,6 +12,8 @@ namespace Thaddeus.Runtime.Api;
 /// </summary>
 public static class WorkspaceHostingExtensions
 {
+    private const string RuntimeTokenCookieName = "thaddeus_runtime_token";
+
     /// <summary>Resolves the on-disk wwwroot path, falling back to the publish layout.</summary>
     public static string ResolveWebRoot(IWebHostEnvironment env)
     {
@@ -64,6 +66,16 @@ public static class WorkspaceHostingExtensions
             context.Response.ContentType = "text/html; charset=utf-8";
             // Bootstrap response is per-token, never cache.
             context.Response.Headers.CacheControl = "no-store";
+            context.Response.Cookies.Append(
+                RuntimeTokenCookieName,
+                opts.BearerToken,
+                new CookieOptions
+                {
+                    HttpOnly = true,
+                    IsEssential = true,
+                    Path = "/",
+                    SameSite = SameSiteMode.Strict,
+                });
             return context.Response.WriteAsync(html);
         }
 

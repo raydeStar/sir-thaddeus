@@ -99,7 +99,7 @@ public sealed class SettingsDrivenVoiceProvidersTests
     }
 
     [Fact]
-    public async Task TextToSpeechProvider_switches_with_saved_settings()
+    public async Task TextToSpeechProvider_uses_legacy_piper_only_when_selected()
     {
         var settings = new InMemorySettings(SettingsDocument.Defaults());
         var piper = new FakeTextToSpeechProvider(isAvailable: true);
@@ -108,14 +108,18 @@ public sealed class SettingsDrivenVoiceProvidersTests
 
         await sut.SpeakAsync("hello", CancellationToken.None);
 
-        Assert.Equal(1, piper.Calls);
-        Assert.Equal(0, stub.Calls);
-        Assert.True(sut.IsAvailable);
+        Assert.Equal(0, piper.Calls);
+        Assert.Equal(1, stub.Calls);
+        Assert.False(sut.IsAvailable);
 
         await settings.ReplaceAsync(
             SettingsDocument.Defaults() with
             {
-                Voice = SettingsDocument.Defaults().Voice with { TtsProvider = "stub" }
+                Voice = SettingsDocument.Defaults().Voice with
+                {
+                    TtsProvider = "piper",
+                    TtsVoiceId = "en_US-john-medium"
+                }
             },
             CancellationToken.None);
 
@@ -123,7 +127,7 @@ public sealed class SettingsDrivenVoiceProvidersTests
 
         Assert.Equal(1, piper.Calls);
         Assert.Equal(1, stub.Calls);
-        Assert.False(sut.IsAvailable);
+        Assert.True(sut.IsAvailable);
     }
 
     [Fact]

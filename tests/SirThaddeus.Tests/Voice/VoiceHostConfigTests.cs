@@ -124,7 +124,7 @@ public sealed class VoiceHostConfigTests
     {
         var settings = new VoiceSettings();
 
-        Assert.Equal("piper", settings.GetNormalizedTtsEngine());
+        Assert.Equal("kokoro-sharp", settings.GetNormalizedTtsEngine());
         Assert.Equal("faster-whisper", settings.GetNormalizedSttEngine());
         Assert.Equal("base", settings.GetResolvedSttModelId());
         Assert.Equal("en", settings.GetResolvedSttLanguage());
@@ -158,8 +158,21 @@ public sealed class VoiceHostConfigTests
             TtsVoiceId = "af_sky"
         };
 
-        Assert.Equal("kokoro", settings.GetNormalizedTtsEngine());
+        Assert.Equal("kokoro-sharp", settings.GetNormalizedTtsEngine());
         Assert.Equal("af_sky", settings.GetResolvedTtsVoiceId());
+    }
+
+    [Fact]
+    public void WindowsTtsEngine_FallsBackToKokoroSharp()
+    {
+        var settings = new VoiceSettings
+        {
+            TtsEngine = "windows",
+            TtsVoiceId = ""
+        };
+
+        Assert.Equal("kokoro-sharp", settings.GetNormalizedTtsEngine());
+        Assert.Equal("bm_lewis", settings.GetResolvedTtsVoiceId());
     }
 
     [Fact]

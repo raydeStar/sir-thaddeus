@@ -35,6 +35,7 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
     private string? _envFingerprint;
     private readonly SemaphoreSlim _restartGate = new(1, 1);
     private readonly TimeSpan _startupTimeout = TimeSpan.FromSeconds(12);
+    private int _disposed;
 
     public McpClientHost(
         ILogger<McpClientHost> logger,
@@ -52,6 +53,9 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return Task.CompletedTask;
+
         _startupTask = Task.Run(() => StartInnerAsync(cancellationToken), cancellationToken);
         return Task.CompletedTask;
     }
@@ -71,9 +75,15 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
 
     private async Task SpawnChildAsync(SettingsDocument doc, CancellationToken ct)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         await _restartGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            if (Volatile.Read(ref _disposed) != 0)
+                return;
+
             var baseDir = AppContext.BaseDirectory;
             var serverPath = RuntimePathResolver.ResolveMcpServerPath("auto", baseDir);
             if (!File.Exists(serverPath))
@@ -126,6 +136,9 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
     /// </summary>
     private void OnSettingsChanged(SettingsDocument doc)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         var newEnv = BuildEnv(doc);
         var newFp = FingerprintEnv(newEnv);
         if (string.Equals(newFp, _envFingerprint, StringComparison.Ordinal)) return;
@@ -175,7 +188,15 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
 
     public async Task<bool> StopChildAsync(CancellationToken cancellationToken = default)
     {
-        await _restartGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _restartGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+
         try
         {
             var inner = _inner;
@@ -200,12 +221,16 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
         }
         finally
         {
-            _restartGate.Release();
+            try { _restartGate.Release(); }
+            catch (ObjectDisposedException) { /* dispose already completed */ }
         }
     }
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         _settings.Changed -= OnSettingsChanged;
         await StopChildAsync(CancellationToken.None).ConfigureAwait(false);
         _restartGate.Dispose();

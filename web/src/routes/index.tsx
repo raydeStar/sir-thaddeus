@@ -1,12 +1,17 @@
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ChevronRight, CircleStop, Loader2, MessageSquare, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronRight, Loader2, MessageSquare, Mic, Sparkles, Square } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
-import { stopAllProcesses } from '../lib/runtimeActions';
+import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
+import { acquireMicStream, stopMicStream } from '../lib/micCapture';
+import { trimSilenceToWav } from '../lib/audioTrim';
+import { transcribeSpeech, warmVoiceHost } from '../lib/voiceApi';
 
 export const Route = createFileRoute('/')({
   component: HomeRoute,
 });
+
+const MIN_VOICE_HOLD_MS = 350;
 
 function HomeRoute() {
   const navigate = useNavigate();
@@ -18,34 +23,48 @@ function HomeRoute() {
 
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const [stoppingAll, setStoppingAll] = useState(false);
-  const [stopAllStatus, setStopAllStatus] = useState<string | null>(null);
-  const [stopAllError, setStopAllError] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Lightweight PTT for the home screen. We keep this self-contained so it
+  // does not pull in the chat route's full speech-playback machinery: hold
+  // mic, record, release, transcribe, then start a new thread.
+  const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing'>('idle');
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const startedAtRef = useRef(0);
+  const abortRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      // Best-effort teardown when leaving the home route mid-capture.
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        try { recorderRef.current.stop(); } catch { /* ignore */ }
+      }
+      if (streamRef.current) {
+        stopMicStream(streamRef.current);
+        streamRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     void loadThreads();
-    textareaRef.current?.focus();
   }, [loadThreads]);
 
-  // Auto-grow the textarea to fit content, capped so the page never gets overtaken.
   useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
-  }, [draft]);
+    void warmVoiceHost().catch(() => undefined);
+  }, []);
 
-  const start = async () => {
-    if (!draft.trim() || busy) return;
+  const start = useCallback(async (text: string, wikiContext?: WikiContextSelection) => {
+    if (busy) return;
     setBusy(true);
     setLocalError(null);
     try {
       const t = await newThread();
       void navigate({ to: '/chat/$threadId', params: { threadId: t.id } });
       await useChatStore.getState().openThread(t.id);
-      await send(draft.trim());
+      await send(text, wikiContext);
       setDraft('');
     } catch (e) {
       // Surface the failure so the user doesn't hit Send and see nothing
@@ -55,40 +74,104 @@ function HomeRoute() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [busy, navigate, newThread, send]);
+
+  const beginVoiceCapture = useCallback(async () => {
+    if (busy || voiceState !== 'idle') return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setLocalError('Microphone capture is not available in this browser shell.');
+      return;
+    }
+
+    setLocalError(null);
+    chunksRef.current = [];
+    abortRef.current = false;
+    startedAtRef.current = performance.now();
+    setVoiceState('starting');
+
+    try {
+      const acquired = await acquireMicStream();
+      if (abortRef.current) {
+        stopMicStream(acquired.stream);
+        abortRef.current = false;
+        setVoiceState('idle');
+        return;
+      }
+
+      const recorder = new MediaRecorder(acquired.stream, mediaRecorderOptions());
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+      recorder.onerror = () => {
+        setLocalError('Microphone recording failed.');
+        releaseHomeMic(recorderRef, streamRef);
+        setVoiceState('idle');
+      };
+
+      streamRef.current = acquired.stream;
+      recorderRef.current = recorder;
+      recorder.start();
+      setVoiceState('recording');
+    } catch (e) {
+      releaseHomeMic(recorderRef, streamRef);
+      setVoiceState('idle');
+      if (!abortRef.current) {
+        setLocalError((e as Error).message || 'Could not start microphone capture.');
+      }
+      abortRef.current = false;
+    }
+  }, [busy, voiceState]);
+
+  const finishVoiceCapture = useCallback(async () => {
+    const recorder = recorderRef.current;
+    if (!recorder) {
+      abortRef.current = true;
+      return;
+    }
+
+    const heldMs = performance.now() - startedAtRef.current;
+    const shortTap = heldMs < MIN_VOICE_HOLD_MS;
+
+    let audioBlob: Blob;
+    try {
+      audioBlob = await stopRecorder(recorder, chunksRef.current);
+    } catch (e) {
+      releaseHomeMic(recorderRef, streamRef);
+      setVoiceState('idle');
+      if (!shortTap) setLocalError((e as Error).message || 'Could not finish microphone recording.');
+      return;
+    }
+
+    releaseHomeMic(recorderRef, streamRef);
+    if (shortTap) {
+      setVoiceState('idle');
+      return;
+    }
+    if (audioBlob.size === 0) {
+      setVoiceState('idle');
+      setLocalError('No microphone audio was captured.');
+      return;
+    }
+
+    setVoiceState('transcribing');
+    setLocalError(null);
+    try {
+      const trimmed = await trimSilenceToWav(audioBlob).catch(() => audioBlob);
+      const transcript = await transcribeSpeech(trimmed);
+      const text = transcript.text.trim();
+      if (!text) {
+        setLocalError('No speech was detected.');
+        return;
+      }
+      await start(text);
+    } catch (e) {
+      setLocalError((e as Error).message || 'Could not transcribe the microphone audio.');
+    } finally {
+      setVoiceState('idle');
+    }
+  }, [start]);
 
   const displayError = localError ?? storeError;
-
-  const onStopAll = async () => {
-    if (stoppingAll) return;
-    setStoppingAll(true);
-    setStopAllStatus(null);
-    setStopAllError(null);
-    try {
-      const result = await stopAllProcesses();
-      const stoppedCount = result.stopped?.length ?? 0;
-      const errorCount = result.errors?.length ?? 0;
-      setStopAllStatus(
-        errorCount > 0
-          ? `Stop requested. ${stoppedCount} stopped, ${errorCount} issue${errorCount === 1 ? '' : 's'} reported.`
-          : stoppedCount > 0
-            ? `Stopped ${stoppedCount} managed item${stoppedCount === 1 ? '' : 's'}.`
-            : 'Stop requested. No managed sidecars were running.'
-      );
-    } catch (e) {
-      setStopAllError((e as Error).message || 'Could not send stop-all command.');
-    } finally {
-      setStoppingAll(false);
-    }
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      void start();
-    }
-  };
-
   const recent = threads.slice(0, 6);
 
   return (
@@ -98,7 +181,7 @@ function HomeRoute() {
     >
       {/* Hero mark — small, calm. Signals identity without being loud. */}
       <div
-        className="mx-auto mb-10 flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent"
+        className="mx-auto mb-10 flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent shadow-[0_8px_24px_-12px_rgba(217,119,87,0.55)]"
         aria-hidden
       >
         <Sparkles className="h-5 w-5" strokeWidth={1.6} />
@@ -112,65 +195,47 @@ function HomeRoute() {
         Ask anything, or pick up where you left off.
       </p>
 
-      <div className="mt-8 flex flex-col items-center gap-2" aria-live="polite">
-        <button
-          type="button"
-          onClick={onStopAll}
-          disabled={stoppingAll}
-          data-testid="home-stop-all"
-          className="inline-flex min-h-14 items-center justify-center gap-3 rounded-lg border border-red-300 bg-red-600 px-8 py-4 text-base font-semibold uppercase tracking-[0.08em] text-white shadow-lg shadow-red-950/15 transition hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-500/25 disabled:cursor-not-allowed disabled:bg-red-900/60 disabled:text-white/70"
-        >
-          {stoppingAll ? (
-            <Loader2 className="h-5 w-5 animate-spin" strokeWidth={2.25} aria-hidden />
-          ) : (
-            <CircleStop className="h-5 w-5" strokeWidth={2.25} aria-hidden />
-          )}
-          {stoppingAll ? 'Stopping' : 'STOP ALL'}
-        </button>
-        {stopAllStatus ? (
-          <p className="max-w-md text-center text-xs text-ink-muted" data-testid="home-stop-all-status">
-            {stopAllStatus}
-          </p>
-        ) : null}
-        {stopAllError ? (
-          <p className="max-w-md text-center text-xs text-rose-500" data-testid="home-stop-all-error">
-            {stopAllError}
-          </p>
-        ) : null}
-      </div>
-
-      {/* Prompt. Deliberately minimal — no visible card border until focus. */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void start();
-        }}
-        className="mt-10"
-      >
-        <div
-          className="group/prompt flex items-end gap-2 rounded-2xl border border-line bg-canvas-raised px-4 py-3 transition-colors focus-within:border-accent-ring focus-within:shadow-[0_0_0_4px_var(--color-accent-soft)]"
-        >
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="Message Sir Thaddeus…"
-            rows={1}
-            data-testid="home-prompt"
-            className="min-h-[24px] max-h-[240px] flex-1 resize-none border-0 bg-transparent px-1 py-1 text-[15px] leading-6 text-ink placeholder:text-ink-subtle focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={!draft.trim() || busy}
-            aria-label="Send"
-            data-testid="home-send"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white transition hover:opacity-90 disabled:bg-line-strong disabled:text-ink-subtle"
-          >
-            <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
-          </button>
-        </div>
-        <p className="mt-2 text-center text-[11px] text-ink-subtle">
+      <div className="mt-10">
+        <ChatComposer
+          value={draft}
+          onChange={setDraft}
+          onSubmit={start}
+          sending={busy}
+          inputTestId="home-prompt"
+          sendTestId="home-send"
+          autoFocus
+          rightActions={
+            <button
+              type="button"
+              className={`chat-composer-icon-button ${voiceState === 'recording' ? 'border-red-400 bg-red-500/10 text-red-700 dark:text-red-300' : ''}`}
+              aria-label={homeVoiceButtonLabel(voiceState)}
+              title={homeVoiceButtonLabel(voiceState)}
+              data-testid="home-voice-hold"
+              disabled={busy}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                event.currentTarget.setPointerCapture(event.pointerId);
+                void beginVoiceCapture();
+              }}
+              onPointerUp={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
+                void finishVoiceCapture();
+              }}
+              onPointerCancel={() => { void finishVoiceCapture(); }}
+            >
+              {voiceState === 'starting' || voiceState === 'transcribing' ? (
+                <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} />
+              ) : voiceState === 'recording' ? (
+                <Square className="h-4 w-4" strokeWidth={1.9} />
+              ) : (
+                <Mic className="h-4 w-4" strokeWidth={1.9} />
+              )}
+            </button>
+          }
+        />
+        <p className="mt-3 text-center text-[11px] text-ink-subtle">
           Press <kbd className="rounded bg-canvas-sunken px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd> to send
           <span className="mx-2">·</span>
           <kbd className="rounded bg-canvas-sunken px-1.5 py-0.5 font-mono text-[10px]">Shift</kbd>
@@ -186,7 +251,7 @@ function HomeRoute() {
             {displayError}
           </div>
         ) : null}
-      </form>
+      </div>
 
       {/* Recents. Only renders when there are threads — otherwise the hero breathes. */}
       {recent.length > 0 ? (
@@ -256,4 +321,46 @@ function formatRelative(iso: string): string {
   } catch {
     return '';
   }
+}
+
+function mediaRecorderOptions(): MediaRecorderOptions {
+  for (const mimeType of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']) {
+    if (MediaRecorder.isTypeSupported(mimeType)) return { mimeType };
+  }
+  return {};
+}
+
+function stopRecorder(recorder: MediaRecorder, chunks: Blob[]): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const mimeType = recorder.mimeType || 'audio/webm';
+    recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+    recorder.onerror = () => reject(new Error('Microphone recording failed.'));
+    if (recorder.state === 'inactive') {
+      resolve(new Blob(chunks, { type: mimeType }));
+      return;
+    }
+    recorder.stop();
+  });
+}
+
+function releaseHomeMic(
+  recorderRef: React.MutableRefObject<MediaRecorder | null>,
+  streamRef: React.MutableRefObject<MediaStream | null>,
+): void {
+  const recorder = recorderRef.current;
+  if (recorder && recorder.state !== 'inactive') {
+    try { recorder.stop(); } catch { /* best effort */ }
+  }
+  recorderRef.current = null;
+  if (streamRef.current) {
+    stopMicStream(streamRef.current);
+    streamRef.current = null;
+  }
+}
+
+function homeVoiceButtonLabel(state: 'idle' | 'starting' | 'recording' | 'transcribing'): string {
+  if (state === 'starting') return 'Starting microphone';
+  if (state === 'recording') return 'Release to send voice message';
+  if (state === 'transcribing') return 'Transcribing voice message';
+  return 'Hold to talk';
 }

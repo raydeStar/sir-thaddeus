@@ -33,9 +33,8 @@ public sealed class AsrProxyBackend : IAsrBackend
         using var audioContent = new ByteArrayContent(audioBytes);
         using var legacyAudioContent = new ByteArrayContent(audioBytes);
 
-        audioContent.Headers.ContentType = new MediaTypeHeaderValue(
-            string.IsNullOrWhiteSpace(audioFile.ContentType) ? "audio/wav" : audioFile.ContentType);
-        legacyAudioContent.Headers.ContentType = audioContent.Headers.ContentType;
+        audioContent.Headers.ContentType = ParseAudioContentType(audioFile.ContentType);
+        legacyAudioContent.Headers.ContentType = ParseAudioContentType(audioFile.ContentType);
 
         // Canonical VoiceHost contract field:
         payload.Add(audioContent, "audio", audioFile.FileName);
@@ -110,6 +109,19 @@ public sealed class AsrProxyBackend : IAsrBackend
 
         value = element.GetString() ?? "";
         return true;
+    }
+
+    private static MediaTypeHeaderValue ParseAudioContentType(string? contentType)
+    {
+        var raw = string.IsNullOrWhiteSpace(contentType) ? "audio/wav" : contentType.Trim();
+        if (MediaTypeHeaderValue.TryParse(raw, out var parsed) && parsed is not null)
+            return parsed;
+
+        var mediaTypeOnly = raw.Split(';', 2, StringSplitOptions.TrimEntries)[0];
+        if (MediaTypeHeaderValue.TryParse(mediaTypeOnly, out parsed) && parsed is not null)
+            return parsed;
+
+        return new MediaTypeHeaderValue("application/octet-stream");
     }
 
 }

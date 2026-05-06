@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageReference Include="coverlet.collector" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Thaddeus.Tts.Abstractions\Thaddeus.Tts.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\Thaddeus.Tts.Kokoro\Thaddeus.Tts.Kokoro.csproj" />
+    <ProjectReference Include="..\..\..\src\Thaddeus.Tts.Piper.Legacy\Thaddeus.Tts.Piper.Legacy.csproj" />
+  </ItemGroup>
+
+</Project>

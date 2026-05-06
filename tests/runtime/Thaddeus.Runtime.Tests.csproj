@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Thaddeus.Runtime\Thaddeus.Runtime.csproj" />
+    <ProjectReference Include="..\..\packages\wiki\SirThaddeus.Wiki\SirThaddeus.Wiki.csproj" />
   </ItemGroup>
 
 </Project>

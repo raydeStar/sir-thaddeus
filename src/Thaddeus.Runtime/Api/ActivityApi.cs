@@ -42,11 +42,11 @@ public static class ActivityApi
         })
             .WithName("GetActivity");
 
-        app.MapGet("/api/diagnostics", (
+        app.MapGet("/api/diagnostics", async (
             RuntimeOptions options,
             RuntimeStateMachine machine,
             IThreadStore threads,
-            VoiceModeController voice,
+            VoiceRuntimeStatusService voiceStatus,
             CancellationToken ct) =>
         {
             var startedAt = options.StartedAt;
@@ -55,13 +55,15 @@ public static class ActivityApi
             var thrCount = string.IsNullOrEmpty(rootDir) ? -1 : CountFiles(rootDir);
 
             var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+            var voice = await voiceStatus.GetStatusAsync(ensureHost: false, ct).ConfigureAwait(false);
 
             var resp = new DiagnosticsResponse(
                 UptimeSeconds: uptime,
                 State: machine.Current.ToString(),
                 ThreadCount: thrCount,
                 ThreadStoreRoot: rootDir,
-                VoiceAvailable: voice.IsAvailable,
+                VoiceAvailable: voice.InputAvailable,
+                Voice: voice,
                 Pid: options.Pid,
                 BuildVersion: version);
 
@@ -95,6 +97,7 @@ public sealed record DiagnosticsResponse(
     int ThreadCount,
     string ThreadStoreRoot,
     bool VoiceAvailable,
+    VoiceRuntimeStatus Voice,
     int Pid,
     string BuildVersion);
 
@@ -107,6 +110,7 @@ public sealed record DiagnosticsResponse(
 [JsonSerializable(typeof(ActivityEntry))]
 [JsonSerializable(typeof(ActivityListResponse))]
 [JsonSerializable(typeof(DiagnosticsResponse))]
+[JsonSerializable(typeof(VoiceRuntimeStatus))]
 public partial class ActivityJsonContext : JsonSerializerContext
 {
 }

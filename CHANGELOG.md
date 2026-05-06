@@ -72,6 +72,20 @@ runtime-version badge.
   (which produces `string[]`). Three latent round-trip tests had been
   red because of this.
 
+### Voice
+
+  VoiceHost `/tts` uses the new `ITtsEngine` abstraction directly and returns
+  WAV-wrapped mono 24 kHz PCM from `KokoroSharp.CPU`; the Python backend remains
+  responsible for ASR/YouTube work. Windows SAPI is no longer exposed or used as
+  an active TTS choice, and older Windows SAPI settings normalize to
+  `kokoro-sharp`. Piper is retained as an explicit legacy fallback: select
+  `Piper (legacy fallback)` in Settings, or set the TTS engine to `piper` and
+  provide the existing Piper voice model path.
+  VoiceHost now resolves the TTS engine per `/tts` request instead of only at
+  process startup, so a stale VoiceHost launched with legacy Piper arguments can
+  still honor Runtime requests for `kokoro-sharp`. Legacy `piper` settings with
+  no actual Piper model path migrate back to KokoroSharp.
+
 ### Shell
 
 - **Butler voice** on tray menu and windows ("At your service, sir",
@@ -96,6 +110,9 @@ runtime-version badge.
 - **`localrunner.ps1`** pre-builds both Shell and Runtime so the
   supervisor's `--no-build` spawn path is honest, and adds Shell to the
   kill-list.
+- **Global stop-all shortcut** now uses `Ctrl+Alt+Esc` instead of
+  Windows-reserved `Ctrl+Shift+Esc`; older saved shortcut settings are
+  normalized to the new default.
 - **Playwright global-setup** pre-builds the SPA and Release runtime so
   `wwwroot/` bundles match the embedded binary at test time.
 - **Build artifacts gitignored**: `src/Thaddeus.Runtime/wwwroot/assets/`

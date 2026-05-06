@@ -119,6 +119,19 @@ public sealed class HelperModelTimeoutTests
     }
 
     [Fact]
+    public async Task SmartIntentClassifier_HeuristicOnlyAmbiguousPrompt_ReturnsUnsureWithoutCallingLlm()
+    {
+        var llm = new CountingLlmClient();
+        var classifier = new SmartIntentClassifier(llm, allowLlmFallback: false);
+
+        var decision = await classifier.ClassifyAsync(
+            "I'm trying to plan my week and I'm not sure where to start.");
+
+        Assert.Equal(MemoryIntentDecision.Unsure, decision);
+        Assert.Equal(0, llm.CallCount);
+    }
+
+    [Fact]
     public async Task SlotExtract_Timeout_FallsBackToHeuristic_AndAudits()
     {
         var audit = new TestAuditLogger();

@@ -26,6 +26,7 @@ public sealed record VoiceSettings(
     string? PiperVoicePath,
     string? TtsVoiceId = null,
     string? TtsModelId = null,
+    string? SttModelId = null,
     string? SttLanguage = null,
     bool VoiceHostEnabled = false,
     string? VoiceHostBaseUrl = null,
@@ -33,7 +34,8 @@ public sealed record VoiceSettings(
     string? YoutubeAsrModelId = null,
     string? YoutubeLanguageHint = null,
     string? YoutubeDraftTone = null,
-    bool YoutubeKeepAudio = false);
+    bool YoutubeKeepAudio = false,
+    int VoiceHostStartupTimeoutMs = 120_000);
 
 /// <summary>Audio capture and playback controls backed by the current runtime.</summary>
 public sealed record AudioSettings(
@@ -188,10 +190,11 @@ public sealed record SettingsDocument(
             ReusePrimaryForGatekeeperOnSharedEndpoint: true),
         Voice: new VoiceSettings(
             SttProvider: "whisper-cpp",
-            TtsProvider: "piper",
+            TtsProvider: "kokoro-sharp",
             PiperVoicePath: null,
-            TtsVoiceId: "en_US-john-medium",
+            TtsVoiceId: "bm_lewis",
             TtsModelId: null,
+            SttModelId: "base",
             SttLanguage: "en",
             VoiceHostEnabled: false,
             VoiceHostBaseUrl: "http://127.0.0.1:17845",
@@ -199,15 +202,16 @@ public sealed record SettingsDocument(
             YoutubeAsrModelId: "base",
             YoutubeLanguageHint: "en-us",
             YoutubeDraftTone: "professional",
-            YoutubeKeepAudio: false),
+            YoutubeKeepAudio: false,
+            VoiceHostStartupTimeoutMs: 120_000),
         Audio: new AudioSettings(
             TtsEnabled: true,
             InputGain: 1.0,
             InputDeviceName: null,
             OutputDeviceName: null),
         Shortcuts: new ShortcutSettings(
-            PushToTalk: "Ctrl+Shift+Space",
-            StopAll: "Ctrl+Shift+Esc"),
+            PushToTalk: "Ctrl+Alt+M",
+            StopAll: "Ctrl+Alt+Esc"),
         Privacy: new PrivacySettings(
             TelemetryEnabled: false,
             AllowScreenCapture: false,

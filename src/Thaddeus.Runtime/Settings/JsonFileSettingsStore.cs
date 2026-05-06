@@ -124,6 +124,7 @@ public sealed class JsonFileSettingsStore : ISettingsStore
         var permissions = document.Permissions ?? defaults.Permissions!;
         var files = document.Files ?? defaults.Files!;
         var hasLegacyMissingAdvancedLlmFields = llm.MaxTokens <= 0 || llm.ContextWindowTokens <= 0;
+        var ttsProvider = NormalizeTtsProvider(voice.TtsProvider, defaults.Voice.TtsProvider, voice.PiperVoicePath);
         return document with
         {
             Llm = llm with
@@ -142,9 +143,12 @@ public sealed class JsonFileSettingsStore : ISettingsStore
                 SttProvider = string.IsNullOrWhiteSpace(voice.SttProvider)
                     ? defaults.Voice.SttProvider
                     : voice.SttProvider,
-                TtsProvider = string.IsNullOrWhiteSpace(voice.TtsProvider)
-                    ? defaults.Voice.TtsProvider
-                    : voice.TtsProvider,
+                TtsProvider = ttsProvider,
+                TtsVoiceId = NormalizeTtsVoiceId(ttsProvider, voice.TtsVoiceId, defaults.Voice.TtsVoiceId),
+                SttModelId = NormalizeSttModelId(voice.SttModelId, defaults.Voice.SttModelId),
+                VoiceHostStartupTimeoutMs = voice.VoiceHostStartupTimeoutMs is >= 30_000 and <= 300_000
+                    ? voice.VoiceHostStartupTimeoutMs
+                    : defaults.Voice.VoiceHostStartupTimeoutMs,
             },
             Audio = audio with
             {
@@ -152,12 +156,8 @@ public sealed class JsonFileSettingsStore : ISettingsStore
             },
             Shortcuts = shortcuts with
             {
-                PushToTalk = string.IsNullOrWhiteSpace(shortcuts.PushToTalk)
-                    ? defaults.Shortcuts.PushToTalk
-                    : shortcuts.PushToTalk,
-                StopAll = string.IsNullOrWhiteSpace(shortcuts.StopAll)
-                    ? defaults.Shortcuts.StopAll
-                    : shortcuts.StopAll,
+                PushToTalk = NormalizePushToTalkShortcut(shortcuts.PushToTalk, defaults.Shortcuts.PushToTalk),
+                StopAll = NormalizeStopAllShortcut(shortcuts.StopAll, defaults.Shortcuts.StopAll),
             },
             Privacy = privacy,
             Flags = flags,
@@ -228,6 +228,64 @@ public sealed class JsonFileSettingsStore : ISettingsStore
     {
         var v = (value ?? "").Trim().ToLowerInvariant();
         return v is "off" or "ask" or "always" ? v : fallback;
+    }
+
+    private static string NormalizeTtsProvider(string? value, string fallback, string? piperVoicePath)
+    {
+        var provider = (value ?? "").Trim().ToLowerInvariant();
+        return provider switch
+        {
+            "" => fallback,
+            "kokoro" => "kokoro-sharp",
+            "kokoro-sharp" => "kokoro-sharp",
+            "kokorosharp" => "kokoro-sharp",
+            "piper" => string.IsNullOrWhiteSpace(piperVoicePath) ? fallback : "piper",
+            "stub" or "disabled" or "none" => "stub",
+            "windows" or "sapi" or "windows-sapi" => "kokoro-sharp",
+            _ => fallback,
+        };
+    }
+
+    private static string? NormalizeTtsVoiceId(string provider, string? value, string? fallback)
+    {
+        var voiceId = string.IsNullOrWhiteSpace(value) ? "" : value.Trim();
+        if (string.Equals(provider, "kokoro-sharp", StringComparison.OrdinalIgnoreCase))
+            return string.IsNullOrWhiteSpace(voiceId) || voiceId.Contains('-') || !voiceId.Contains('_')
+                ? fallback
+                : voiceId;
+
+        if (string.Equals(provider, "piper", StringComparison.OrdinalIgnoreCase))
+            return string.IsNullOrWhiteSpace(voiceId) || !voiceId.Contains('-')
+                ? "en_US-john-medium"
+                : voiceId;
+
+        return string.IsNullOrWhiteSpace(voiceId) ? fallback : voiceId;
+    }
+
+    private static string? NormalizeSttModelId(string? value, string? fallback)
+    {
+        var modelId = string.IsNullOrWhiteSpace(value) ? "" : value.Trim();
+        if (string.IsNullOrWhiteSpace(modelId)) return fallback;
+        if (modelId.Contains("qwen", StringComparison.OrdinalIgnoreCase)) return fallback;
+        return modelId;
+    }
+
+    private static string NormalizeStopAllShortcut(string? value, string fallback)
+    {
+        var shortcut = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        return shortcut.Equals("Ctrl+Shift+Esc", StringComparison.OrdinalIgnoreCase)
+            || shortcut.Equals("Ctrl+Shift+Escape", StringComparison.OrdinalIgnoreCase)
+            ? fallback
+            : shortcut;
+    }
+
+    private static string NormalizePushToTalkShortcut(string? value, string fallback)
+    {
+        var shortcut = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        return shortcut.Equals("Ctrl+Shift+Space", StringComparison.OrdinalIgnoreCase)
+            || shortcut.Equals("Ctrl+Alt+Space", StringComparison.OrdinalIgnoreCase)
+            ? fallback
+            : shortcut;
     }
 
     private static string NormalizeOverride(string? value)

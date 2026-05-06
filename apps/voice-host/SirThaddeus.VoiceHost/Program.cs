@@ -23,15 +23,15 @@ builder.Services.AddHttpClient<IAsrBackend, AsrProxyBackend>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(90);
 });
-builder.Services.AddHttpClient<ITtsBackend, TtsProxyBackend>(client =>
-{
-    client.Timeout = TimeSpan.FromMinutes(2);
-});
+builder.Services.AddThaddeusTts(builder.Configuration, options);
 builder.Services.AddHttpClient<IYouTubeJobsBackend, YouTubeJobsProxyBackend>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(60);
 });
 builder.Services.AddSingleton<VoiceBackendSupervisor>();
+// Pre-warm STT + TTS once the backend reports ready so the user's first
+// push-to-talk doesn't pay the multi-second cold-start cost.
+builder.Services.AddHostedService<BackendWarmer>();
 
 var app = builder.Build();
 var backendSupervisor = app.Services.GetRequiredService<VoiceBackendSupervisor>();
@@ -249,23 +249,10 @@ app.MapPost("/tts", async (
     VoiceHostTtsRequest payload,
     HttpContext httpContext,
     ITtsBackend ttsBackend,
-    VoiceBackendSupervisor backendSupervisor,
     CancellationToken cancellationToken) =>
 {
     var requestId = ResolveRequestId(payload.RequestId, httpContext.Request.Headers["X-Request-Id"].ToString());
     httpContext.Response.Headers["X-Request-Id"] = requestId;
-
-    var ensure = await backendSupervisor.EnsureTtsReadyAsync(cancellationToken);
-    if (!ensure.Success)
-    {
-        return Results.Json(new
-        {
-            error = "Voice backend unavailable.",
-            errorCode = ensure.ErrorCode,
-            message = ensure.Message,
-            requestId
-        }, statusCode: StatusCodes.Status503ServiceUnavailable);
-    }
 
     if (string.IsNullOrWhiteSpace(payload.Text))
         return Results.BadRequest(new
@@ -284,8 +271,6 @@ app.MapPost("/tts", async (
         Format = string.IsNullOrWhiteSpace(payload.Format) ? "pcm_s16le" : payload.Format.Trim(),
         SampleRate = payload.SampleRate <= 0 ? 24_000 : payload.SampleRate
     };
-
-    // Removed the VoiceId check for Kokoro to allow default fallback handled in server.py
 
     await ttsBackend.StreamSynthesisAsync(normalizedPayload, httpContext.Response, cancellationToken);
     return Results.Empty;

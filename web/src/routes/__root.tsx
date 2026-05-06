@@ -8,6 +8,7 @@ import {
   Gauge,
   History,
   Home,
+  Library,
   MessageSquareText,
   type LucideIcon,
 } from 'lucide-react';
@@ -15,6 +16,7 @@ import { useRuntimeStore } from '../stores/runtimeStore';
 import { usePermissionsStore } from '../stores/permissionsStore';
 import { useToolActivityStore } from '../stores/toolActivityStore';
 import { RuntimeStateBadge } from '../components/RuntimeStateBadge';
+import { KillAppButton } from '../components/KillAppButton';
 import { PermissionModal } from '../components/PermissionModal';
 import { readRuntimeMetadata } from '../lib/runtime';
 
@@ -31,6 +33,7 @@ interface NavEntry {
 const primaryNav: ReadonlyArray<NavEntry> = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/chat', label: 'Chat', icon: MessageSquareText },
+  { to: '/wiki', label: 'Wiki', icon: Library },
   { to: '/history', label: 'History', icon: History },
   { to: '/activity', label: 'Activity', icon: Activity },
 ];
@@ -112,6 +115,7 @@ function RootLayout() {
           </nav>
           <div className="hidden md:block" />
           <div className="flex items-center gap-3 text-xs text-ink-muted">
+            <KillAppButton />
             <RuntimeStateBadge />
           </div>
         </header>

@@ -467,6 +467,196 @@ public static class ToolManifest
             Description = "Appends an entry to today's journal markdown file in a configured knowledge-store root.",
             Limits      = "Configured roots only. Writes to journal/yyyy-MM-dd.md."
         },
+        new()
+        {
+            Name        = "wiki_roots_list",
+            Aliases     = ["WikiRootsList"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Lists local Wiki Canvas roots with ids, names, paths, and timestamps.",
+            Limits      = "Bounded to configured local wiki library roots."
+        },
+        new()
+        {
+            Name        = "wiki_root_create",
+            Aliases     = ["WikiRootCreate"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Creates a local Wiki Canvas root inside the configured wiki library directory.",
+            Limits      = "Root path must stay inside the wiki library directory."
+        },
+        new()
+        {
+            Name        = "wiki_root_rename",
+            Aliases     = ["WikiRootRename"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Renames a local Wiki Canvas root without moving its directory.",
+            Limits      = "Root id must exist in the local wiki registry."
+        },
+        new()
+        {
+            Name        = "wiki_root_remove",
+            Aliases     = ["WikiRootRemove"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Removes a local Wiki Canvas root from the registry without deleting files from disk.",
+            Limits      = "Root id must exist in the local wiki registry. Files are preserved on disk."
+        },
+        new()
+        {
+            Name        = "wiki_tree_get",
+            Aliases     = ["WikiTreeGet"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Gets folders and page metadata for one Wiki Canvas root.",
+            Limits      = "Returns metadata only. Folder/page list clamped to 500 each."
+        },
+        new()
+        {
+            Name        = "wiki_folder_create",
+            Aliases     = ["WikiFolderCreate"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Creates a folder inside a Wiki Canvas root.",
+            Limits      = "Folder must belong to the requested wiki root."
+        },
+        new()
+        {
+            Name        = "wiki_folder_rename",
+            Aliases     = ["WikiFolderRename"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Renames a Wiki Canvas folder and updates descendant page paths.",
+            Limits      = "Folder must belong to the requested wiki root."
+        },
+        new()
+        {
+            Name        = "wiki_folder_move",
+            Aliases     = ["WikiFolderMove"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Moves a Wiki Canvas folder to another parent folder or to the root.",
+            Limits      = "Rejects cycles and cross-root parent folders."
+        },
+        new()
+        {
+            Name        = "wiki_folder_delete",
+            Aliases     = ["WikiFolderDelete"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Deletes a Wiki Canvas folder and all descendant folders, pages, files, and revisions.",
+            Limits      = "Folder must belong to the requested wiki root. Destructive."
+        },
+        new()
+        {
+            Name        = "wiki_page_create",
+            Aliases     = ["WikiPageCreate"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Creates a Markdown page in a Wiki Canvas root or folder.",
+            Limits      = "Markdown is persisted as the canonical page body."
+        },
+        new()
+        {
+            Name        = "wiki_page_read",
+            Aliases     = ["WikiPageRead"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Reads one Wiki Canvas page by id, including bounded Markdown body and current version.",
+            Limits      = "Default 24000 chars; max 60000 chars."
+        },
+        new()
+        {
+            Name        = "wiki_page_update",
+            Aliases     = ["WikiPageUpdate"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Replaces a Wiki Canvas page Markdown body using expected-version concurrency.",
+            Limits      = "Requires current version from wiki_page_read. Creates a revision."
+        },
+        new()
+        {
+            Name        = "wiki_page_rename",
+            Aliases     = ["WikiPageRename"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Renames a Wiki Canvas page using expected-version concurrency.",
+            Limits      = "Requires current version from wiki_page_read. Creates a revision."
+        },
+        new()
+        {
+            Name        = "wiki_page_move",
+            Aliases     = ["WikiPageMove"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Moves a Wiki Canvas page to another folder or to the root.",
+            Limits      = "Requires current version from wiki_page_read. Rejects cross-root folders. Creates a revision."
+        },
+        new()
+        {
+            Name        = "wiki_page_delete",
+            Aliases     = ["WikiPageDelete"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Deletes a Wiki Canvas page, Markdown file, and revisions.",
+            Limits      = "Optional expected version prevents deleting stale content. Destructive."
+        },
+        new()
+        {
+            Name        = "wiki_page_patch_selection",
+            Aliases     = ["WikiPagePatchSelection"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Replaces exactly one selected text passage in a Wiki Canvas page.",
+            Limits      = "Requires current version and exact selected text match. Creates a revision."
+        },
+        new()
+        {
+            Name        = "wiki_page_revisions_list",
+            Aliases     = ["WikiPageRevisionsList"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Lists bounded Wiki Canvas page revisions for inspection before restore.",
+            Limits      = "Default 20 revisions; max 100. Revision Markdown bodies are bounded."
+        },
+        new()
+        {
+            Name        = "wiki_page_revision_restore",
+            Aliases     = ["WikiPageRevisionRestore"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Restores a Wiki Canvas page revision using expected-version concurrency.",
+            Limits      = "Requires current version from wiki_page_read. Creates a restore revision."
+        },
+        new()
+        {
+            Name        = "wiki_search",
+            Aliases     = ["WikiSearch"],
+            Category    = "file",
+            ReadWrite   = "read",
+            Permission  = "required",
+            Description = "Searches local Wiki Canvas pages by title, excerpt, or Markdown body.",
+            Limits      = "Optional root filter. Max 50 results."
+        },
 
         // ── System Tools ─────────────────────────────────────────────
         new()

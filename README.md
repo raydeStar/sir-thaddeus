@@ -79,6 +79,7 @@ Sir Thaddeus does not phone home. Your prompts go to your local model server. Yo
 ### Voice and Interface
 
 - **Push-to-talk voice input** with release-to-send behavior *(Windows only)*
+- **KokoroSharp text-to-speech** is the default spoken-response engine, with Piper kept as an explicit legacy fallback
 - **Command palette** for keyboard-first workflows
 - **Global STOP kill switch** to halt active execution
 - **Tray-first Windows experience** with local desktop controls
@@ -238,9 +239,11 @@ flowchart LR
   end
 
   subgraph voice [Layer 5: Voice - apps/voice-host + voice-backend]
-    VoiceHost[VoiceHost Proxy]
-    VoiceBackend[Voice Backend - Python]
+    VoiceHost[VoiceHost]
+    TtsEngine[ITtsEngine - KokoroSharp default]
+    VoiceBackend[Voice Backend - Python ASR]
     VoiceBackend --> VoiceHost
+    TtsEngine --> VoiceHost
   end
 
   PTT -->|audio buffer| VoiceHost
@@ -278,7 +281,13 @@ flowchart LR
 | Layer 2: Interface | `src/Thaddeus.Runtime`, `web`, `apps/headless-runtime` | Hybrid web runtime + legacy terminal runtime | Loop, Voice |
 | Layer 3: Model | `packages/llm-client` | OpenAI-style model calls and embeddings | LM Studio, Loop |
 | Layer 4: Tools | `apps/mcp-server`, `packages/memory`, `packages/memory-sqlite` | MCP tools plus local memory retrieval/storage | Loop |
-| Layer 5: Voice | `apps/voice-host`, `apps/voice-backend` | Local ASR and TTS transport/runtime | Interface, Loop |
+| Layer 5: Voice | `apps/voice-host`, `apps/voice-backend`, `src/Thaddeus.Tts.*` | Local ASR plus swappable TTS engines | Interface, Loop |
+
+### TTS engine selection
+
+VoiceHost serves `/tts` through the stable `ITtsEngine` abstraction. The default engine is `kokoro-sharp` via the `KokoroSharp.CPU` NuGet package; it returns mono 24 kHz PCM wrapped as WAV for the existing browser playback path. Settings normalize blank, `kokoro`, and older Windows SAPI values to `kokoro-sharp`, and the settings UI no longer exposes Windows SAPI as an active engine.
+
+Piper remains in the codebase as a legacy fallback. To roll back for a machine that needs it, choose `Piper (legacy fallback)` in Settings or set the voice setting/VoiceHost argument to `piper` and provide the Piper voice model path as before.
 
 </details>
 

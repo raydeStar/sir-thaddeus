@@ -112,6 +112,54 @@
     @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3.5 py-1.5 text-sm font-medium text-ink transition hover:bg-accent-soft hover:border-line-strong disabled:opacity-50;
   }
 
+  .wiki-icon-button {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line bg-canvas-raised text-ink-muted transition hover:border-line-strong hover:bg-accent-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .wiki-command-button {
+    @apply inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-canvas-raised px-3 text-sm font-medium text-ink transition hover:border-line-strong hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .chat-composer-icon-button {
+    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-canvas text-ink-muted transition-all duration-200 hover:border-line-strong hover:bg-accent-soft hover:text-ink;
+  }
+
+  /* Shared composer shell. A confident rounded surface that lifts on focus
+     with a soft accent halo + warm drop shadow. Used by both the home
+     hero composer and the in-thread composer. */
+  .composer-shell {
+    @apply relative rounded-[26px] border border-line bg-canvas-raised p-2.5 transition-all duration-200;
+    box-shadow:
+      0 1px 0 0 rgb(255 255 255 / 0.03) inset,
+      0 6px 22px -14px rgb(0 0 0 / 0.18);
+  }
+  .composer-shell:focus-within {
+    border-color: var(--color-accent-ring);
+    box-shadow:
+      0 1px 0 0 rgb(255 255 255 / 0.04) inset,
+      0 0 0 4px var(--color-accent-soft),
+      0 10px 30px -14px rgb(217 119 87 / 0.28);
+  }
+
+  /* Confident circular send button with a subtle gradient + lift on hover.
+     Disabled state collapses back to a flat muted swatch. */
+  .composer-send {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-all duration-200;
+    background-image: linear-gradient(135deg, var(--color-accent) 0%, #B85A3C 100%);
+  }
+  .composer-send:hover:not(:disabled) {
+    box-shadow: 0 6px 16px -6px rgb(217 119 87 / 0.55);
+    filter: brightness(1.04);
+  }
+  .composer-send:active:not(:disabled) {
+    filter: brightness(0.96);
+  }
+  .composer-send:disabled {
+    @apply cursor-not-allowed text-ink-subtle shadow-none;
+    background-image: none;
+    background-color: var(--color-line-strong);
+  }
+
   /* Low-chrome container. No shadow — just a barely-there bg wash + thin hairline.
      Intentionally minimal so pages feel composed of content, not boxes. */
   .surface {
@@ -125,7 +173,7 @@
 
   /* Base text input styling, reused everywhere. */
   .field-input {
-    @apply block w-full rounded-xl border border-line bg-canvas-raised px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-subtle focus:border-accent-ring focus:outline-none focus:ring-2 focus:ring-accent/20;
+    @apply block w-full rounded-xl border border-line bg-canvas-raised px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-subtle focus:border-accent-ring focus:outline-none focus:ring-2 focus:ring-accent-ring;
   }
 
   /* Prose variant for assistant chat messages. Pulls tokens from CSS vars
@@ -191,5 +239,36 @@
   .prose-thaddeus th {
     @apply font-semibold text-ink;
     background: var(--color-canvas-sunken);
+  }
+
+  .wiki-editor .ProseMirror {
+    min-height: 100%;
+    outline: none;
+  }
+
+  .wiki-editor .ProseMirror p.is-editor-empty:first-child::before {
+    color: var(--color-ink-subtle);
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
+  /*
+   * TipTap adds `.ProseMirror-hideselection` when the editor blurs, which
+   * removes the native ::selection paint. The result was that the moment the
+   * user clicked into the page-chat textarea, their highlighted passage
+   * appeared unselected — so they had no visual confirmation of what was
+   * about to be rewritten. Force the highlight to stay painted with the
+   * accent colour so the selection is always visible while the rewrite is
+   * being composed.
+   */
+  .wiki-editor .ProseMirror-hideselection ::selection,
+  .wiki-editor .ProseMirror-hideselection *::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
+  .wiki-editor .ProseMirror-hideselection {
+    caret-color: transparent;
   }
 }

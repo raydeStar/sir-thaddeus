@@ -17,6 +17,14 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
     private readonly string _lockFilePath;
     private Process? _process;
 
+    /// <summary>
+    /// Raised when the supervised runtime process exits unexpectedly (or after
+    /// a graceful <c>/api/runtime/stop</c>). Subscribers should treat this as
+    /// the cue to tear the shell down — without it the workspace window would
+    /// stay open pointing at a dead backend.
+    /// </summary>
+    public event EventHandler? RuntimeExited;
+
     /// <summary>Wires the supervisor.</summary>
     public RuntimeProcessSupervisor(ILogger<RuntimeProcessSupervisor> logger)
     {
@@ -30,16 +38,22 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         if (TryAttachExisting(out var existing))
         {
             _logger.LogInformation("runtime.attached pid={Pid} port={Port}", existing!.Pid, existing.Port);
+            // We didn't spawn this runtime, but we still need to know when it
+            // exits — otherwise the kill-app button (which calls
+            // /api/runtime/stop on the attached runtime) would tear the
+            // backend down without ever notifying the shell.
+            TryWatchAttachedProcess(existing.Pid);
             return existing;
         }
 
         // Stale lock file; the existing PID is gone or unresponsive.
         RuntimeLockFileReader.TryDelete(_lockFilePath);
 
-        var runtimePath = ResolveRuntimeExecutablePath();
+        var runtimePath = ResolveRuntimeLaunchInfo();
         var psi = new ProcessStartInfo
         {
             FileName = runtimePath.command,
+            WorkingDirectory = runtimePath.workingDirectory,
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = false,
@@ -48,9 +62,30 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         foreach (var arg in runtimePath.args) psi.ArgumentList.Add(arg);
         psi.ArgumentList.Add($"--parent-pid={Environment.ProcessId}");
 
-        _logger.LogInformation("runtime.spawning command={Cmd} args={Args}", psi.FileName, string.Join(' ', psi.ArgumentList));
+        _logger.LogInformation(
+            "runtime.spawning command={Cmd} workingDir={WorkingDirectory} args={Args}",
+            psi.FileName,
+            psi.WorkingDirectory,
+            string.Join(' ', psi.ArgumentList));
         _process = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to spawn runtime process.");
+
+        // Surface child-process exit so the shell can tear itself down when the
+        // runtime is killed (web "kill app" button, /api/runtime/stop, crash).
+        try
+        {
+            _process.EnableRaisingEvents = true;
+            _process.Exited += (_, _) =>
+            {
+                _logger.LogInformation("runtime.process_exited pid={Pid}", _process?.Id);
+                try { RuntimeExited?.Invoke(this, EventArgs.Empty); }
+                catch (Exception ex) { _logger.LogWarning(ex, "runtime.exited_handler_failed"); }
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "runtime.exited_subscribe_failed");
+        }
 
         return await WaitForLockFileAsync(ct).ConfigureAwait(false);
     }
@@ -72,6 +107,28 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         }
     }
 
+    private void TryWatchAttachedProcess(int pid)
+    {
+        try
+        {
+            // We hold our own Process handle (not via `using`) so it stays
+            // open for the lifetime of the supervisor and the Exited event
+            // can still fire. Disposed in DisposeAsync().
+            _process = Process.GetProcessById(pid);
+            _process.EnableRaisingEvents = true;
+            _process.Exited += (_, _) =>
+            {
+                _logger.LogInformation("runtime.process_exited pid={Pid} (attached)", pid);
+                try { RuntimeExited?.Invoke(this, EventArgs.Empty); }
+                catch (Exception ex) { _logger.LogWarning(ex, "runtime.exited_handler_failed"); }
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "runtime.attach_watch_failed pid={Pid}", pid);
+        }
+    }
+
     private async Task<RuntimeLockFile> WaitForLockFileAsync(CancellationToken ct)
     {
         var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(15);
@@ -89,7 +146,7 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         throw new TimeoutException("Runtime did not become ready within 15 seconds.");
     }
 
-    private static (string command, IReadOnlyList<string> args) ResolveRuntimeExecutablePath()
+    private static (string command, string workingDirectory, IReadOnlyList<string> args) ResolveRuntimeLaunchInfo()
     {
         // The shell publishes alongside the runtime in the install layout. During
         // development we point at the runtime project directly via `dotnet run`.
@@ -100,7 +157,7 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         var prod = Path.Combine(shellDir, "Thaddeus.Runtime" + ext);
         if (File.Exists(prod))
         {
-            return (prod, Array.Empty<string>());
+            return (prod, shellDir, Array.Empty<string>());
         }
 
         // Dev layout: walk up to the repo root and `dotnet run` the runtime project.
@@ -108,7 +165,8 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         // so we match that here with --no-build for fast startup.
         var repoRoot = FindRepoRoot(shellDir);
         var runtimeProj = Path.Combine(repoRoot, "src", "Thaddeus.Runtime", "Thaddeus.Runtime.csproj");
-        return ("dotnet", new[] { "run", "--project", runtimeProj, "--no-build" });
+        var runtimeDir = Path.GetDirectoryName(runtimeProj)!;
+        return ("dotnet", runtimeDir, new[] { "run", "--project", runtimeProj, "--no-build" });
     }
 
     private static string FindRepoRoot(string startDir)

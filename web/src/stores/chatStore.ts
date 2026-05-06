@@ -11,6 +11,7 @@ import type {
 } from '@thaddeus/shared-types';
 import { ChatTurnEventTypes } from '@thaddeus/shared-types';
 import * as api from '../lib/chatApi';
+import type { WikiChatContextInput } from '../lib/chatApi';
 import { buildRuntimeWebSocketUrl, readRuntimeMetadata } from '../lib/runtime';
 
 /**
@@ -39,7 +40,8 @@ interface ChatStoreState {
   loadThreads: () => Promise<void>;
   openThread: (id: string) => Promise<void>;
   newThread: (title?: string) => Promise<ChatThread>;
-  send: (text: string) => Promise<void>;
+  send: (text: string, wikiContext?: WikiChatContextInput) => Promise<void>;
+  retryLatestResponse: () => Promise<void>;
   destroy: () => void;
   ingestEvent: (evt: RuntimeEvent<unknown>) => void;
 }
@@ -125,13 +127,53 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }
   },
 
-  send: async (text: string) => {
+  send: async (text: string, wikiContext?: WikiChatContextInput) => {
     const id = get().activeThreadId;
-    if (!id || !text.trim()) return;
+    const trimmed = text.trim();
+    if (!id || !trimmed) return;
+    const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const createdAt = new Date().toISOString();
+    const optimisticMessage: ChatMessage = {
+      id: optimisticId,
+      role: 'user',
+      text: trimmed,
+      createdAt,
+    };
+
+    set((s) => {
+      const thread = s.activeThread;
+      return {
+        sending: true,
+        error: null,
+        activeThread: thread && s.activeThreadId === id
+          ? {
+              ...thread,
+              messages: [...thread.messages, optimisticMessage],
+              updatedAt: createdAt,
+            }
+          : thread,
+      };
+    });
+    ensureSocket((evt) => get().ingestEvent(evt));
+    try {
+      const updated = await api.appendMessage(id, trimmed, wikiContext);
+      set({ activeThread: updated, sending: false });
+    } catch (e) {
+      set((s) => ({
+        error: (e as Error).message,
+        sending: false,
+        activeThread: removeOptimisticMessage(s.activeThread, optimisticId),
+      }));
+    }
+  },
+
+  retryLatestResponse: async () => {
+    const id = get().activeThreadId;
+    if (!id || get().sending || get().activeTurn) return;
     set({ sending: true, error: null });
     ensureSocket((evt) => get().ingestEvent(evt));
     try {
-      const updated = await api.appendMessage(id, text.trim());
+      const updated = await api.retryLatestResponse(id);
       set({ activeThread: updated, sending: false });
     } catch (e) {
       set({ error: (e as Error).message, sending: false });
@@ -170,10 +212,13 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           text: p.text,
           createdAt: p.createdAt,
         };
+        const withoutMatchingOptimistic = thread.messages.filter((m) =>
+          !(m.id.startsWith('optimistic-') && m.role === 'user' && m.text === p.text),
+        );
         return {
           activeThread: {
             ...thread,
-            messages: [...thread.messages, appended],
+            messages: [...withoutMatchingOptimistic, appended],
             updatedAt: p.createdAt,
           },
         };
@@ -224,3 +269,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }
   },
 }));
+
+function removeOptimisticMessage(thread: ChatThread | null, messageId: string): ChatThread | null {
+  if (!thread) return thread;
+  const messages = thread.messages.filter((m) => m.id !== messageId);
+  return messages.length === thread.messages.length ? thread : { ...thread, messages };
+}

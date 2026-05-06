@@ -5,6 +5,13 @@ import type {
   ThreadSummary,
 } from '@thaddeus/shared-types';
 
+export type WikiChatContextInput =
+  | { mode: 'none' }
+  | { mode: 'all' }
+  | { mode: 'root'; rootId: string }
+  | { mode: 'folder'; rootId: string; folderId: string }
+  | { mode: 'page'; pageId: string };
+
 function token(): string {
   return readRuntimeMetadata().token;
 }
@@ -31,13 +38,25 @@ export async function createThread(title?: string): Promise<ChatThread> {
   return asJson<ChatThread>(res);
 }
 
-export async function appendMessage(threadId: string, text: string): Promise<ChatThread> {
+export async function appendMessage(
+  threadId: string,
+  text: string,
+  wikiContext?: WikiChatContextInput,
+): Promise<ChatThread> {
   const res = await runtimeFetch(token(), `/api/threads/${encodeURIComponent(threadId)}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, wikiContext }),
   });
   const body = await asJson<{ message: unknown; thread: ChatThread }>(res);
+  return body.thread;
+}
+
+export async function retryLatestResponse(threadId: string): Promise<ChatThread> {
+  const res = await runtimeFetch(token(), `/api/threads/${encodeURIComponent(threadId)}/messages/retry`, {
+    method: 'POST',
+  });
+  const body = await asJson<{ thread: ChatThread }>(res);
   return body.thread;
 }
 

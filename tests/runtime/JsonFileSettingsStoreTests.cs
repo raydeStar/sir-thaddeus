@@ -58,7 +58,7 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
 
         var updated = SettingsDocument.Defaults() with
         {
-            Shortcuts = new ShortcutSettings("Ctrl+Alt+Space", "Ctrl+Alt+Esc"),
+            Shortcuts = new ShortcutSettings("Ctrl+Alt+M", "Ctrl+Alt+Esc"),
         };
         await store.ReplaceAsync(updated, CancellationToken.None);
 
@@ -117,6 +117,10 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
                 Assert.Equal(SettingsDocument.Defaults().Llm.MaxTokens, doc.Llm.MaxTokens);
                 Assert.Equal(SettingsDocument.Defaults().Llm.ContextWindowTokens, doc.Llm.ContextWindowTokens);
                 Assert.Equal(SettingsDocument.Defaults().Llm.Temperature, doc.Llm.Temperature);
+                Assert.Equal("kokoro-sharp", doc.Voice.TtsProvider);
+                Assert.Equal("bm_lewis", doc.Voice.TtsVoiceId);
+                Assert.Equal("base", doc.Voice.SttModelId);
+                Assert.Equal(120_000, doc.Voice.VoiceHostStartupTimeoutMs);
                 Assert.Equal(SettingsDocument.Defaults().Audio.TtsEnabled, doc.Audio.TtsEnabled);
                 Assert.Equal(SettingsDocument.Defaults().Audio.InputGain, doc.Audio.InputGain);
         }
@@ -165,6 +169,98 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
         var doc = await store.GetAsync(CancellationToken.None);
 
         Assert.Equal(SettingsDocument.Defaults().Audio.InputGain, doc.Audio.InputGain);
+    }
+
+    [Fact]
+    public async Task GetAsync_normalizes_windows_tts_to_kokoro_sharp()
+    {
+        var path = Path.Combine(_tempDir, "runtime-settings.json");
+        var windowsTts = """
+        {
+            "llm": {
+                "provider": "lmstudio",
+                "modelId": "auto",
+                "baseUrl": "http://127.0.0.1:1234/v1",
+                "apiKey": null,
+                "maxTokens": 2048,
+                "contextWindowTokens": 8192,
+                "temperature": 0.7
+            },
+            "voice": {
+                "sttProvider": "whisper-cpp",
+                "ttsProvider": "windows",
+                "ttsVoiceId": "Microsoft David",
+                "piperVoicePath": null
+            },
+            "audio": {
+                "ttsEnabled": true,
+                "inputGain": 1
+            },
+            "shortcuts": {
+                "pushToTalk": "Ctrl+Shift+Space",
+                "stopAll": "Ctrl+Shift+Esc"
+            },
+            "privacy": {
+                "telemetryEnabled": false,
+                "allowScreenCapture": false,
+                "localOnly": true
+            },
+            "flags": {
+                "onboardingCompleted": false
+            }
+        }
+        """;
+        await File.WriteAllTextAsync(path, windowsTts);
+        var store = new JsonFileSettingsStore(path, NullLogger<JsonFileSettingsStore>.Instance);
+
+        var doc = await store.GetAsync(CancellationToken.None);
+
+        Assert.Equal("kokoro-sharp", doc.Voice.TtsProvider);
+        Assert.Equal("bm_lewis", doc.Voice.TtsVoiceId);
+    }
+
+    [Fact]
+    public async Task GetAsync_normalizes_reserved_shortcuts_to_defaults()
+    {
+        var path = Path.Combine(_tempDir, "runtime-settings.json");
+        var reservedShortcut = """
+        {
+            "llm": {
+                "provider": "lmstudio",
+                "modelId": "auto",
+                "baseUrl": "http://127.0.0.1:1234/v1",
+                "apiKey": null,
+                "maxTokens": 2048,
+                "contextWindowTokens": 8192,
+                "temperature": 0.7
+            },
+            "voice": {
+                "sttProvider": "whisper-cpp",
+                "ttsProvider": "kokoro-sharp",
+                "ttsVoiceId": "bm_lewis",
+                "piperVoicePath": null
+            },
+            "shortcuts": {
+                "pushToTalk": "Ctrl+Shift+Space",
+                "stopAll": "Ctrl+Shift+Esc"
+            },
+            "privacy": {
+                "telemetryEnabled": false,
+                "allowScreenCapture": false,
+                "localOnly": true
+            },
+            "flags": {
+                "onboardingCompleted": false
+            }
+        }
+        """;
+        await File.WriteAllTextAsync(path, reservedShortcut);
+        var store = new JsonFileSettingsStore(path, NullLogger<JsonFileSettingsStore>.Instance);
+
+        var doc = await store.GetAsync(CancellationToken.None);
+
+        Assert.Equal("Ctrl+Alt+M", doc.Shortcuts.PushToTalk);
+        Assert.Equal("Ctrl+Alt+Esc", doc.Shortcuts.StopAll);
     }
 
     private JsonFileSettingsStore NewStore() =>
