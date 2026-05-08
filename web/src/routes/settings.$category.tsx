@@ -1,17 +1,14 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { PageScaffold } from '../components/PageScaffold';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
+/**
+ * Legacy URL shape: settings used to support per-category routes (/settings/audio,
+ * /settings/files, etc.) but the working surface is the tabbed /settings page.
+ * Redirect any deep-link to the canonical route so old bookmarks still land
+ * somewhere useful. Using a loader-level redirect runs before render, so the
+ * stub never paints.
+ */
 export const Route = createFileRoute('/settings/$category')({
-  component: SettingsCategoryRoute,
+  beforeLoad: () => {
+    throw redirect({ to: '/settings', replace: true });
+  },
 });
-
-function SettingsCategoryRoute() {
-  const { category } = Route.useParams();
-  return (
-    <PageScaffold
-      testId="route-settings-category"
-      title={`Settings · ${category}`}
-      subtitle="Settings for this category will appear here."
-    />
-  );
-}

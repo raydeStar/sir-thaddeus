@@ -25,9 +25,32 @@
     --focus-ring: rgba(217, 119, 87, 0.45);
   }
 
+  /* Dark palette — applied when the user (or the system, in "system" mode)
+     selects dark. The `.dark` class is set on <html> by the theme module
+     in src/lib/theme.ts; the @media block keeps "system" mode working
+     before the JS hydrates and for any pre-hydration paint. */
+  :root.dark,
+  :root[data-theme='dark'] {
+    --color-canvas: #0E0E0D;
+    --color-canvas-raised: #161615;
+    --color-canvas-sunken: #090908;
+    --color-ink: #ECECE7;
+    --color-ink-muted: #9A988F;
+    --color-ink-subtle: #66645F;
+    --color-line: #242321;
+    --color-line-strong: #3A3833;
+    --color-accent: #E89069;
+    --color-accent-soft: #2A1C14;
+    --color-accent-ring: #E89069;
+    --color-danger: #E06B60;
+    --scrollbar-thumb: rgba(236, 236, 231, 0.08);
+    --scrollbar-thumb-hover: rgba(236, 236, 231, 0.18);
+    --focus-ring: rgba(232, 144, 105, 0.55);
+  }
+
   @media (prefers-color-scheme: dark) {
-    :root {
-      /* Dark palette — near-black, slightly warm. Terracotta brightened for contrast. */
+    :root[data-theme='system']:not(.dark),
+    :root:not([data-theme]):not(.dark) {
       --color-canvas: #0E0E0D;
       --color-canvas-raised: #161615;
       --color-canvas-sunken: #090908;
