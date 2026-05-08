@@ -227,11 +227,6 @@ internal static partial class OfflineWebReasoningResponder
         var greeting = string.IsNullOrEmpty(name) ? "" : $"{name}, ";
         var shouldMentionOutage = RequiresLiveWebVerification(userMessage);
 
-        if (LooksLikeLatestVersionQuestion(userMessage, out var subject, out var yearHint))
-        {
-            return BuildLatestVersionFallback(userMessage, greeting, subject, yearHint);
-        }
-
         if (LooksLikeMediaInstallmentPlotRequest(userMessage, out var installmentLabel))
         {
             return $"{greeting}I could not verify that {installmentLabel} has an official released episode to summarize from the available evidence, so I should not invent a plot. If you want, I can summarize the actual ending or cancellation status instead.";
@@ -279,22 +274,6 @@ internal static partial class OfflineWebReasoningResponder
                         "If you want, I can still narrow the question and give the strongest best-effort answer I can.";
     }
 
-    internal static string? TryBuildKnownLatestVersionAnswer(string userMessage, string memoryPackText = "")
-    {
-        if (!LooksLikeLatestVersionQuestion(userMessage, out var subject, out var yearHint))
-            return null;
-
-        if (!string.Equals(subject, ".NET", StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(yearHint, "2025", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        var name = ExtractPreferredName(memoryPackText);
-        var greeting = string.IsNullOrEmpty(name) ? "" : $"{name}, ";
-        return BuildLatestVersionFallback(userMessage, greeting, subject, yearHint);
-    }
-
             private static bool ShouldIncludeOutageFraming(string userMessage, string failureReason)
             {
                 if (string.IsNullOrWhiteSpace(failureReason))
@@ -324,87 +303,6 @@ internal static partial class OfflineWebReasoningResponder
                     Intents.LookupSearch,
                     StringComparison.OrdinalIgnoreCase);
             }
-
-    private static bool LooksLikeLatestVersionQuestion(string userMessage, out string subject, out string yearHint)
-    {
-        subject = "";
-        yearHint = "";
-        if (string.IsNullOrWhiteSpace(userMessage))
-            return false;
-
-        var lower = userMessage.ToLowerInvariant();
-        if (!lower.Contains("latest", StringComparison.Ordinal) ||
-            !lower.Contains("version", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var yearMatch = System.Text.RegularExpressions.Regex.Match(lower, @"\b(20\d{2})\b");
-        if (yearMatch.Success)
-            yearHint = yearMatch.Groups[1].Value;
-
-        if (lower.Contains("python", StringComparison.Ordinal))
-        {
-            subject = "Python";
-            return true;
-        }
-
-        if (lower.Contains("rust", StringComparison.Ordinal))
-        {
-            subject = "Rust";
-            return true;
-        }
-
-        if (lower.Contains(".net", StringComparison.Ordinal) ||
-            lower.Contains(" dotnet", StringComparison.Ordinal) ||
-            lower.Contains("dotnet", StringComparison.Ordinal))
-        {
-            subject = ".NET";
-            return true;
-        }
-
-        subject = "that software";
-        return true;
-    }
-
-    private static string BuildLatestVersionFallback(string userMessage, string greeting, string subject, string yearHint)
-    {
-        var strictTwoLine = RequiresStrictOutputFormat(userMessage);
-
-        if (string.Equals(subject, ".NET", StringComparison.OrdinalIgnoreCase))
-        {
-            if (strictTwoLine)
-                return "Answer: .NET 9 is the latest stable major release as of 2025.\nCommentary: Use the latest .NET 9.x patch SDK/runtime for current fixes and security updates.";
-
-            return $"{greeting}For .NET, the latest stable major release as of 2025 is .NET 9. " +
-                   "Use the newest .NET 9.x patch level for production stability and security.";
-        }
-
-        if (string.Equals(subject, "Python", StringComparison.OrdinalIgnoreCase))
-        {
-            if (strictTwoLine)
-                return "Answer: Python 3.12 is a stable major release; the latest patch may change over time.\nCommentary: Check python.org for the newest 3.12.x/3.13.x stable patch before pinning.";
-
-            return $"{greeting}For Python, treat the newest stable 3.x release on python.org as authoritative. " +
-                   "Use the latest patch in that stable line before pinning versions.";
-        }
-
-        if (string.Equals(subject, "Rust", StringComparison.OrdinalIgnoreCase))
-        {
-            if (strictTwoLine)
-                return "Answer: Rust stable updates frequently on a regular release cadence.\nCommentary: Check rust-lang.org for the current stable version before pinning.";
-
-            return $"{greeting}For Rust, the stable channel updates regularly on a short cadence. " +
-                   "Use rust-lang.org as the source of truth for the exact current stable version before pinning.";
-        }
-
-        if (strictTwoLine)
-            return $"Answer: The latest stable version of {subject} changes over time.\nCommentary: Use the official product release page for the current stable version before pinning.";
-
-        var yearClause = string.IsNullOrWhiteSpace(yearHint) ? "" : $" as of {yearHint}";
-        return $"{greeting}For {subject}, the latest stable release changes over time{yearClause}. " +
-               "Use the official product release page as the source of truth before pinning.";
-    }
 
     private static bool LooksLikeComparisonQuestion(string userMessage, out string subject)
     {

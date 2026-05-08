@@ -567,14 +567,11 @@ public sealed class ToolBackedResponseQualityGuardsTests
     }
 
     [Fact]
-    public void Apply_WhenStrictDotNetLatestVersionAnswerIsNoisy_ReturnsExactlyTwoLines()
+    public void Apply_WhenStrictDotNetLatestVersionAnswerIsNoisy_DoesNotSynthesizeHardCodedAnswer()
     {
         const string weakResponse = """
             Answer: I do not have a definitive answer for the latest stable version of .NET as of 2025 based on the search results provided.
             Commentary: The recent search query returned an unrelated article regarding UGC NET applications, indicating that no specific information about .NET versions was found in the immediate results.
-
-            ***
-            Sir Thaddeus
             """;
 
         var response = ToolBackedResponseQualityGuards.Apply(
@@ -590,13 +587,11 @@ public sealed class ToolBackedResponseQualityGuardsTests
                 }
             ]);
 
-        var lines = response.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        Assert.Equal(2, lines.Length);
-        Assert.StartsWith("Answer:", lines[0], StringComparison.OrdinalIgnoreCase);
-        Assert.StartsWith("Commentary:", lines[1], StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(".NET 10", response, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("unrelated", response, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Sir Thaddeus", response, StringComparison.OrdinalIgnoreCase);
+        // The guard must not invent a clean ".NET X" two-line answer when the underlying
+        // response had no real evidence — that would be hard-coding an answer the agent
+        // cannot actually verify.
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"\.NET\s+\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase), response);
+        Assert.DoesNotContain("dotnet.microsoft.com", response, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

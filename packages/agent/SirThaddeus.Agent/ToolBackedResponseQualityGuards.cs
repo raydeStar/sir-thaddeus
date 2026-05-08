@@ -21,9 +21,6 @@ public static class ToolBackedResponseQualityGuards
             return structuredResearch;
         }
 
-        if (TryBuildStrictDotNetLatestVersionFallback(latestUserMessage, text) is { Length: > 0 } latestVersionFallback)
-            return latestVersionFallback;
-
         if (LooksLikeBareCancelled(text) &&
             SearchOrchestrator.TryBuildMediaInstallmentFallback(latestUserMessage) is { Length: > 0 } mediaFallback)
         {
@@ -194,49 +191,6 @@ public static class ToolBackedResponseQualityGuards
         {
             return null;
         }
-    }
-
-    private static string? TryBuildStrictDotNetLatestVersionFallback(string latestUserMessage, string text)
-    {
-        var lowerPrompt = latestUserMessage.ToLowerInvariant();
-        var strictTwoLine = lowerPrompt.Contains("exactly two lines", StringComparison.Ordinal) &&
-                            lowerPrompt.Contains("line 1 starts with", StringComparison.Ordinal) &&
-                            lowerPrompt.Contains("answer:", StringComparison.Ordinal) &&
-                            lowerPrompt.Contains("commentary:", StringComparison.Ordinal);
-        if (!strictTwoLine ||
-            !lowerPrompt.Contains("latest stable version", StringComparison.Ordinal) ||
-            (!lowerPrompt.Contains(".net", StringComparison.Ordinal) &&
-             !Regex.IsMatch(lowerPrompt, @"\b(?:dotnet|net)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)))
-        {
-            return null;
-        }
-
-        if (IsCleanStrictTwoLineLatestVersionAnswer(text))
-            return null;
-
-         return "Answer: .NET 10 is the latest stable version as of late 2025.\n" +
-             "Commentary: Confirm the current SDK patch on the official .NET download page before pinning.";
-    }
-
-    private static bool IsCleanStrictTwoLineLatestVersionAnswer(string text)
-    {
-        var lines = text
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(line => !string.IsNullOrWhiteSpace(line))
-            .ToList();
-        if (lines.Count != 2)
-            return false;
-
-        if (!lines[0].StartsWith("Answer:", StringComparison.OrdinalIgnoreCase) ||
-            !lines[1].StartsWith("Commentary:", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var lower = text.ToLowerInvariant();
-        return !lower.Contains("do not have a definitive answer", StringComparison.Ordinal) &&
-               !lower.Contains("unrelated", StringComparison.Ordinal) &&
-               !lower.Contains("recommend performing a more targeted search", StringComparison.Ordinal);
     }
 
     private static bool LooksLikeStructuredSearchNoResultDeflection(
@@ -1344,6 +1298,13 @@ public static class ToolBackedResponseQualityGuards
         }
 
         var lowerUser = latestUserMessage.ToLowerInvariant();
+        if (LooksLikeLocalBusinessBriefingShell(text) &&
+            IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerUser) &&
+            !IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lowerUser))
+        {
+            return null;
+        }
+
         var isLocalBusiness = IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerUser) ||
                               IntentFeatureExtractor.LooksLikeDeepDiveLookup(lowerUser) ||
                               toolCallsMade.Any(call =>

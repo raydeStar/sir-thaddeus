@@ -1284,36 +1284,6 @@ public sealed partial class SearchOrchestrator
             };
         }
 
-        if (!IsExplicitLookupToolInvocationRequest(userMessage) &&
-            !IsExplicitLookupToolInvocationRequest(explicitLookupUserMessage) &&
-            !IsExplicitLookupToolInvocationRequest(latestUserMessage))
-        {
-            var knownLatestVersionAnswer =
-                OfflineWebReasoningResponder.TryBuildKnownLatestVersionAnswer(userMessage, memoryPackText) ??
-                OfflineWebReasoningResponder.TryBuildKnownLatestVersionAnswer(latestUserMessage, memoryPackText);
-            if (!string.IsNullOrWhiteSpace(knownLatestVersionAnswer))
-            {
-                _audit.Append(new AuditEvent
-                {
-                    Actor = "search",
-                    Action = "NO_RESULTS_KNOWN_LATEST_VERSION_FALLBACK",
-                    Result = "deterministic",
-                    Details = new Dictionary<string, object>
-                    {
-                        ["userMessage"] = latestUserMessage
-                    }
-                });
-
-                return new AgentResponse
-                {
-                    Text = knownLatestVersionAnswer,
-                    Success = true,
-                    ToolCallsMade = toolCallsMade.ToList(),
-                    LlmRoundTrips = 0
-                };
-            }
-        }
-
         if (RequiresLiveWebVerification(userMessage, history))
         {
             var harnessExplicitFallback =
