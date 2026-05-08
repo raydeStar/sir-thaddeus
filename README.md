@@ -19,19 +19,22 @@
 
 Sir Thaddeus is a power-user AI workspace for chat, MCP-powered tools, explicit permissions, local storage, diagnostics, and durable wiki/canvas knowledge. It is designed for people who want useful agentic workflows without silent background autonomy or opaque cloud control.
 
+If it acts, you see it. If you press **STOP**, it stops.
+
 The public v1 product surface is the hybrid shell/runtime/workspace stack: [src/Thaddeus.Shell/](src/Thaddeus.Shell/), [src/Thaddeus.Runtime/](src/Thaddeus.Runtime/), [web/](web/), [apps/mcp-server/](apps/mcp-server/), [packages/mcp-shared/](packages/mcp-shared/), [packages/mcp-tools-core/](packages/mcp-tools-core/), [packages/mcp-tools-windows/](packages/mcp-tools-windows/), and [packages/wiki/](packages/wiki/). The legacy terminal runtime in [apps/headless-runtime/](apps/headless-runtime/) remains for harness and transitional work, but it is not the main product surface.
 
 ![Sir Thaddeus workspace screenshot](assets/images/sir-thaddeus-screenshot.png)
 
-No polished demo GIF is checked in yet. Use [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) to record the v1 demo without inventing features.
+> A 15-second demo GIF (`assets/images/sir-thaddeus-demo.gif`) is the recommended hero asset — see [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) for the recording recipe. Until it lands, the static screenshot above is the placeholder.
 
 ## What Makes It Different
 
-- Local-first architecture: the workspace is served from a loopback runtime on your machine.
-- Controlled tool use: tool calls cross an MCP boundary and go through explicit permission policy.
-- Visible actions: chat streaming, tool activity, activity feed, diagnostics, and audit logs make work inspectable.
-- Durable knowledge: wiki/canvas content, revisions, import/export, memos, routines, and run history live locally.
-- Practical model support: LM Studio, Ollama's OpenAI-compatible shim, hosted OpenAI-compatible APIs, and custom endpoints all use the same settings surface.
+- **Local-first architecture** — the workspace is served from a loopback runtime on your machine.
+- **Controlled tool use** — tool calls cross an MCP boundary and go through explicit permission policy.
+- **Visible actions** — chat streaming, tool activity, activity feed, diagnostics, and audit logs make work inspectable.
+- **Durable knowledge** — wiki/canvas content, revisions, import/export, memos, routines, and run history live locally.
+- **Practical model support** — LM Studio, Ollama's OpenAI-compatible shim, hosted OpenAI-compatible APIs, and custom endpoints all use the same settings surface.
+- **No telemetry** — none. Not anonymized, not opt-in.
 
 ## Requirements
 
@@ -97,7 +100,7 @@ Small local models vary widely. If tool use is unreliable, use a stronger instru
 - MCP tool boundary with manifest-driven tool metadata.
 - Permission prompts with once, session, always, and deny decisions.
 - Persisted permission policy and visible tool activity.
-- Activity feed and diagnostics.
+- Activity feed and diagnostics (with logs path discoverable in the UI).
 - Wiki/canvas CRUD, revisions, import/export, search, and assistant actions.
 - Manual routines and run history.
 - Stop-all and kill controls.
@@ -130,12 +133,14 @@ See [V1_SCOPE.md](V1_SCOPE.md), [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIO
 
 Sir Thaddeus is built around visible, bounded actions:
 
-- The runtime listens on loopback, not the LAN.
-- API calls use a per-launch bearer token.
-- Tool calls go through MCP and permission policy.
-- Dangerous or side-effecting tool groups can be approved once, approved for the session, always allowed, or denied.
-- Tool activity, runtime activity, diagnostics, and audit logs are local review surfaces.
-- Stop-all and kill controls are part of the v1 surface.
+| Property | How it's enforced |
+|---|---|
+| Local-first | Runtime binds `127.0.0.1` only. No outbound calls except those triggered by a tool you approved. |
+| Per-launch token | Bearer token rotates each launch. Browsers cannot reach the runtime without it. |
+| Permission gate | Every MCP tool call goes through `ToolPermissionGate`. Decisions are persisted to settings. |
+| Audit | `~/.thaddeus/logs/audit.jsonl` records every tool call, permission decision, and outcome. |
+| Stop | `/api/stop-all` aborts active turns and sidecar processes. |
+| No telemetry | None. Not anonymized, not opt-in. |
 
 This is not a claim of production-grade security. It is a local-first trust model: loopback hosting, explicit permission prompts, visible actions, local persistence, and auditability.
 
@@ -201,6 +206,7 @@ Fast web checks:
 ```powershell
 Push-Location web
 npm run typecheck
+npm run lint
 npm run build
 Pop-Location
 ```
@@ -227,15 +233,17 @@ Integration/model harness testing can require live local services and GPU availa
 
 ## Documentation Map
 
-- [V1_SCOPE.md](V1_SCOPE.md) - v1 scope lock and release boundary.
-- [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) - 3-5 minute golden demo.
-- [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) - honest v1 limitations.
-- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) - practical readiness checklist.
-- [docs/ROADMAP.md](docs/ROADMAP.md) - v1.0, v1.1, and v2.0 roadmap.
-- [docs/ARCHITECTURE_PUBLIC.md](docs/ARCHITECTURE_PUBLIC.md) - public architecture overview.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - full architecture reference.
-- [docs/FEATURE_GAP_MATRIX.md](docs/FEATURE_GAP_MATRIX.md) - subsystem completion matrix.
-- [docs/packaging.md](docs/packaging.md) - packaging notes.
+- [V1_SCOPE.md](V1_SCOPE.md) — v1 scope lock and release boundary.
+- [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) — 3-5 minute golden demo + 15-second GIF script.
+- [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) — honest v1 limitations.
+- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) — practical readiness checklist.
+- [docs/ROADMAP.md](docs/ROADMAP.md) — v1.0, v1.1, and v2.0 roadmap.
+- [docs/ARCHITECTURE_PUBLIC.md](docs/ARCHITECTURE_PUBLIC.md) — public architecture overview.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — full architecture reference.
+- [docs/ARCHITECTURE_EXECUTIVE_SUMMARY.md](docs/ARCHITECTURE_EXECUTIVE_SUMMARY.md) — short architecture summary for handoff.
+- [docs/FEATURE_GAP_MATRIX.md](docs/FEATURE_GAP_MATRIX.md) — subsystem completion matrix.
+- [docs/packaging.md](docs/packaging.md) — packaging notes.
+- [CHANGELOG.md](CHANGELOG.md) — release notes.
 
 ## License
 

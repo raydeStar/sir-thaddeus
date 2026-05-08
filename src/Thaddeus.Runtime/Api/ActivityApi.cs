@@ -53,6 +53,8 @@ public static class ActivityApi
             var uptime = (DateTimeOffset.UtcNow - startedAt).TotalSeconds;
             var rootDir = threads is JsonFileThreadStore js ? js.RootDirectory : "";
             var thrCount = string.IsNullOrEmpty(rootDir) ? -1 : CountFiles(rootDir);
+            var lockDir = Path.GetDirectoryName(options.LockFilePath);
+            var logsRoot = string.IsNullOrEmpty(lockDir) ? "" : Path.Combine(lockDir, "logs");
 
             var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
             var voice = await voiceStatus.GetStatusAsync(ensureHost: false, ct).ConfigureAwait(false);
@@ -62,6 +64,7 @@ public static class ActivityApi
                 State: machine.Current.ToString(),
                 ThreadCount: thrCount,
                 ThreadStoreRoot: rootDir,
+                LogsRoot: logsRoot,
                 VoiceAvailable: voice.InputAvailable,
                 Voice: voice,
                 Pid: options.Pid,
@@ -96,6 +99,7 @@ public sealed record DiagnosticsResponse(
     string State,
     int ThreadCount,
     string ThreadStoreRoot,
+    string LogsRoot,
     bool VoiceAvailable,
     VoiceRuntimeStatus Voice,
     int Pid,

@@ -1,7 +1,8 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { PageScaffold } from '../components/PageScaffold';
-import { listRoutines, startRun } from '../lib/routinesApi';
+import { createRoutine, listRoutines, startRun, updateRoutine } from '../lib/routinesApi';
 import type { Routine } from '@thaddeus/shared-types';
 
 export const Route = createFileRoute('/routines/')({
@@ -13,6 +14,9 @@ function RoutinesListRoute() {
   const [items, setItems] = useState<Routine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [showDisabled, setShowDisabled] = useState(false);
+  const [pendingToggleId, setPendingToggleId] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -37,12 +41,79 @@ function RoutinesListRoute() {
     }
   };
 
+  const onCreate = async () => {
+    if (creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const r = await createRoutine({
+        name: 'New routine',
+        description: '',
+        checklistItems: [],
+        promptTemplate: '',
+        enabled: true,
+      });
+      void navigate({ to: '/routines/$id/edit', params: { id: r.id } });
+    } catch (e) {
+      setError((e as Error).message);
+      setCreating(false);
+    }
+  };
+
+  const onToggleEnabled = async (routine: Routine) => {
+    if (pendingToggleId) return;
+    setPendingToggleId(routine.id);
+    setError(null);
+    try {
+      await updateRoutine(routine.id, { enabled: !routine.enabled });
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPendingToggleId(null);
+    }
+  };
+
+  const visibleItems = items
+    ? showDisabled
+      ? items
+      : items.filter((r) => r.enabled)
+    : null;
+  const disabledCount = items ? items.filter((r) => !r.enabled).length : 0;
+
   return (
     <PageScaffold
       testId="route-routines"
       title="Routines"
       subtitle="Checklists Sir Thaddeus walks you through — you stay in the driver's seat."
     >
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            data-testid="routines-new"
+            disabled={creating}
+            onClick={() => void onCreate()}
+            className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="h-4 w-4" strokeWidth={2} />
+            {creating ? 'Creating…' : 'New routine'}
+          </button>
+          {disabledCount > 0 ? (
+            <button
+              type="button"
+              data-testid="routines-toggle-disabled"
+              onClick={() => setShowDisabled((s) => !s)}
+              className="text-xs text-ink-muted underline-offset-2 transition hover:text-ink hover:underline"
+            >
+              {showDisabled
+                ? `Hide disabled (${disabledCount})`
+                : `Show disabled (${disabledCount})`}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
       {error ? (
         <p data-testid="routines-error" className="mb-3 text-sm text-rose-500">
           {error}
@@ -53,18 +124,22 @@ function RoutinesListRoute() {
         <p className="text-sm italic text-ink-subtle" data-testid="routines-loading">
           Loading…
         </p>
-      ) : items !== null && items.length === 0 ? (
+      ) : visibleItems !== null && visibleItems.length === 0 ? (
         <p className="text-sm text-ink-muted" data-testid="routines-empty">
-          No routines yet.
+          {items && items.length > 0
+            ? 'No enabled routines. Toggle one back on or create a new one.'
+            : 'No routines yet. Click "New routine" to start one.'}
         </p>
-      ) : items !== null ? (
+      ) : visibleItems !== null ? (
         <ul data-testid="routines-list" className="space-y-3">
-          {items.map((r) => (
+          {visibleItems.map((r) => (
             <RoutineCard
               key={r.id}
               routine={r}
               running={runningId === r.id}
+              toggling={pendingToggleId === r.id}
               onRun={() => void onRun(r.id)}
+              onToggleEnabled={() => void onToggleEnabled(r)}
             />
           ))}
         </ul>
@@ -76,17 +151,22 @@ function RoutinesListRoute() {
 interface RoutineCardProps {
   routine: Routine;
   running: boolean;
+  toggling: boolean;
   onRun: () => void;
+  onToggleEnabled: () => void;
 }
 
-function RoutineCard({ routine, running, onRun }: RoutineCardProps) {
+function RoutineCard({ routine, running, toggling, onRun, onToggleEnabled }: RoutineCardProps) {
   const itemCount = routine.checklistItems.length;
   const lastRun = routine.lastRunAt ? new Date(routine.lastRunAt).toLocaleString() : null;
 
   return (
     <li
       data-testid={`routine-item-${routine.id}`}
-      className="surface flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+      data-enabled={routine.enabled}
+      className={`surface flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between ${
+        routine.enabled ? '' : 'opacity-70'
+      }`}
     >
       <div className="min-w-0">
         <p className="text-sm font-semibold text-ink">{routine.name}</p>
@@ -101,6 +181,24 @@ function RoutineCard({ routine, running, onRun }: RoutineCardProps) {
       </div>
 
       <div className="flex shrink-0 items-center gap-2 text-xs">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={routine.enabled}
+          aria-label={routine.enabled ? 'Disable routine' : 'Enable routine'}
+          data-testid={`routine-toggle-${routine.id}`}
+          disabled={toggling}
+          onClick={onToggleEnabled}
+          className={`relative h-[22px] w-[38px] shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+            routine.enabled ? 'bg-accent' : 'bg-line-strong'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform ${
+              routine.enabled ? 'translate-x-4' : 'translate-x-0'
+            }`}
+          />
+        </button>
         <button
           type="button"
           data-testid={`routine-run-${routine.id}`}
