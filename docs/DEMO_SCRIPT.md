@@ -1,191 +1,146 @@
-# Sir Thaddeus — Golden demo script
+# Golden Demo Script
 
-**Length:** 3–5 minutes.
-**Goal:** Show the v1 trust loop end-to-end — local model, permission boundary,
-visible tool activity, durable wiki, stop control. No surprises, no recovery.
+This is the 3-5 minute v1 demo. It shows the core hybrid product surface only: shell, local workspace, model settings, chat, MCP permissioning, tool activity, wiki/canvas, diagnostics, and stop controls.
 
-If a step in this script breaks, fix the bug — do **not** rewrite the demo
-to avoid it.
+Do not use this demo to showcase beta or deferred features. If a step in this script breaks, fix the bug — do **not** rewrite the demo to avoid it.
 
----
-
-## Pre-demo checklist
+## Pre-Demo Checklist
 
 Run this **at most 30 minutes before** the demo, on the demo machine.
 
-- [ ] LM Studio (or your chosen OpenAI-compatible server) is running.
-      Confirm a chat-capable model is loaded.
-- [ ] No leftover `Thaddeus.Runtime` or `Thaddeus.Shell` processes are running
-      (`Get-Process Thaddeus*` on Windows).
-- [ ] `~/.thaddeus/` exists and is writable. Optional: archive it for a
-      genuinely-empty demo.
+- [ ] Build or install a current package.
+- [ ] Confirm no stale `Thaddeus.Runtime.exe`, `Thaddeus.Shell.exe`, `SirThaddeus.McpServer.exe`, or `SirThaddeus.VoiceHost.exe` processes are running (`Get-Process Thaddeus*`).
+- [ ] Start LM Studio, Ollama, or another OpenAI-compatible endpoint if using a real model.
+- [ ] Confirm the endpoint is reachable:
+  - LM Studio: `http://127.0.0.1:1234/v1`
+  - Ollama OpenAI shim: `http://127.0.0.1:11434/v1`
+- [ ] Prepare a local demo folder with one harmless text or Markdown file if web search is flaky.
+- [ ] Reset or review permission policy so the demo will show at least one prompt.
 - [ ] Network is reachable (web search step needs it).
-- [ ] Audio is muted unless the voice section is being demoed (it is **not**
-      in the golden script — voice is Beta).
-- [ ] Browser zoom is 100%; window is at least 1280×800.
+- [ ] Browser zoom is 100%; window is at least 1280x800.
+- [ ] Audio is muted unless the voice section is being demoed (it is **not** in the golden script — voice is Beta).
 - [ ] Demo prompts are pasted into a scratch buffer for fast copy.
+- [ ] Open [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) in case you need to explain beta/deferred boundaries.
 
----
+## Demo Arc
 
-## The arc
+| Time | Step | What To Say | What To Show |
+| --- | --- | --- | --- |
+| 0:00-0:30 | Launch from shell | "Sir Thaddeus v1 starts as a local shell that supervises a loopback runtime and opens a local workspace." | Run `dotnet run --project src/Thaddeus.Shell/Thaddeus.Shell.csproj` from source, or launch `Thaddeus.Shell.exe` from a package if available. |
+| 0:30-0:50 | Show workspace/runtime | "The UI is a React workspace served by the local runtime. API access is loopback and token-gated." | Show the workspace home, runtime state badge, and navigation. Hover the version pill. |
+| 0:50-1:15 | Confirm model settings | "The model endpoint is explicit. LM Studio, Ollama, and other OpenAI-compatible endpoints use the same settings surface." | Open Settings → Models, show provider/base URL/model ID, click **Test connection**, show the returned model list. |
+| 1:15-1:45 | Start chat | "Chat is threaded and streams assistant output." | Open Chat, create a new thread. |
+| 1:45-2:30 | Ask for a tool | "Now I will ask for something that requires an MCP tool, so the app has to ask before acting." | Send a primary or fallback prompt from the section below. |
+| 2:30-3:00 | Permission prompt | "The permission prompt shows what access is requested and lets me approve once, for the session, always, or deny." | Read the four verbs aloud. Approve once or for the session. Avoid always during the public demo. |
+| 3:00-3:30 | Streamed answer and tool activity | "The answer streams back while tool activity stays visible. Source cards land below the reply." | Show assistant response, tool-activity pills, and source cards inline. |
+| 3:30-4:10 | Save into wiki/canvas | "Useful output can become durable local knowledge." | Open Wiki, create a page such as `Demo Notes`, paste the useful summary into it, save. |
+| 4:10-4:35 | Wiki assistant action | "Wiki pages have assistant actions for page chat, draft, and selected-text rewrite." | Select a paragraph, choose **Rewrite → Tighten** (or Clarify). The selection is replaced. Show the revisions dropdown briefly. |
+| 4:35-4:50 | Activity/diagnostics | "Every turn is auditable. Logs path is one click away." | Open Activity → click the latest entry. Open Diagnostics — point at state, uptime, build version, PID, **Logs path**. |
+| 4:50-5:00 | Stop-all/kill | "If anything ever feels wrong — runaway tool loop, model talking to itself, whatever — this is the kill." | Hover the red kill switch in the header. Don't click during a live demo. |
 
-Twelve steps, paced so the room sees the value of each. Don't editorialize
-between steps — let the UI do the talking.
+## Primary Demo Prompts
 
-### 1. Launch from the shell *(20 seconds)*
+Use one of these when the network and provider are healthy:
 
-```
-dotnet run --project src/Thaddeus.Shell
-```
-
-> "Sir Thaddeus is a desktop workspace. The shell starts a local runtime, then
-> opens the workspace UI."
-
-The shell prints the loopback URL. The webview opens. Workspace renders.
-
-### 2. Show the runtime briefly *(15 seconds)*
-
-Click the runtime-state badge in the header (top right). Hover the version
-pill in the sidebar.
-
-> "Everything runs on `127.0.0.1`. The runtime is a single binary, the UI
-> talks to it over loopback with a per-launch bearer token. Nothing is
-> reachable from the network."
-
-### 3. Confirm the model *(20 seconds)*
-
-Sidebar → **Settings** → **Models**.
-
-Show the provider preset (LM Studio), base URL, the **Test connection**
-button. Click **Test connection**. Show the model list returned.
-
-> "We're talking to whatever local model the user already runs."
-
-### 4. Start a chat *(10 seconds)*
-
-Sidebar → **Home** or **Chat** → **+ New chat**. Type the first prompt.
-
-### 5. Ask for something that needs a tool *(15 seconds)*
-
-**Primary prompt:**
-
-```
+```text
 What's the latest stable release of .NET? Cite a source.
 ```
 
-This forces `web_search`. Send.
+```text
+Search the web for the current status of LM Studio local server support. Summarize what matters for running Sir Thaddeus with a local OpenAI-compatible endpoint, and include sources.
+```
 
-### 6. Permission prompt *(15 seconds)*
+```text
+What's the weather in Olympia, WA tomorrow?
+```
 
-The permission modal appears. Read the title aloud:
+*(routes to `weather_geocode` → `weather_forecast`, not `web_search`)*
 
-> "Allow `web_search`? Reach out to the internet."
+## Fallback Prompts
 
-Show the four options in order of escalation: **Deny / Allow once / For session / Always**.
+Use these if live web/search is flaky or if you want a fully local demo:
 
-### 7. Approve *(5 seconds)*
+```text
+Read README.md from this repository and summarize the v1 product promise, the beta features, and the deferred features. Ask for permission before reading files.
+```
 
-Click **For session**. The decision persists for the rest of the run.
+```text
+Read docs/FEATURE_GAP_MATRIX.md and turn it into a five-bullet release review summary. Ask for permission before reading files.
+```
 
-### 8. Stream the answer + show tool activity *(45 seconds)*
+```text
+Look at docs/KNOWN_LIMITATIONS.md and draft a short, honest release note paragraph that explains what v1 is and is not.
+```
 
-The reply streams. Above it, tool-activity pills show `web_search` started
-and finished. Below it, source cards render with favicons and excerpts.
+```text
+What time is it?
+```
 
-> "Every tool call is on the message that triggered it. If you ever wonder
-> what made the model say something, it's right here."
+*(offline tool — no permission prompt, useful when permission system is already saturated)*
 
-### 9. Move output into the wiki *(30 seconds)*
+```text
+Convert 50 mph to km/h.
+```
 
-Sidebar → **Wiki** → **+ New page**. Paste a paragraph from the chat reply.
-Save.
+*(offline math)*
 
-> "The wiki is local, durable, versioned. This isn't ephemeral chat memory —
-> it's notes that survive restart and that the assistant can read."
+## Wiki Assistant Examples
 
-### 10. Wiki assistant action *(45 seconds)*
+After saving demo output into a wiki page, use one of these:
 
-In the new wiki page, select two or three sentences. Use **Rewrite** →
-**Tighten** (or **Clarify**).
+```text
+Rewrite the selected paragraph so it is more direct and suitable for a release note.
+```
 
-The selection is replaced with the assistant's tightened version. Show the
-revision history dropdown briefly — every save is a revision you can roll back.
+```text
+Draft a short checklist from this page for someone validating the v1 release.
+```
 
-> "Same model, same permission boundary, same audit log. The wiki just gets
-> the same agentic surface as chat."
+```text
+Answer this from the page only: what are the v1 release boundaries?
+```
 
-### 11. Activity & diagnostics *(20 seconds)*
+## What Not To Show
 
-Sidebar → **Activity** → click the latest entry.
+- Voice, ASR, TTS, or push-to-talk as a core v1 promise.
+- Tray integration or global shortcuts as fully validated everywhere.
+- Compact panel beyond its beta/minimal state.
+- Scheduled or unattended automation.
+- Profile/personality administration in the v2 workspace.
+- Installer polish or auto-update.
+- Cross-platform desktop parity.
+- Settings → Advanced → Limits — saved-but-not-yet-enforced; the help text says so but it raises the wrong question for a public demo.
+- `/settings/$category` URLs of any kind. Use the in-page tabs.
+- Any prompt that requires private data, credentials, or destructive file actions.
 
-Show: kind (`ChatTurn`), status (`Ok`), thread link, started/completed times,
-detail.
+## Recovery Notes
 
-Sidebar → **Diagnostics**. Show: state, uptime, thread count, voice
-(probably "disabled"), build version, PID, **Logs path** (`~/.thaddeus/logs/`).
+The goal is to demo the **trust loop**, not to demo perfection. Acceptable recoveries:
 
-> "Every turn is auditable. The logs path is one click away — no hunting in
-> AppData."
+- **Permission modal doesn't fire** → you probably already chose **Always** for that tool. Mention it, move on.
+- **Web search returns nothing** → switch to a fallback prompt. Don't retry the failing prompt.
+- **Streaming stalls** → click the kill switch, restart the runtime, narrate the recovery ("This is what stop looks like in practice"), then continue from the chat step.
+- **Real model is not responding** → switch to a simpler prompt or use the stub assistant to show the workspace and permission model.
+- **Permission was previously allowed** → reset policy or choose a different tool group so the prompt appears.
+- **Voice sidecars start unexpectedly** → explain that voice is Beta and keep the demo focused on chat/tools/wiki.
 
-### 12. Stop control *(10 seconds)*
+Unacceptable: pretending the runtime is fine when it isn't, or running manual fix-up commands in a terminal during the demo.
 
-Header → red **kill switch**. Hover only — don't click during a live demo.
+## The 15-Second GIF (For The README)
 
-> "If anything ever feels wrong — runaway tool loop, model talking to itself,
-> whatever — this is the kill. It tears down sidecars and exits the runtime."
+For social/discovery use, you also want a 15-second GIF, not the full 5-minute demo. Recommended frame-by-frame:
 
-End on this slide. Don't kill the runtime mid-demo unless the room asked.
+| Time | Frame |
+|---|---|
+| 0-3s | Type a prompt: *"What's the latest stable release of .NET? Cite a source."* |
+| 3-5s | Reply starts streaming. Permission modal pops up: **"Allow web_search? Reach out to the internet."** |
+| 5-8s | Cursor hovers the four buttons. The verbs are the demo: **Deny · Once · Session · Always.** |
+| 8-12s | Click "Once". Source cards stream in inline. |
+| 12-15s | Cursor swings up to the red kill switch. End on it. |
 
----
+Captions (so it works on mute):
+- "Most agents do this silently."
+- "This one asks first."
+- "And stops when you say stop."
 
-## Demo prompts
-
-### Primary (works with web search reachable)
-
-- `What's the latest stable release of .NET? Cite a source.`
-- `What's the weather in Olympia, WA tomorrow?` *(routes to weather, not web)*
-- `Read this file: README.md` *(if a file root is allowlisted)*
-- `Summarize the main idea of the file we just read into a wiki page.`
-
-### Fallback (offline / web-search flaky)
-
-If the demo machine cannot reach the internet:
-
-- `What time is it?` *(offline tool)*
-- `Convert 50 mph to km/h.` *(offline math)*
-- `Read this file: docs/ARCHITECTURE_PUBLIC.md and tell me the layers.`
-- `Open a new wiki page and draft a short summary of what you just read.`
-
-These exercise: tool boundary, permission prompt, file allowlist, wiki
-draft action — without depending on the network.
-
----
-
-## What not to show
-
-- **Voice / push-to-talk.** Voice is Beta; PTT depends on global hotkey
-  registration that is finicky to demo on a borrowed machine.
-- **Tray integration.** Same — depends on Windows shell state.
-- **Compact panel.** Phase-2 stub. Skip.
-- **Profile / personality admin.** Deferred from v1.
-- **Settings → Advanced → limits.** Saved but not yet enforced; the help
-  text already says this, but it raises the wrong question.
-- **`/settings/$category` URLs** of any kind. Use the in-page tabs.
-
----
-
-## If something breaks live
-
-The goal is to demo the **trust loop**, not to demo perfection. Acceptable
-recoveries:
-
-- **Permission modal doesn't fire** → you probably already chose **Always**
-  for that tool. Mention it, move on.
-- **Web search returns nothing** → switch to a fallback prompt. Don't retry
-  the failing prompt.
-- **Streaming stalls** → click the kill switch, restart the runtime, narrate
-  the recovery. ("This is what stop looks like in practice.") Then continue
-  from step 5.
-
-Unacceptable: pretending the runtime is fine when it isn't, or running
-manual fix-up commands in a terminal during the demo.
+Drop the GIF into `assets/images/sir-thaddeus-demo.gif` and reference it in the README hero.

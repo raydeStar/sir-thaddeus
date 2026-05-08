@@ -1,140 +1,110 @@
-# Sir Thaddeus — v1.0 Scope
+# Sir Thaddeus v1 Scope
 
-This is the contract for v1.0. It exists to make it impossible for future work
-to expand v1 scope by accident. If a feature is not on the **Core v1** list, it
-is either Beta, Deferred, or a Non-goal — even if it works today.
+Sir Thaddeus v1 is a local-first AI workspace for controlled agentic workflows: chat, MCP-powered tools, explicit permissions, local storage, diagnostics, and durable wiki/canvas knowledge.
 
----
+This file is the v1 scope lock. If a proposed task expands beyond this page, it belongs after v1 unless it fixes a blocker in the current surface. **Pulling a row off the Core list is not an acceptable path; fixing the row that fails is.**
 
-## One-line positioning
+## Target User
 
-> A local-first AI workspace for controlled agentic workflows: chat,
-> MCP-powered tools, explicit permissions, local storage, diagnostics, and
-> durable wiki/canvas knowledge.
+Sir Thaddeus v1 is for technical power users who are comfortable running local tools, configuring an OpenAI-compatible model endpoint, reviewing permission prompts, and validating a local-first workflow before broader distribution polish exists.
 
-## Target user
+## Core v1 Promise
 
-A power user — developer, researcher, or technical operator — who:
-
-- runs a local model (LM Studio, Ollama, or any OpenAI-compatible endpoint),
-- wants chat plus tools without a cloud account or telemetry,
-- understands what an MCP server is and is comfortable approving tool calls,
-- prefers explicit control over background autonomy.
-
-Not aimed at consumers, not aimed at IT-managed deployments, not aimed at
-unattended automation.
-
-## Core v1 promise
-
-Sir Thaddeus runs on your machine, talks to a model you chose, only uses
-tools you approved, and keeps every action visible and stoppable.
+Sir Thaddeus v1 lets a user run a local workspace, chat with a configured model, grant or deny explicit tool permissions, inspect tool activity, and preserve useful output in local wiki/canvas knowledge without pretending the product is a polished consumer installer.
 
 If it acts, you see it. If you press **STOP**, it stops.
 
----
+## Product Surface That Counts
 
-## Core v1 features (must work, must be documented, must ship)
+The v1 product surface is limited to:
 
-The v1 product surface is:
+- [src/Thaddeus.Shell/](src/Thaddeus.Shell/)
+- [src/Thaddeus.Runtime/](src/Thaddeus.Runtime/)
+- [web/](web/)
+- [apps/mcp-server/](apps/mcp-server/)
+- [packages/mcp-shared/](packages/mcp-shared/)
+- [packages/mcp-tools-core/](packages/mcp-tools-core/)
+- [packages/mcp-tools-windows/](packages/mcp-tools-windows/)
+- [packages/wiki/](packages/wiki/)
+- supporting runtime/tool/storage packages used by the hybrid surface
 
-- `src/Thaddeus.Shell/`
-- `src/Thaddeus.Runtime/`
-- `web/`
-- `apps/mcp-server/`
-- `packages/mcp-*` and `packages/wiki/`
-- the runtime/tool/storage packages used by the hybrid surface
+The legacy runtime in [apps/headless-runtime/](apps/headless-runtime/) may remain for harness and transitional workflows, but it is not the public v1 product.
 
-The features that must work end-to-end on v1 day one:
+## Core v1 Features
 
-| # | Feature | Surface |
-|---|---|---|
-| 1 | Hybrid shell launch (Shell supervises Runtime) | `Thaddeus.Shell` |
-| 2 | Local loopback workspace hosting (127.0.0.1, per-launch token) | `Thaddeus.Runtime` |
-| 3 | React workspace UI in the embedded webview | `web/` |
-| 4 | Threaded chat with streaming responses | `web/`, `Thaddeus.Runtime/Chat` |
-| 5 | Local-model / OpenAI-compatible model configuration (LM Studio, Ollama, OpenAI, custom) | Settings → Models |
-| 6 | MCP tool boundary (every tool call brokered through the runtime) | `apps/mcp-server`, `packages/mcp-*` |
-| 7 | Permission prompts (Deny / Once / Session / Always) and persisted policy | Permission modal |
-| 8 | Tool-activity visibility (pills on the message that triggered them) | Chat UI |
-| 9 | Activity feed and diagnostics page | `/activity`, `/diagnostics` |
-| 10 | Wiki/canvas CRUD, revisions, import/export, search | `/wiki` |
-| 11 | Wiki assistant actions: page chat, draft, selected-text rewrite | `/wiki` |
-| 12 | Manual routines (user-invoked checklists) and run history | `/routines` |
-| 13 | Stop-all and kill controls (header) | `RuntimeStopAllService` |
-| 14 | File / document tools, gated by permissions and allowlisted roots | `mcp-tools-core` |
+Each row must work end-to-end on v1 day one. The corresponding step in
+[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) is the gate.
 
-Each feature has a row in [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
+- Hybrid shell/runtime launch.
+- Local loopback workspace hosting.
+- React workspace UI.
+- Threaded chat with streaming.
+- Local/OpenAI-compatible model configuration.
+- MCP tool boundary.
+- Permission prompts and persisted permission policy.
+- Tool activity visibility.
+- Activity feed and diagnostics.
+- Wiki/canvas CRUD, revisions, import/export, and search.
+- Wiki assistant actions: page chat, draft, and selected-text rewrite.
+- Manual routines and run history.
+- Stop-all and kill controls.
+- File/document tools when stable under permission gating.
 
----
+## Beta Features
 
-## Beta features (present, not promoted)
+These may remain available, but they must not be marketed as core v1 promises:
 
-These work but are not the headline. They depend on local sidecars, OS
-integrations, or hardware that we cannot guarantee on every user's machine.
-Mention them in passing; do not lead with them.
+- Voice / ASR / TTS.
+- Push-to-talk.
+- Tray integration.
+- Global shortcuts.
+- Compact panel.
+- Windows desktop observation hooks.
+- Clipboard and screen tools.
 
-- **Voice / ASR / TTS** (Whisper.cpp, KokoroSharp, Piper). Works on Windows
-  with the bundled VoiceHost; macOS/Linux paths exist but are unverified.
-- **Push-to-talk** global hotkey.
-- **Tray integration** (right-click menu, minimize-to-tray).
-- **Global shortcuts** (Stop-all hotkey).
-- **Compact panel** (`/compact`). Phase-2 stub today.
-- **Windows desktop observation hooks** (UI Automation, screen reader).
-- **Clipboard / screen capture tools** (Windows-only, gated by permissions).
+If a Beta item is broken on a user's machine, v1 still ships: the core experience does not regress.
 
-If something on this list is broken on a user's machine, v1 is still shipped:
-the core experience does not regress.
+## Explicitly Deferred
 
----
+Do not add these to v1:
 
-## Deferred (explicitly not in v1)
+- Scheduled automations.
+- Profile/personality administration in the v2 workspace.
+- Polished installers.
+- Auto-update.
+- Cross-platform desktop UX parity.
+- Advanced audit-search/admin pane.
 
-Stating these explicitly so contributors stop asking.
+## Non-Goals
 
-- **Scheduled / unattended automations.** Removed in 0.3.0. Do not re-add.
-- **User profile / personality admin in the v2 workspace.** The runtime API
-  does not expose `/api/profile` or `/api/personalities`; the headless
-  terminal still has them. v1 ships without admin UI for either.
-- **Polished installers** (MSIX, signed `.app` bundle, AppImage).
-- **Auto-update channel.**
-- **Cross-platform desktop UX parity.** The single-file binary runs on
-  macOS/Linux from a terminal; the polished Shell UX is Windows-first.
-- **Advanced audit-search / admin pane.** Activity page is read-only; no
-  filter/search beyond what the page already shows.
-
----
-
-## Non-goals
-
-Things v1 will never claim, regardless of how much they technically work:
-
-- Cloud sync, account, or multi-device state.
+- Redesigning the UI.
+- Rewriting the agent loop.
+- Promoting voice as the headline feature.
+- Removing the legacy runtime unless separate tests prove it is dead.
+- Claiming production-grade security beyond local-first loopback hosting, per-launch tokens, explicit permissions, visible activity, and local auditability.
+- Claiming cross-platform desktop parity.
+- Adding unattended background autonomy.
 - Telemetry of any kind, including anonymized.
-- Production-grade security beyond local-first, loopback, per-launch token,
-  permission gates, and audit logs. We are not a hardened multi-tenant
-  service.
-- Replacing your judgment. The agent proposes; you approve; you stop.
-- Unbounded autonomous agents that run freely on your machine.
-- Mobile / tablet / web-hosted versions.
+- Cloud sync, account, or multi-device state.
 
----
+## Release-Readiness Checklist
 
-## Release-readiness checklist (gate)
+v1 ships when **all** of the following are true. If any row fails, v1 does not ship — feature work to fix that row is the only acceptable path.
 
-v1 ships when **all** of the following are true:
-
+- [ ] Public README describes the hybrid product, not the legacy runtime.
+- [ ] Core v1 features are documented as current and validated.
+- [ ] Beta features are labeled beta everywhere public-facing.
+- [ ] Deferred features are not described as v1 commitments.
+- [ ] Demo script can be completed without relying on voice, tray, global shortcuts, or compact mode.
+- [ ] Local model setup is documented for LM Studio, Ollama, and custom OpenAI-compatible endpoints.
+- [ ] Stub assistant smoke test passes.
+- [ ] Local/OpenAI-compatible model smoke test passes, or is explicitly skipped with reason.
+- [ ] Permission prompt and tool activity flow is manually validated.
+- [ ] Wiki/canvas CRUD, revisions, import/export, search, and assistant actions are validated.
+- [ ] Routines are validated as manual workflows only.
+- [ ] Stop-all and kill controls are validated.
 - [ ] `dotnet build SirThaddeus.sln` is green at Release.
-- [ ] `dev/test.ps1 -Configuration Release` is green.
-- [ ] `cd web && npm install && npm run build` is green.
-- [ ] `cd web && npm run typecheck` is green.
-- [ ] Every Core v1 row above passes the corresponding step in
-      [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
-- [ ] [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) runs end-to-end without
-      manual recovery.
-- [ ] `README.md` lists Core v1 features and labels Beta/Deferred items
-      clearly.
-- [ ] `docs/KNOWN_LIMITATIONS.md` matches reality on a fresh Windows install.
-- [ ] No code path advertises a Deferred feature as available.
-
-If any row fails, v1 does not ship — feature work to "fix" the row is the
-only acceptable path. Pulling rows off this list is not.
+- [ ] `dev/test.ps1 -Configuration Release -SkipScreenObserveHarness` is green.
+- [ ] `cd web && npm install && npm run build && npm run typecheck && npm run lint` is green.
+- [ ] [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) walked end-to-end with sign-off.
+- [ ] Any skipped GPU, voice, harness, or live integration work is recorded in [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).

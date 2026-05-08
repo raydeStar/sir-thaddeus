@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus" width="180" />
+  <img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus logo" width="160" />
 
   <h1>Sir Thaddeus</h1>
 
@@ -12,145 +12,126 @@
     <a href="https://github.com/raydeStar/sir-thaddeus/blob/main/LICENSE">
       <img src="https://img.shields.io/github/license/raydeStar/sir-thaddeus" alt="Apache 2.0 license" />
     </a>
-    <img src="https://img.shields.io/badge/runtime-.NET%2010-blue" alt=".NET 10 runtime" />
-    <img src="https://img.shields.io/badge/UI-React%20%2B%20Vite-black" alt="React + Vite UI" />
+    <img src="https://img.shields.io/badge/.NET-10-blue" alt=".NET 10" />
+    <img src="https://img.shields.io/badge/LLM-OpenAI--compatible-orange" alt="OpenAI-compatible local model endpoints" />
   </p>
 </div>
 
----
+Sir Thaddeus is a power-user AI workspace for chat, MCP-powered tools, explicit permissions, local storage, diagnostics, and durable wiki/canvas knowledge. It is designed for people who want useful agentic workflows without silent background autonomy or opaque cloud control.
 
-Sir Thaddeus is a chat-and-tools workspace that runs on your machine, talks to
-a model **you** chose, only uses tools **you** approved, and keeps every action
-visible and stoppable.
+If it acts, you see it. If you press **STOP**, it stops.
 
-It is designed for power users — developers, researchers, technical operators —
-who want agentic workflows without giving up control or sending data to a
-provider they don't host.
+The public v1 product surface is the hybrid shell/runtime/workspace stack: [src/Thaddeus.Shell/](src/Thaddeus.Shell/), [src/Thaddeus.Runtime/](src/Thaddeus.Runtime/), [web/](web/), [apps/mcp-server/](apps/mcp-server/), [packages/mcp-shared/](packages/mcp-shared/), [packages/mcp-tools-core/](packages/mcp-tools-core/), [packages/mcp-tools-windows/](packages/mcp-tools-windows/), and [packages/wiki/](packages/wiki/). The legacy terminal runtime in [apps/headless-runtime/](apps/headless-runtime/) remains for harness and transitional work, but it is not the main product surface.
 
-> **What this is not.** Not an unattended automation platform. Not a hosted
-> service. Not a cloud product. There is no sign-up. There is no telemetry.
+![Sir Thaddeus workspace screenshot](assets/images/sir-thaddeus-screenshot.png)
 
-<div align="center">
-  <img src="assets/images/sir-thaddeus-screenshot.png" alt="Sir Thaddeus workspace screenshot" width="800" />
-  <br /><sub><i>Workspace screenshot — chat, tool activity, and permission prompt.</i></sub>
-</div>
+> A 15-second demo GIF (`assets/images/sir-thaddeus-demo.gif`) is the recommended hero asset — see [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) for the recording recipe. Until it lands, the static screenshot above is the placeholder.
 
----
+## What Makes It Different
 
-## Why this exists
+- **Local-first architecture** — the workspace is served from a loopback runtime on your machine.
+- **Controlled tool use** — tool calls cross an MCP boundary and go through explicit permission policy.
+- **Visible actions** — chat streaming, tool activity, activity feed, diagnostics, and audit logs make work inspectable.
+- **Durable knowledge** — wiki/canvas content, revisions, import/export, memos, routines, and run history live locally.
+- **Practical model support** — LM Studio, Ollama's OpenAI-compatible shim, hosted OpenAI-compatible APIs, and custom endpoints all use the same settings surface.
+- **No telemetry** — none. Not anonymized, not opt-in.
 
-Most AI assistants are easy to use because they make decisions for you. Sir
-Thaddeus is the opposite: it surfaces every decision and lets you say yes or no.
+## Requirements
 
-- **Local model, local data.** Threads, memos, wiki pages, and audit logs live
-  in `~/.thaddeus/` (or `%LocalAppData%\SirThaddeus\` on Windows). The runtime
-  binds `127.0.0.1:<random-port>` and accepts only the per-launch bearer token.
-- **Tools cross a permission boundary.** Every MCP tool call (web fetch, file
-  read, screen capture, system command) goes through a broker that asks you,
-  records the decision, and can be revoked at any time.
-- **Stop is real.** A red kill switch lives in the header. Pressing it tears
-  down active tool calls, sidecars, and the runtime itself.
+- Windows 10/11 for the richest shell experience today.
+- .NET SDK `10.0.103` or newer compatible feature band for source builds. See [global.json](global.json).
+- Node.js and npm for the React workspace build.
+- PowerShell 5.1 or newer for repo scripts.
+- Optional: LM Studio, Ollama, or another OpenAI-compatible model endpoint.
+- Optional beta: local voice sidecar assets and machine setup for ASR/TTS.
 
-If "AI agent that you can actually audit" sounds boring, that's the point.
+The loopback runtime and many packages are designed to build beyond Windows, but v1 desktop ergonomics are Windows-first. Do not read that as cross-platform desktop parity.
 
----
+## Quick Start From Source
 
-## Quickstart
-
-### Requirements
-
-- **.NET 10 SDK** for building from source. Single-file binaries are coming via
-  [`dev/package-runtime.ps1`](dev/package-runtime.ps1); see
-  [`docs/packaging.md`](docs/packaging.md).
-- **Node.js 18+** (or any version compatible with Vite 5) to build the web UI
-  during development.
-- **A local model server**, OpenAI-compatible. We test against:
-  - [LM Studio](https://lmstudio.ai/) (default — `http://127.0.0.1:1234/v1`)
-  - [Ollama](https://ollama.com/) (`http://127.0.0.1:11434/v1`)
-  - OpenAI hosted (`https://api.openai.com/v1`, requires API key)
-  - Any other OpenAI-compatible endpoint via the **Custom** preset.
-
-### Run from source (recommended for v1.0)
-
-```bash
-# 1) Build the web bundle and sync it into the runtime's wwwroot.
-cd web
-npm install
-npm run build
-cd ..
-
-# (Windows / PowerShell) Copy the bundle into wwwroot.
-Copy-Item web/dist/index.html src/Thaddeus.Runtime/wwwroot/index.html -Force
-Copy-Item web/dist/assets/* src/Thaddeus.Runtime/wwwroot/assets/ -Recurse -Force
-
-# (macOS / Linux)
-cp web/dist/index.html src/Thaddeus.Runtime/wwwroot/index.html
-cp -R web/dist/assets/. src/Thaddeus.Runtime/wwwroot/assets/
-
-# 2) Run the runtime directly (development).
-dotnet run --project src/Thaddeus.Runtime
-
-# 3) Or launch the Windows shell (supervises the runtime, opens the webview).
-dotnet run --project src/Thaddeus.Shell
+```powershell
+git clone https://github.com/raydeStar/sir-thaddeus.git
+cd sir-thaddeus
+dotnet restore SirThaddeus.sln
 ```
 
-The runtime prints a loopback URL such as
-`http://127.0.0.1:54971/?access_token=...`. Open it in any modern browser, or
-— on Windows — let `Thaddeus.Shell` open the embedded webview for you.
+Build the web workspace:
 
-For self-contained binaries, see
-[`dev/package-runtime.ps1`](dev/package-runtime.ps1) and
-[`docs/packaging.md`](docs/packaging.md).
+```powershell
+Push-Location web
+npm ci
+npm run build
+Pop-Location
+```
 
-### First-run setup
+Launch the hybrid shell:
 
-1. Onboarding walks you through privacy defaults and a model probe.
-2. Settings → **Models** → pick a provider preset and **Test connection**.
-3. Send your first message. Approve any tool prompts that appear.
+```powershell
+dotnet run --project src/Thaddeus.Shell/Thaddeus.Shell.csproj
+```
 
----
+If you want to run the loopback runtime directly, use:
 
-## What's in v1.0
+```powershell
+dotnet run --project src/Thaddeus.Runtime/Thaddeus.Runtime.csproj
+```
 
-For the full contract, see [`V1_SCOPE.md`](V1_SCOPE.md).
+The runtime binds to `127.0.0.1` on an ephemeral port and serves the local workspace with a per-launch token.
 
-### Core v1 features
+## Local Model Setup
 
-| Surface | What it does |
-|---|---|
-| **Hybrid runtime** | Single `Thaddeus.Runtime` binary; Shell supervises it on Windows. |
-| **Workspace UI** | React + Vite + TanStack Router, served from the runtime over loopback. |
-| **Chat** | Threaded, streaming, persistent. Tool activity inline. Source cards for web-search results. |
-| **Models** | LM Studio / Ollama / OpenAI / custom OpenAI-compatible. Optional gatekeeper model for tool routing. |
-| **MCP tools** | Web search, file read, document parse (PDF / DOCX / XLSX / CSV / RTF / Markdown / text), system allowlist, math, time, holidays. |
-| **Permissions** | Deny / Once / Session / Always, with persisted policy and per-call audit. |
-| **Wiki / canvas** | CRUD, revisions, import/export, search, page chat, draft, selected-text rewrite. |
-| **Routines** | User-invoked checklists with run history. No background firing. |
-| **Activity & diagnostics** | Live activity feed, runtime state pill, diagnostics page (uptime, threads, voice, build, logs path). |
-| **Stop-all / kill** | Red kill switch in the header; `/api/stop-all` aborts in-flight tool work. |
+Sir Thaddeus can run with the stub assistant for smoke testing, but the real workflow expects an OpenAI-compatible endpoint.
 
-### Beta — works on the maintainer's box; not the headline
+| Provider | Base URL | Notes |
+| --- | --- | --- |
+| LM Studio | `http://127.0.0.1:1234/v1` | Start the local server in LM Studio, load an instruction-tuned model, then select or test it in Settings. |
+| Ollama | `http://127.0.0.1:11434/v1` | Uses Ollama's OpenAI-compatible shim. Pull and run the model first. |
+| Custom | Your `/v1` endpoint | Any compatible endpoint can be used. Add an API key only when the endpoint requires one. |
 
-- Voice (Whisper.cpp ASR + KokoroSharp TTS, Piper as legacy fallback).
-- Push-to-talk global hotkey.
-- Tray integration and minimize-to-tray.
-- Compact panel (`/compact`) — Phase-2 stub today.
-- Clipboard read / write and screen capture tools (Windows-only).
+Small local models vary widely. If tool use is unreliable, use a stronger instruction-tuned model or keep the gatekeeper configuration conservative.
 
-### Deferred — not in v1, intentionally
+## Core v1 Features
 
-- Scheduled / unattended automations (removed in 0.3.0).
-- Profile / personality admin in the workspace UI.
-- Polished installers (MSIX, signed `.app`, AppImage).
+- Hybrid shell/runtime launch.
+- Local loopback workspace hosting.
+- React workspace UI with chat, history, activity, memory, routines, settings, diagnostics, onboarding, wiki, and compact routes.
+- Threaded chat with streaming assistant responses.
+- Local/OpenAI-compatible model configuration and stub fallback.
+- MCP tool boundary with manifest-driven tool metadata.
+- Permission prompts with once, session, always, and deny decisions.
+- Persisted permission policy and visible tool activity.
+- Activity feed and diagnostics (with logs path discoverable in the UI).
+- Wiki/canvas CRUD, revisions, import/export, search, and assistant actions.
+- Manual routines and run history.
+- Stop-all and kill controls.
+- File/document tools when used under permission gating.
+
+## Beta And Deferred Features
+
+Beta in v1:
+
+- Voice / ASR / TTS.
+- Push-to-talk.
+- Tray integration.
+- Global shortcuts.
+- Compact panel.
+- Windows desktop observation hooks.
+- Clipboard and screen tools.
+
+Deferred from v1:
+
+- Scheduled automations.
+- Profile/personality administration in the v2 workspace.
+- Polished installers.
 - Auto-update.
-- Cross-platform desktop UX parity (macOS/Linux run the runtime; Shell ergonomics are Windows-first).
+- Cross-platform desktop UX parity.
+- Advanced audit-search/admin pane.
 
-See [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) for the
-honest version.
+See [V1_SCOPE.md](V1_SCOPE.md), [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md), and [docs/ROADMAP.md](docs/ROADMAP.md) for the release boundary.
 
----
+## Trust And Control Model
 
-## Trust and control
+Sir Thaddeus is built around visible, bounded actions:
 
 | Property | How it's enforced |
 |---|---|
@@ -159,68 +140,111 @@ honest version.
 | Permission gate | Every MCP tool call goes through `ToolPermissionGate`. Decisions are persisted to settings. |
 | Audit | `~/.thaddeus/logs/audit.jsonl` records every tool call, permission decision, and outcome. |
 | Stop | `/api/stop-all` aborts active turns and sidecar processes. |
-| No telemetry | None. Not anonymized, not opt-in. The setting exists in case the policy ever changes. |
+| No telemetry | None. Not anonymized, not opt-in. |
 
----
+This is not a claim of production-grade security. It is a local-first trust model: loopback hosting, explicit permission prompts, visible actions, local persistence, and auditability.
 
-## Architecture (short version)
+## Known Limitations
 
-- **Shell** (`src/Thaddeus.Shell`) — Windows supervisor. Starts the runtime,
-  opens the embedded webview, owns tray + global hotkeys. Optional.
-- **Runtime** (`src/Thaddeus.Runtime`) — ASP.NET Core minimal API on loopback.
-  Hosts `wwwroot/` (the built React bundle), exposes REST + WebSocket.
-- **Web** (`web/`) — React + Vite + TanStack Router workspace.
-- **MCP server** (`apps/mcp-server`) — stdio MCP server hosting the toolset.
-- **Tools** (`packages/mcp-tools-core`, `packages/mcp-tools-windows`) — split
-  between cross-platform (`net10.0`) and Windows-only.
-- **Wiki** (`packages/wiki`) — durable Markdown-backed knowledge with revisions.
-- **Voice** (`apps/voice-host`, `apps/voice-backend`, `src/Thaddeus.Tts.*`) —
-  optional sidecars for ASR and TTS. Beta.
+- Windows has the most complete desktop shell behavior today.
+- Voice depends on local sidecars, assets, models, drivers, and machine setup.
+- The compact panel is a minimal beta surface.
+- Tray and global shortcuts need live Windows validation before being promoted beyond beta.
+- There is no scheduled unattended automation in v1.
+- There is no polished installer or auto-update channel yet.
+- Runtime portability exists before full desktop parity.
+- Local model quality depends on the configured model and endpoint.
+- Web/live-data quality depends on providers and network conditions.
 
-For a 10-minute read, see [`docs/ARCHITECTURE_PUBLIC.md`](docs/ARCHITECTURE_PUBLIC.md).
-For the full version, [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Read the full list in [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
 
----
+## Development Commands
 
-## Development
+Bootstrap dependencies:
 
-```bash
-# Solution build (Debug)
-dotnet build SirThaddeus.sln
-
-# Solution build + tests (Release)
-pwsh dev/test.ps1 -Configuration Release
-
-# Full preflight (bootstrap + Release tests)
-pwsh dev/preflight.ps1
-
-# Web typecheck + build
-cd web && npm install && npm run typecheck && npm run build
-
-# Web E2E (Playwright)
-cd web && npm run test:e2e
+```powershell
+./dev/bootstrap.ps1
 ```
 
-For platform packaging, see [`docs/packaging.md`](docs/packaging.md).
+Build the web workspace:
 
----
+```powershell
+Push-Location web
+npm ci
+npm run build
+Pop-Location
+```
 
-## Documentation
+Build the .NET solution:
 
-- [`V1_SCOPE.md`](V1_SCOPE.md) — what v1 is and is not.
-- [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) — golden 3–5 minute demo.
-- [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) — honest boundaries.
-- [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) — pre-release gate.
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — v1.0 → v1.1 → v2.0.
-- [`docs/ARCHITECTURE_PUBLIC.md`](docs/ARCHITECTURE_PUBLIC.md) — architecture in 10 minutes.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full architecture.
-- [`docs/SETTINGS.md`](docs/SETTINGS.md) — settings reference.
-- [`docs/hybrid-shell.md`](docs/hybrid-shell.md) — Phase-1 hybrid notes.
-- [`docs/packaging.md`](docs/packaging.md) — building self-contained binaries.
-- [`PRIVACY.md`](PRIVACY.md), [`SECURITY.md`](SECURITY.md), [`CONTRIBUTING.md`](CONTRIBUTING.md).
+```powershell
+dotnet build SirThaddeus.sln -c Release --no-restore
+```
 
----
+Launch the shell from source:
+
+```powershell
+dotnet run --project src/Thaddeus.Shell/Thaddeus.Shell.csproj
+```
+
+Create a single-file runtime publish:
+
+```powershell
+./dev/package-runtime.ps1 -Rids win-x64
+```
+
+Create a release package after validation:
+
+```powershell
+./dev/release-package.ps1 -Runtime win-x64
+```
+
+## Testing Commands
+
+Fast web checks:
+
+```powershell
+Push-Location web
+npm run typecheck
+npm run lint
+npm run build
+Pop-Location
+```
+
+Normal .NET gate without the screen-observe harness:
+
+```powershell
+./dev/test.ps1 -Configuration Release -Restore $true -SkipScreenObserveHarness
+```
+
+Full preflight, including heavier harness behavior:
+
+```powershell
+./dev/preflight.ps1
+```
+
+Package smoke test after building a package:
+
+```powershell
+./dev/smoke-test.ps1 -SkipLaunch
+```
+
+Integration/model harness testing can require live local services and GPU availability. If those are not available, skip them explicitly and record the gap in [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
+
+## Documentation Map
+
+- [V1_SCOPE.md](V1_SCOPE.md) — v1 scope lock and release boundary.
+- [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) — 3-5 minute golden demo + 15-second GIF script.
+- [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) — honest v1 limitations.
+- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) — practical readiness checklist.
+- [docs/ROADMAP.md](docs/ROADMAP.md) — v1.0, v1.1, and v2.0 roadmap.
+- [docs/ARCHITECTURE_PUBLIC.md](docs/ARCHITECTURE_PUBLIC.md) — public architecture overview.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — full architecture reference.
+- [docs/ARCHITECTURE_EXECUTIVE_SUMMARY.md](docs/ARCHITECTURE_EXECUTIVE_SUMMARY.md) — short architecture summary for handoff.
+- [docs/FEATURE_GAP_MATRIX.md](docs/FEATURE_GAP_MATRIX.md) — subsystem completion matrix.
+- [docs/packaging.md](docs/packaging.md) — packaging notes.
+- [CHANGELOG.md](CHANGELOG.md) — release notes.
 
 ## License
 
-Apache 2.0. See [`LICENSE`](LICENSE).
+Sir Thaddeus is licensed under the [Apache License 2.0](LICENSE).

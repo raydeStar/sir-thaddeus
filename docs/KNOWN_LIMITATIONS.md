@@ -1,204 +1,95 @@
-# Sir Thaddeus — Known limitations (v1.0)
+# Known Limitations
 
-These are the boundaries we shipped on purpose. Each one is either a Beta
-feature that needs more time on real machines, or a Deferred feature we
-chose to leave for v1.1+ to keep the v1.0 scope honest.
+Sir Thaddeus v1 is a credible power-user release, not a finished consumer distribution. These limitations are release boundaries, not excuses. They keep v1 honest and protect the project from accidental scope expansion.
 
-If you hit one of these and assumed it was a bug, it's not — it's the line
-we drew. If you think the line is in the wrong place, open an issue against
-the relevant roadmap milestone in [`docs/ROADMAP.md`](ROADMAP.md).
+## Windows-First Shell Ergonomics
 
----
+The hybrid runtime and many packages are built with portability in mind, but the richest shell experience is Windows-first today. Tray behavior, global shortcuts, desktop observation hooks, and some shell workflows need live Windows validation before they should be described as broadly complete.
 
-## 1. Windows-first shell ergonomics
+The runtime itself (`Thaddeus.Runtime`) builds and runs on macOS and Linux as a single-file binary. You can launch it from a terminal, open the printed `http://127.0.0.1:<port>?access_token=...` URL in a browser, and you have the workspace. What you don't have on macOS/Linux today is the Shell supervisor, tray menu, embedded webview wrapper, and global hotkey registration.
 
-The full desktop experience — the supervised `Thaddeus.Shell`, embedded
-webview, tray icon, "At your service / Stand down / Dismiss" menu, and
-minimize-to-tray — is implemented and tested on **Windows only**.
+## Voice Is Beta
 
-The runtime itself (`Thaddeus.Runtime`) builds and runs on macOS and Linux
-as a single-file binary. You can launch it from a terminal, open the printed
-`http://127.0.0.1:<port>?access_token=...` URL in a browser, and you have
-the workspace. What you don't have on macOS/Linux today:
+Voice / ASR / TTS depends on local sidecars, assets, models, drivers, and machine setup. The runtime can supervise and proxy voice services, but voice should not be the headline v1 promise.
 
-- Tray menu
-- Global push-to-talk hotkey registration
-- Embedded webview wrapper
-- Auto-launch on login
+If voice is broken on your machine, **everything else still works**. v1.0 does not regress when voice is off.
 
-This is not a "coming soon" promise. v1 ships Windows-primary on purpose.
-See [`docs/migration/non-transferrable-functionality.md`](migration/non-transferrable-functionality.md)
-for the per-feature breakdown.
+## Compact Panel Is Minimal
 
-## 2. Voice depends on local sidecars, models, and your machine
+The compact route and launcher exist, but the active UI is a minimal idle/status surface. Treat it as beta until it has a complete quick-interaction workflow.
 
-Voice is **Beta** in v1. It works in the maintainer's setup; it has not been
-validated across the long tail of mics, sound cards, sample rates, headsets,
-and Bluetooth profiles you will throw at it.
+## Tray And Global Shortcuts Need Live Validation
 
-Specifically:
+Tray integration, push-to-talk, global shortcut hooks, stop-all shortcuts, and compact-panel shortcuts are present in the shell code. They still need live validation on the target Windows machines and should remain beta for v1.
 
-- **ASR** uses Whisper.cpp via the `VoiceHost` sidecar. The bundled `base`
-  model is fine for short utterances; longer or accented speech may need
-  a larger model swapped in via Settings → Audio.
-- **TTS** defaults to KokoroSharp (CPU). Piper is kept as a legacy fallback.
-  Both are local; both depend on voice files that must be present on disk.
-- **Push-to-talk** registers a global hotkey on Windows via
-  `WindowsGlobalShortcutAdapter`. If another app already grabbed your chosen
-  combo, registration silently fails — diagnose via Settings → Audio →
-  "Check VoiceHost".
-- **VoiceHost startup** can take 5–15 seconds on cold launch while models
-  warm up. The first PTT press of a session may feel slow; subsequent
-  presses are fast.
+## No Scheduled Unattended Automation
 
-If voice is broken on your machine, **everything else still works**. v1.0
-does not regress when voice is off.
+Manual routines and run history are part of v1. Scheduled automations and unattended background execution are deferred. Do not present routines as a scheduler.
 
-## 3. Compact panel is a stub
+A meta-test in the runtime test suite asserts no `IHostedService` is added under `Thaddeus.Runtime.Routines` — the "no scheduler" property is enforced by code review.
 
-The `/compact` route is a Phase-2 placeholder. It renders a small card with
-a runtime-state badge and a "Press your global shortcut" hint. It does not
-yet show transcript, PTT, or quick-interaction controls.
+## No Polished Installer Or Auto-Update
 
-Treat `/compact` as a preview surface. Don't build workflows around it for v1.
-
-## 4. Tray menu and global shortcuts need live Windows validation
-
-The tray menu is wired and the icon is custom-branded as of 0.3.0
-([`87a82aa`](../CHANGELOG.md)). Global shortcuts (PTT, Stop-all) register on
-Windows. Both depend on:
-
-- A live Windows shell (no headless CI validation).
-- Your shortcut combo being free.
-- Antivirus or security software not blocking the registration.
-
-If the tray icon never appears, or the global PTT fires for the wrong
-window, that's the seam we acknowledge here.
-
-## 5. No scheduled or unattended automation
-
-Sir Thaddeus does not run anything in the background on its own. There is
-no scheduler, no `IHostedService` for routines, no cron-like trigger. The
-v0.3.0 release explicitly removed the Automations feature for this reason —
-it was drifting away from the trust model.
-
-**Routines** is the v1 alternative: you press Run, you see a checklist, you
-walk through it. There is a meta-test in the runtime test suite that asserts
-no `IHostedService` is added under `Thaddeus.Runtime.Routines` — the "no
-scheduler" property is enforced by code review.
-
-If you need scheduled automation, v1 is the wrong tool. We have no plan to
-add it back in v1.1 either.
-
-## 6. No polished installer, no auto-update
-
-v1.0 ships single-file binaries via `dev/package-runtime.ps1`. They run
-without an installer; they update by replacement.
+The project has packaging scripts and can produce runnable artifacts, but v1 does not include a polished installer, signed MSIX, macOS app bundle, Linux desktop package, or auto-update channel.
 
 Specifically deferred:
 
-- **Windows MSIX** — needs a manifest, signing cert, and the MSIX Packaging
-  Tool.
+- **Windows MSIX** — needs a manifest, signing cert, and the MSIX Packaging Tool.
 - **macOS `.app` bundle + notarization** — needs an Apple Developer ID.
 - **Linux `.desktop` integration / AppImage** — straightforward but unbuilt.
 - **Auto-update channel** — no update server, no signing, no patcher.
 
-Power users on day one launch the binary from a terminal or a Start-menu
-shortcut they made themselves. A polished installer is a v1.1+ concern.
+Power users on day one launch the binary from a terminal or a Start-menu shortcut they make themselves. A polished installer is a v1.1+ concern.
 
-See [`docs/packaging.md`](packaging.md) for the current packaging path.
+## Runtime Portability Comes Before Desktop Parity
 
-## 7. Cross-platform runtime exists before full desktop parity
+The loopback runtime and MCP layers are broader than the current desktop UX. Cross-platform desktop parity is deferred until platform-specific shell packaging and ergonomics are validated.
 
-The single-file `Thaddeus.Runtime` binary builds for `win-x64`, `osx-arm64`,
-and `linux-x64`. It will host the workspace UI on any of them.
+## Model Quality Depends On The Configured Model
 
-What is **not** at parity on macOS/Linux:
-
-- The `Thaddeus.Shell` supervisor.
-- Tray, global shortcuts, push-to-talk.
-- Voice host startup paths (the Python sidecar runs, but install ergonomics
-  are Windows-tested).
-
-If you're running on Mac or Linux and you hit ergonomics gaps, that's
-expected. The runtime is the contract; the shell is the comfort.
-
-## 8. Local model quality depends on the model you chose
-
-Sir Thaddeus does not ship with a model. It assumes you brought your own
-local server (LM Studio, Ollama, or any OpenAI-compatible endpoint). The
-quality of every chat reply, tool selection, and wiki rewrite is bounded
-by your choice.
+Sir Thaddeus can talk to LM Studio, Ollama's OpenAI-compatible shim, hosted OpenAI-compatible APIs, and custom endpoints. Tool reliability, instruction following, latency, and answer quality depend heavily on the chosen model and server health.
 
 In particular:
 
-- **Tool routing** improves significantly when a small fast "gatekeeper"
-  model is configured to pre-classify each turn (Settings → Models →
-  Verification model). This avoids feeding every tool to a big slow model
-  on every prompt.
-- **Streaming reliability** depends on your endpoint. LM Studio is our
-  baseline; OpenAI-compatible community servers vary.
-- **Function-calling correctness** depends on the model. Smaller models
-  occasionally hallucinate "I can't do that" even when a tool is available;
-  the imperative-tool path ("use web_search") was added in 0.3.0
-  ([`b75e098`](../CHANGELOG.md)) to work around this.
+- **Tool routing** improves significantly when a small fast "gatekeeper" model is configured to pre-classify each turn (Settings → Models → Verification model). This avoids feeding every tool to a big slow model on every prompt.
+- **Streaming reliability** depends on your endpoint. LM Studio is the baseline; OpenAI-compatible community servers vary.
+- **Function-calling correctness** depends on the model. Smaller models occasionally hallucinate "I can't do that" even when a tool is available; the imperative-tool path ("use web_search") was added to work around this.
 
-If your model is bad at agentic workflows, Sir Thaddeus cannot fix that.
+## Web And Live Data Depend On Providers
 
-## 9. Web / live-data quality depends on providers and network
+Web search, page fetches, weather, place lookup, feeds, and other live-data tools depend on provider availability, network conditions, and rate limits. Demo and release checklists should include local file/document fallbacks.
 
-Web search, weather, places, and retailer fast-paths all hit external
-services. Their freshness and correctness are bounded by:
+When a provider is down or rate-limited, the agent surfaces the failure rather than fabricating an answer — that's by design.
 
-- The provider's quota and rate limits.
-- Your network reachability.
-- Whether the provider changed their HTML / JSON shape this week.
+## Settings → Advanced → Limits Are Saved But Not Enforced
 
-We don't claim "real-time market data" or "guaranteed fresh news". When a
-provider is down or rate-limited, the agent surfaces the failure rather
-than fabricating an answer — that's by design.
-
-## 10. Settings → Advanced → "Limits" are saved but not enforced
-
-The Advanced settings tab exposes tool-budget fields (max tool calls per
-turn, per session, etc.). v1.0 persists these values; the runtime does not
-yet read them at gate time. The tab labels itself "Saved but not yet
-enforced by the runtime" — believe the label.
+The Advanced settings tab exposes tool-budget fields (max tool calls per turn, per session, etc.). v1.0 persists these values; the runtime does not yet read them at gate time. The tab labels itself "Saved but not yet enforced by the runtime" — believe the label.
 
 This is a v1.1 finishing item.
 
-## 11. Profile and personality admin are not in the workspace
+## Profile And Personality Admin Are Not In The Workspace
 
-The runtime API does not expose `/api/profile` or `/api/personalities`.
-The headless terminal (`apps/headless-runtime`) still has profile and
-personality endpoints; the v2 hybrid runtime that the workspace talks to
-does not.
+The runtime API does not expose `/api/profile` or `/api/personalities`. The headless terminal (`apps/headless-runtime`) still has profile and personality endpoints; the v2 hybrid runtime that the workspace talks to does not.
 
-Practically: there is no UI to set a display name, alias, "about-me", or
-to swap personalities from the workspace. Greeting prompts can't reflect
-identity until v1.1 ships the endpoint and the UI.
+Practically: there is no UI to set a display name, alias, "about-me", or to swap personalities from the workspace. Greeting prompts can't reflect identity until v1.1 ships the endpoint and the UI.
 
-## 12. Audit / activity is read-only
+## Audit / Activity Is Read-Only
 
-The Activity page lists chat turns, voice turns, routine runs, and tool
-calls. You can click an entry for detail. v1.0 does **not** ship:
+The Activity page lists chat turns, voice turns, routine runs, and tool calls. You can click an entry for detail. v1.0 does **not** ship:
 
 - Filter / search across activity.
 - Bulk export of audit log.
 - A separate admin pane for security review.
 
-The audit log on disk (`~/.thaddeus/logs/audit.jsonl`) is the source of
-truth; the page is convenience.
+The audit log on disk (`~/.thaddeus/logs/audit.jsonl`) is the source of truth; the page is convenience.
 
-## 13. Screen-observe harness fixtures are not checked in
+## Advanced Admin Surfaces Are Deferred
 
-`dev/test.ps1` supports an optional **screen-observe harness** that
-exercises the Windows screen-observation tools against pre-recorded
-suites under `artifacts/harness-suites/screen-observe/`. Those suite
-fixtures are not in-tree (they're generated by a separate workflow), so
-running `dev/test.ps1` without `-SkipScreenObserveHarness` will fail with
-"Suite directory not found" even on a clean machine where every other
-test passed.
+The current workspace has activity and diagnostics, but not an advanced audit-search/admin pane. Review deeper audit details through local logs and artifacts when needed.
+
+## Screen-Observe Harness Fixtures Are Not Checked In
+
+`dev/test.ps1` supports an optional **screen-observe harness** that exercises the Windows screen-observation tools against pre-recorded suites under `artifacts/harness-suites/screen-observe/`. Those suite fixtures are not in-tree (they're generated by a separate workflow), so running `dev/test.ps1` without `-SkipScreenObserveHarness` will fail with "Suite directory not found" even on a clean machine where every other test passed.
 
 For v1.0 release validation, the canonical invocation is:
 
@@ -206,14 +97,14 @@ For v1.0 release validation, the canonical invocation is:
 pwsh dev/test.ps1 -Configuration Release -SkipScreenObserveHarness
 ```
 
-This is documented in [`docs/RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md).
-Generating the screen-observe fixtures and pinning a hash for them is a
-v1.1 task.
+This is documented in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Generating the screen-observe fixtures and pinning a hash for them is a v1.1 task.
+
+## Legacy Runtime Still Exists
+
+[apps/headless-runtime/](../apps/headless-runtime/) remains for harness and transitional workflows. It should not be promoted as the public v1 product surface.
 
 ---
 
 ## Posture
 
-These are not bugs. They are the line we drew so v1.0 ships honest. The
-roadmap ([`docs/ROADMAP.md`](ROADMAP.md)) names the milestone where each
-item moves.
+These are not bugs. They are the line drawn so v1.0 ships honest. The roadmap ([ROADMAP.md](ROADMAP.md)) names the milestone where each item moves.
