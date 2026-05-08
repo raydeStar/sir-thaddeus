@@ -10,7 +10,7 @@ The v2 hybrid shell consists of a single self-contained binary,
 
 - Hosts the React web UI (embedded under `wwwroot/`).
 - Exposes the local REST + WebSocket API on `127.0.0.1:<random-port>`.
-- Persists chat threads, memos, automations, and settings to
+- Persists chat threads, memos, routines, wiki content, and settings to
   `~/.thaddeus/` (or the lock-file directory when overridden).
 
 There is no separate UI process. Users open the printed URL in any modern

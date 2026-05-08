@@ -469,6 +469,22 @@ public sealed partial class SearchOrchestrator
             return null;
         }
 
+        foreach (var pattern in new[]
+        {
+            @"\bepisode\s+\d+\s+of\s+season\s+\d+\s+of\s+(?<entity>.+?)(?:\s+about)?[?.!]*$",
+            @"\bseason\s+\d+\s+episode\s+\d+\s+of\s+(?<entity>.+?)(?:\s+about)?[?.!]*$",
+            @"\bseason\s+\d+\s+of\s+(?<entity>.+?)(?:\s+about)?[?.!]*$"
+        })
+        {
+            var entityMatch = Regex.Match(question, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!entityMatch.Success)
+                continue;
+
+            var parsedEntity = entityMatch.Groups["entity"].Value.Trim(' ', '?', '.', '"', '\'');
+            if (!string.IsNullOrWhiteSpace(parsedEntity))
+                return (parsedEntity, season, episode);
+        }
+
         var marker = lower.IndexOf(" of ", StringComparison.Ordinal);
         if (marker < 0)
             marker = lower.IndexOf(" for ", StringComparison.Ordinal);

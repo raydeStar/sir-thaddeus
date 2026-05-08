@@ -38,6 +38,7 @@ export interface DiagnosticsResponse {
   state: string;
   threadCount: number;
   threadStoreRoot: string;
+  logsRoot: string;
   voiceAvailable: boolean;
   voice: VoiceRuntimeStatus;
   pid: number;

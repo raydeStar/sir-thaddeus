@@ -406,7 +406,7 @@ public sealed class LmStudioAssistant : IAssistant
             permissionGate: permissionGate,
             groupClassifier: RuntimeToolGroupClassifier.Instance,
             interceptors: Array.Empty<IToolCallInterceptor>(),
-            argsRewriters: Array.Empty<IToolArgsRewriter>(),
+            argsRewriters: [new LocationAwarePlacesArgsRewriter(() => LocationHint)],
             maxRoundTrips: MaxRoundTrips);
 
         return new ChatPipeline(new ITurnStep[]
@@ -416,7 +416,7 @@ public sealed class LmStudioAssistant : IAssistant
             // other step touches the turn — no LLM, no memory read, no
             // tool loop. Matches the legacy orchestrator's line 182-192
             // safety short-circuit byte-for-byte.
-            new SafetyBoundaryStep(),
+            new SafetyBoundaryStep(() => PersonalityRuntime?.Snapshot.Profile.Id),
 
             // Utility fast-path. Deterministic matches (unit conversion,
             // percent-of, simple arithmetic, classic reasoning tripwires)
@@ -495,7 +495,16 @@ public sealed class LmStudioAssistant : IAssistant
                 SearchFallbackExecutor,
                 buildRequest: ctx =>
                 {
+                    if (!ctx.ToolDefs.Any(def =>
+                            string.Equals(def.Function?.Name, ToolNames.WebSearch, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return null;
+                    }
+
                     var draft = ctx.AssistantDraft ?? string.Empty;
+                    if (LooksLikeCompletedWeatherNewsEvidenceDraft(draft))
+                        return null;
+
                     var refusal = RefusalDetector.HasRefusalOrUncertaintySignals(draft, draft);
                     // Layer B: hedge detection catches "I believe ... as of
                     // my training data" drafts on factual prompts — same
@@ -511,6 +520,8 @@ public sealed class LmStudioAssistant : IAssistant
                         HasRefusalOrUncertaintySignals = true,
                     };
                 }),
+
+            new PostProcessStep(sanitize, "PostProcess:SearchFallbackSanitize"),
 
             // Fire-and-forget user + assistant memory writes. No-op when
             // AutoMemoryExtractor is null.
@@ -593,6 +604,20 @@ public sealed class LmStudioAssistant : IAssistant
             }
         }
         if (start < text.Length) yield return text.Substring(start);
+    }
+
+    private static bool LooksLikeCompletedWeatherNewsEvidenceDraft(string draft)
+    {
+        if (string.IsNullOrWhiteSpace(draft))
+            return false;
+
+        var lower = draft.ToLowerInvariant();
+        return lower.Contains("weather in ", StringComparison.Ordinal) &&
+               lower.Contains("local news in ", StringComparison.Ordinal) &&
+               (lower.Contains("current conditions are", StringComparison.Ordinal) ||
+                lower.Contains("live forecast lookup returned", StringComparison.Ordinal)) &&
+               (lower.Contains("live search returned", StringComparison.Ordinal) ||
+                lower.Contains("live search did not return", StringComparison.Ordinal));
     }
 
 }

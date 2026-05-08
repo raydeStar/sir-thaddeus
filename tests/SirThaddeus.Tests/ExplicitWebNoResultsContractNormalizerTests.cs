@@ -21,7 +21,7 @@ public sealed class ExplicitWebNoResultsContractNormalizerTests
     }
 
     [Fact]
-    public void TryBuildResponse_WhenExplicitCSharpChangesPromptAndNoResults_ReturnsStableFallback()
+    public void TryBuildResponse_WhenExplicitCSharpChangesPromptAndNoResults_ReturnsUnavailableMessage()
     {
         var response = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(
             "Use web_search to answer what changed in C# 13 and keep it practical.",
@@ -33,11 +33,9 @@ public sealed class ExplicitWebNoResultsContractNormalizerTests
                 Success = true
             }]);
 
-        Assert.NotNull(response);
-        Assert.Contains("C# 13", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("params collections", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("System.Threading.Lock", response, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("unavailable", response, StringComparison.OrdinalIgnoreCase);
+        // Live search returned no results, so the agent must not invent a feature list.
+        // It defers to the unavailable message instead.
+        Assert.Equal(ExplicitWebNoResultsContractNormalizer.UnavailableMessage, response);
     }
 
     [Fact]
@@ -53,6 +51,25 @@ public sealed class ExplicitWebNoResultsContractNormalizerTests
                 Success = true
             }]);
 
+        Assert.Equal(ExplicitWebNoResultsContractNormalizer.UnavailableMessage, response);
+    }
+
+    [Fact]
+    public void TryBuildResponse_WhenLatestStablePythonHasNoResults_ReturnsUnavailableMessage()
+    {
+        var response = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(
+            "What is the latest stable version of Python?",
+            [new ToolCallRecord
+            {
+                ToolName = "web_search",
+                Arguments = "{}",
+                Result = "[search: 0 result(s) returned]",
+                Success = true
+            }]);
+
+        // Live search returned no results, so the agent must not invent a subject-specific
+        // "check python.org" response — that's still a hard-coded answer template. It defers
+        // to the generic unavailable message instead.
         Assert.Equal(ExplicitWebNoResultsContractNormalizer.UnavailableMessage, response);
     }
 

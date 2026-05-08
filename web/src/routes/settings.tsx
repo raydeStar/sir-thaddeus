@@ -40,6 +40,13 @@ import {
 import { readRuntimeMetadata } from '../lib/runtime';
 import { acquireMicStream, clearMicResolutionCache, stopMicStream } from '../lib/micCapture';
 import { warmVoiceHost } from '../lib/voiceApi';
+import {
+  applyTheme,
+  readThemePreference,
+  watchSystemTheme,
+  writeThemePreference,
+  type ThemePreference,
+} from '../lib/theme';
 import type {
   SettingsDocument,
   LocationSettings,
@@ -433,6 +440,8 @@ function GeneralTab({
   return (
     <div className="space-y-6" role="tabpanel" aria-labelledby="settings-tab-general">
       <SystemStatusSection />
+
+      <ThemeSection />
 
       <Section
         title="Desktop behavior"
@@ -1594,6 +1603,63 @@ function AdvancedTab({
         </div>
       </Section>
     </div>
+  );
+}
+
+// ───────────────────────── Theme ─────────────────────────
+
+function ThemeSection() {
+  const [pref, setPref] = useState<ThemePreference>(() => readThemePreference());
+
+  useEffect(() => {
+    // Keep "system" mode in sync with OS theme switches without requiring
+    // a tab reload. The watch returns a disposer; call it on unmount.
+    return watchSystemTheme(() => pref);
+  }, [pref]);
+
+  const choose = (next: ThemePreference) => {
+    setPref(next);
+    writeThemePreference(next);
+    // Re-apply explicitly in case the change was a system swap-in/out so the
+    // class on <html> reflects the new effective theme immediately.
+    applyTheme(next);
+  };
+
+  const options: ReadonlyArray<{ value: ThemePreference; label: string; hint: string }> = [
+    { value: 'light', label: 'Light', hint: 'Always light, ignores OS theme.' },
+    { value: 'dark', label: 'Dark', hint: 'Always dark, ignores OS theme.' },
+    { value: 'system', label: 'System', hint: 'Follows your OS appearance setting.' },
+  ];
+
+  return (
+    <Section
+      title="Appearance"
+      description="Light, dark, or follow the system. Stored locally in this browser."
+    >
+      <div className="grid gap-2 sm:grid-cols-3" data-testid="settings-theme-picker">
+        {options.map((o) => {
+          const selected = pref === o.value;
+          return (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              data-testid={`settings-theme-${o.value}`}
+              onClick={() => choose(o.value)}
+              className={`rounded-xl border px-3.5 py-3 text-left transition ${
+                selected
+                  ? 'border-accent bg-accent-soft text-ink'
+                  : 'border-line bg-canvas-raised text-ink-muted hover:text-ink'
+              }`}
+            >
+              <p className="text-sm font-medium text-ink">{o.label}</p>
+              <p className="mt-0.5 text-[12px] text-ink-muted">{o.hint}</p>
+            </button>
+          );
+        })}
+      </div>
+    </Section>
   );
 }
 

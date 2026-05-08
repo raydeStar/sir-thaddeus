@@ -127,6 +127,9 @@ public sealed partial class FastLlmFootmanRouter : IFootmanRouter
         if (features.IsLogicPuzzle)
             return RoutingDecision.CreateDeterministic(requestId, AgentState.Chat, "heuristic_logic_puzzle");
 
+        if (LooksLikePlainChat(features))
+            return RoutingDecision.CreateDeterministic(requestId, AgentState.Chat, "heuristic_chat");
+
         // ── Single-family short-circuits ────────────────────────────────
         // When the feature extractor returns an UNAMBIGUOUS single bucket,
         // skip the LLM gatekeeper entirely. 2B models often abstain on
@@ -221,6 +224,21 @@ public sealed partial class FastLlmFootmanRouter : IFootmanRouter
         }
 
         return null;
+    }
+
+    private static bool LooksLikePlainChat(RoutingFeatures features)
+    {
+        return !features.LooksLikeFactLookup
+               && !features.LooksLikeNewsLookup
+               && !features.LooksLikeDeepDive
+               && !features.LooksLikeLocalBusiness
+               && !features.LooksLikeScreenRequest
+               && !features.LooksLikeFileRequest
+               && !features.LooksLikeSystemCommand
+               && !features.LooksLikeBrowseRequest
+               && !features.LooksLikeMemoryWrite
+               && !features.LooksLikeWebSearch
+               && !features.IsSlashCommand;
     }
 
     // ── Prompt Construction ──────────────────────────────────────────

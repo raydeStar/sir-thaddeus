@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using SirThaddeus.Agent.Routing;
 
 namespace SirThaddeus.Agent;
@@ -6,7 +5,7 @@ namespace SirThaddeus.Agent;
 public static class ExplicitWebNoResultsContractNormalizer
 {
     public const string TimeoutMessage =
-        "Live lookup timed out for this request, so I do not have confirmed results to quote right now. " +
+        "Live lookup hit a timeout for this request, so I do not have confirmed results to quote right now. " +
         "Please retry in a moment or narrow the query.";
 
     public const string UnavailableMessage =
@@ -21,10 +20,12 @@ public static class ExplicitWebNoResultsContractNormalizer
             return null;
 
         var lower = userMessage.Trim().ToLowerInvariant();
-        if (!string.Equals(
-                IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower),
-                Intents.LookupSearch,
-                StringComparison.OrdinalIgnoreCase))
+        var isExplicitLookupRequest = string.Equals(
+            IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower),
+            Intents.LookupSearch,
+            StringComparison.OrdinalIgnoreCase);
+        var isLatestStableVersionRequest = LooksLikeLatestStableVersionRequest(lower);
+        if (!isExplicitLookupRequest && !isLatestStableVersionRequest)
         {
             return null;
         }
@@ -40,9 +41,6 @@ public static class ExplicitWebNoResultsContractNormalizer
 
         if (lower.Contains("timeout", StringComparison.Ordinal))
             return TimeoutMessage;
-
-        if (TryBuildStableSoftwareChangesFallback(userMessage) is { Length: > 0 } stableFallback)
-            return stableFallback;
 
         return UnavailableMessage;
     }
@@ -107,6 +105,9 @@ public static class ExplicitWebNoResultsContractNormalizer
         return UnavailableMessage;
     }
 
+    private static bool LooksLikeLatestStableVersionRequest(string lowerUserMessage)
+        => lowerUserMessage.Contains("latest stable version", StringComparison.Ordinal);
+
     private static bool IsRelevantWebTool(string toolName)
     {
         return toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
@@ -124,20 +125,4 @@ public static class ExplicitWebNoResultsContractNormalizer
                lower.Contains("no matching", StringComparison.Ordinal);
     }
 
-    private static string? TryBuildStableSoftwareChangesFallback(string userMessage)
-    {
-        var lower = userMessage.ToLowerInvariant();
-        var asksForChanges = lower.Contains("what changed", StringComparison.Ordinal) ||
-                             lower.Contains("what's new", StringComparison.Ordinal) ||
-                             lower.Contains("whats new", StringComparison.Ordinal) ||
-                             lower.Contains("new in", StringComparison.Ordinal) ||
-                             lower.Contains("changes", StringComparison.Ordinal);
-        if (!asksForChanges)
-            return null;
-
-        if (!Regex.IsMatch(lower, @"\b(c#|csharp)\s*13\b", RegexOptions.IgnoreCase))
-            return null;
-
-        return "In C# 13, the practical changes are mostly about smoother everyday code: params collections make APIs easier to call with collection inputs, lock works better with System.Threading.Lock for clearer synchronization, and smaller parser and escape-sequence refinements reduce friction in string-heavy code. In day-to-day work, the biggest wins are simpler collection parameters and more explicit locking patterns.";
-    }
 }

@@ -1,5 +1,114 @@
 # Changelog
 
+## 1.0.0 — 2026-05-08
+
+The v1.0 release. The hybrid Shell + Runtime + workspace surface is now
+the product Sir Thaddeus ships as. Scope is locked in
+[`V1_SCOPE.md`](V1_SCOPE.md); the release-readiness gate is in
+[`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
+
+This release does not introduce major new product features beyond what
+shipped in 0.3.0. Its job is to package, stabilize, document, and validate
+what was already there as a credible v1.0 power-user release.
+
+### What changed
+
+#### Workspace UX polish
+
+- **Memos: edit + Markdown body.** The memo cards on `/memory` now have
+  an inline edit affordance (title / body / tags) and render the body
+  through `Markdown` instead of as raw `<pre>`. Closes the gap between
+  the create form's "(markdown)" hint and what was actually displayed.
+- **Routines: create + enable/disable from the list.** The `/routines`
+  index page now has a "+ New routine" button (creates a draft and routes
+  to the editor) and an inline enable/disable switch on each card with a
+  "Show disabled" reveal. Previously the only way to create a routine was
+  via the seeded templates.
+- **Diagnostics: logs path discoverable.** `/api/diagnostics` now
+  returns `logsRoot` (derived from the lock-file directory + `logs`),
+  surfaced as a row on the Diagnostics page so users can find their
+  log directory without hunting in `%LocalAppData%`.
+- **Settings: legacy `/settings/$category` redirects.** Old per-category
+  URLs now `beforeLoad`-redirect to the canonical tabbed `/settings`
+  page. Old bookmarks no longer dead-end on a stub.
+- **Theme: manual Light / Dark / System picker.** Settings → General →
+  Appearance. The theme is applied to `<html>` before React mounts (no
+  flash of light theme on a dark-preferred boot) and persisted in
+  `localStorage`. Tailwind switched to `darkMode: 'class'`.
+
+#### Build infrastructure
+
+- **ESLint v9 flat config.** `web/eslint.config.js` lands with React +
+  TypeScript + react-hooks rules and a `--max-warnings=0` policy.
+  `npm run lint` is now a real CI gate. Fixed three latent issues
+  surfaced by the first lint run:
+  - Useless escape (`\[`) in the chat-route TTS sentence-split regex.
+  - An unused `eslint-disable` directive in the chat route.
+  - A `messages` array recreated every render that was thrashing the
+    "speak voice reply" effect — wrapped in `useMemo`.
+- **Versioning.** `Directory.Build.props` `VersionPrefix` and
+  `web/package.json` `version` both move to `1.0.0`. Tag-triggered CI
+  release (`ci-release.yml`) overrides via `-p:Version=…`.
+
+#### Public-facing documentation
+
+- New `V1_SCOPE.md` — v1 contract: positioning, target user, Core/Beta/
+  Deferred lists, non-goals, release-readiness gate.
+- New `docs/DEMO_SCRIPT.md` — golden 3–5 minute demo with prompts,
+  fallback prompts, pre-demo checklist, and "what not to show".
+- New `docs/KNOWN_LIMITATIONS.md` — 13 honestly-named release boundaries
+  framed as intentional, including Windows-first ergonomics, voice as
+  Beta, no scheduled automation, no polished installer in v1.0,
+  saved-not-yet-enforced limits, profile/personality admin deferred,
+  and the screen-observe harness fixture gap.
+- New `docs/RELEASE_CHECKLIST.md` — 17-section pre-release gate with
+  checkboxes, Beta-skip-or-pass slots, and a sign-off block.
+- New `docs/ROADMAP.md` — three milestones (v1.0 / v1.1 / v2.0) with
+  explicit "things that are never" and a swap-only change rule.
+- New `docs/ARCHITECTURE_PUBLIC.md` — 10-minute architecture summary
+  derived from the full architecture doc.
+- `README.md` rewritten as a public product page. Honest Core/Beta/
+  Deferred labelling, working quickstart commands, links to the new
+  docs, no overclaim.
+- `FEATURES_QA.md` realigned: every section tagged Core / Beta /
+  Deferred. Section 7 (Profiles & Personalities) marked Deferred —
+  the runtime API does not expose `/api/profile` or
+  `/api/personalities`, and the workspace does not advertise admin UI
+  for either in v1.0.
+- `README_FIRST_RUN.md`, `docs/hybrid-shell.md`, `docs/packaging.md`
+  swept of stale references (Automations → Routines + Wiki, the
+  removed "pick a personality" wizard step replaced with the actual
+  4-step Welcome / Privacy / Voice / Done flow).
+
+### What's intentionally **not** in v1.0
+
+These are documented as Deferred. They are not bugs. Roadmap milestone
+in parentheses.
+
+- Profile / personality admin in the workspace UI (v1.1).
+- Settings → Advanced → Limits enforcement (v1.1).
+- Polished installers — MSIX, signed `.app`, AppImage (v2.0).
+- Auto-update channel (v2.0).
+- Cross-platform desktop UX parity (v2.0).
+- Advanced audit-search / admin pane (v1.1).
+- Scheduled / unattended automations — **never**.
+
+### Tests + build at tag
+
+- `dotnet build SirThaddeus.sln` (Release): 0 errors, 0 warnings.
+- `dev/test.ps1 -Configuration Release -SkipScreenObserveHarness`:
+  **2,457 / 2,457 unit tests passing**.
+- `cd web && npm run lint`: 0 errors, 0 warnings.
+- `cd web && npm run typecheck`: clean.
+- `cd web && npm run build`: clean (one chunk-size warning on the main
+  bundle, pre-existing, non-blocking).
+
+The screen-observe harness is opt-in for releases — its fixture suite is
+not checked in. See [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)
+§13.
+
+---
+
 ## 0.3.0 — 2026-04-24
 
 First versioned release. Previous builds reported `0.0.0-dev`; from here

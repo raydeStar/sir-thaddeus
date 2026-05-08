@@ -55,10 +55,10 @@ public sealed class MemoryContextStep : ITurnStep
         if (_provider is null)
             return new StepResult.Continue(context);
 
+        var request = _requestBuilder(context);
         MemoryContextResult result;
         try
         {
-            var request = _requestBuilder(context);
             result = await _provider.GetContextAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -76,7 +76,11 @@ public sealed class MemoryContextStep : ITurnStep
 
         // Propagate the onboarding signal regardless of pack contents
         // so OnboardingInjectionStep can fire on empty-memory turns.
-        var withOnboarding = context with { IsNewUser = result.OnboardingNeeded };
+        var withOnboarding = context with
+        {
+            IsNewUser = result.OnboardingNeeded,
+            ToolCallsMade = AppendMemoryToolCall(context.ToolCallsMade, result, request)
+        };
 
         if (string.IsNullOrWhiteSpace(result.PackText))
             return new StepResult.Continue(withOnboarding);
@@ -91,6 +95,37 @@ public sealed class MemoryContextStep : ITurnStep
         ConversationId = context.ThreadId,
         MemoryEnabled = true,
     };
+
+    private static IReadOnlyList<ToolCallRecord> AppendMemoryToolCall(
+        IReadOnlyList<ToolCallRecord> existing,
+        MemoryContextResult result,
+        MemoryContextRequest request)
+    {
+        var toolName = result.Provenance.SourceTool;
+        if (string.IsNullOrWhiteSpace(toolName))
+            return existing;
+
+        if (!string.Equals(toolName, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(toolName, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase))
+        {
+            return existing;
+        }
+
+        var calls = existing.ToList();
+        calls.Add(new ToolCallRecord
+        {
+            ToolName = toolName,
+            Arguments = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                query = request.UserMessage,
+                conversationId = request.ConversationId,
+                activeProfileId = request.ActiveProfileId
+            }),
+            Result = result.RawResult ?? result.PackText,
+            Success = result.Provenance.Success,
+        });
+        return calls;
+    }
 
     private static IReadOnlyList<ChatMessage> AppendMemoryPackToSystemMessage(
         IReadOnlyList<ChatMessage> messages,

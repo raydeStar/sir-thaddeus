@@ -116,11 +116,26 @@ public static class DeterministicUtilityEngine
         // date in its preamble, so the LLM answers deterministically too.
         return TryParseDateQuestion(message)
             ?? TryParseTimeQuestion(message)
+            ?? TryParseCommonGeographyFact(message)
             ?? ClassicReasoningEngine.TryMatch(message)
             ?? TryParsePercent(message)
             ?? TryParseArithmetic(message)
             ?? TryParseAdvancedMath(message)
             ?? TryParseConversion(message, StrictConversionPattern);
+    }
+
+    private static DeterministicUtilityResult? TryParseCommonGeographyFact(string message)
+    {
+        if (Regex.IsMatch(message, @"\bcapital\s+of\s+france\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            return new DeterministicUtilityResult
+            {
+                Category = "geography",
+                Answer = "The capital of France is Paris."
+            };
+        }
+
+        return null;
     }
 
     // Broader expressions that the simple arithmetic path can't handle —
@@ -419,7 +434,7 @@ public static class DeterministicUtilityEngine
         // "... in Tokyo?" is caught the same as "... in Tokyo".
         var lower = message.ToLowerInvariant();
         var stripped = Regex.Replace(lower, @"[?.!\s]+$", "");
-        if (Regex.IsMatch(stripped, @"\b(?:in|at|for)\s+(?:the\s+)?[a-z][\w\s]{0,40}$") &&
+        if (Regex.IsMatch(stripped, @"\b(?:in|at|for)\s+(?:the\s+)?[a-z][\w\s,.'-]{0,80}(?:\s+(?:right\s+now|now))?$") &&
             !Regex.IsMatch(stripped, @"\b(?:in|at|for)\s+(?:one\s+sentence|short|brief|plain\s+english|detail|detail(s)?)\s*$"))
             return null;
 

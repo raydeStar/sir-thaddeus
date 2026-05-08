@@ -137,6 +137,82 @@ public class ToolLoopStepTests
     }
 
     [Fact]
+    public async Task Synthesizes_current_time_after_timezone_lookup()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool(ToolNames.WeatherGeocode, "{\"location\":\"Tokyo, Japan\"}"),
+            LlmReply.Tool(ToolNames.ResolveTimezone, "{\"countryCode\":\"JP\",\"latitude\":35.6768601,\"longitude\":139.7638947}"),
+            LlmReply.Tool(ToolNames.TimeNow, "{}"),
+            LlmReply.Final("I cannot provide the live time."));
+        var mcp = new StubMcp((tool, _) => tool switch
+        {
+            var name when string.Equals(name, ToolNames.WeatherGeocode, StringComparison.OrdinalIgnoreCase) =>
+                "[Weather geocode: 3 result(s), source=photon]",
+            var name when string.Equals(name, ToolNames.ResolveTimezone, StringComparison.OrdinalIgnoreCase) =>
+                "[Timezone lookup: timezone=Asia/Tokyo, source=open-meteo]",
+            var name when string.Equals(name, ToolNames.TimeNow, StringComparison.OrdinalIgnoreCase) =>
+                "{\"iso\":\"2026-05-07T20:29:14.0325030-06:00\",\"unix_ms\":1778207354032,\"timezone\":\"Mountain Standard Time\",\"offset\":\"-06:00\"}",
+            _ => "ok"
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = NewContext() with
+        {
+            UserText = "What time is it in Tokyo, Japan right now?",
+            LlmMessages = new[] { ChatMessage.System("sys"), ChatMessage.User("What time is it in Tokyo, Japan right now?") },
+            ToolDefs = new[]
+            {
+                new ToolDefinition { Function = new FunctionDefinition { Name = ToolNames.WeatherGeocode, Description = "geocode", Parameters = new { } } },
+                new ToolDefinition { Function = new FunctionDefinition { Name = ToolNames.ResolveTimezone, Description = "timezone", Parameters = new { } } },
+                new ToolDefinition { Function = new FunctionDefinition { Name = ToolNames.TimeNow, Description = "time", Parameters = new { } } },
+            }
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(2, cont.Next.ToolCallsMade.Count);
+        Assert.Contains("currently", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Tokyo, Japan", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Asia/Tokyo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("open-meteo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("clock=system UTC", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Synthesizes_current_time_from_json_timezone_payload_without_advertised_defs()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool(ToolNames.WeatherGeocode, "{\"location\":\"Tokyo, Japan\"}"),
+            LlmReply.Tool(ToolNames.ResolveTimezone, "{\"countryCode\":\"JP\",\"latitude\":35.6768601,\"longitude\":139.7638947}"),
+            LlmReply.Final("I cannot provide the live time."));
+        var mcp = new StubMcp((tool, _) => tool switch
+        {
+            var name when string.Equals(name, ToolNames.WeatherGeocode, StringComparison.OrdinalIgnoreCase) =>
+                "{\"results\":[{\"name\":\"Tokyo\"}],\"source\":\"photon\"}",
+            var name when string.Equals(name, ToolNames.ResolveTimezone, StringComparison.OrdinalIgnoreCase) =>
+                "{\"timezone\":\"Asia/Tokyo\",\"source\":\"open-meteo\"}",
+            _ => "ok"
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = NewContext() with
+        {
+            UserText = "What time is it in Tokyo, Japan right now?",
+            LlmMessages = new[] { ChatMessage.System("sys"), ChatMessage.User("What time is it in Tokyo, Japan right now?") },
+            ToolDefs = Array.Empty<ToolDefinition>()
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(2, cont.Next.ToolCallsMade.Count);
+        Assert.Contains("currently", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Tokyo, Japan", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Asia/Tokyo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("open-meteo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cannot provide", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Mcp_exception_is_surfaced_as_failed_outcome_not_thrown()
     {
         // The step's contract is "run the loop to completion"; an MCP

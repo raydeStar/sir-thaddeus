@@ -50,6 +50,35 @@ public class SearchOrchestratorTests
         Assert.Same(toolCalls, response.ToolCallsMade);
     }
 
+    [Fact]
+    public void ProductRecommendationFilter_RejectsGoogleNewsEditorialSourcesForRetailerRequest()
+    {
+        var sources = new List<SourceItem>
+        {
+            new()
+            {
+                SourceId = "editorial",
+                Url = "https://news.google.com/rss/articles/example?oc=5",
+                Title = "The 6 Best Ashwagandha Supplements of 2026",
+                Domain = "news.google.com",
+                Snippet = "A review roundup that mentions Amazon."
+            },
+            new()
+            {
+                SourceId = "amazon",
+                Url = "https://www.amazon.com/dp/B000000000",
+                Title = "Ashwagandha Supplement 600mg",
+                Domain = "amazon.com",
+                Snippet = "Ashwagandha supplement listing with reviews."
+            }
+        };
+
+        var filtered = SearchOrchestrator.TestHook_FilterProductSources(sources, ["amazon.com"], "Ashwagandha");
+
+        var source = Assert.Single(filtered);
+        Assert.Equal("amazon", source.SourceId);
+    }
+
     private sealed class FakeLlmClient : ILlmClient
     {
         public Task<LlmResponse> ChatAsync(

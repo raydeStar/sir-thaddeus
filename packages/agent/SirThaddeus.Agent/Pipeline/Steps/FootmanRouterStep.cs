@@ -117,7 +117,61 @@ public sealed class FootmanRouterStep : ITurnStep
         if (_footman is null) return true;
         if (context.IsAutomationRun) return true;
         if (context.ToolDefs.Count == 0) return true;
+        if (HarnessAllowsOnlyMemoryRetrieve()) return true;
+        if (HasWeatherGeocode(context) && HasWeatherCue(context.UserText)) return true;
+        if (HasMemoryRetrieve(context) && HasPersonalContextCue(context.UserText)) return true;
         if (context.Features is null) return true;
         return false;
+    }
+
+    private static bool HasWeatherGeocode(TurnContext context)
+        => context.ToolDefs.Any(def =>
+            string.Equals(def.Function?.Name, ToolNames.WeatherGeocode, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(def.Function?.Name, ToolNames.WeatherGeocodeAlt, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasWeatherCue(string? userText)
+    {
+        if (string.IsNullOrWhiteSpace(userText))
+            return false;
+
+        var lower = userText.ToLowerInvariant();
+        return lower.Contains("weather", StringComparison.Ordinal) ||
+               lower.Contains("forecast", StringComparison.Ordinal) ||
+               lower.Contains("temperature", StringComparison.Ordinal) ||
+               lower.Contains("outlook", StringComparison.Ordinal);
+    }
+
+    private static bool HasMemoryRetrieve(TurnContext context)
+        => context.ToolDefs.Any(def =>
+            string.Equals(def.Function?.Name, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(def.Function?.Name, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasPersonalContextCue(string? userText)
+    {
+        if (string.IsNullOrWhiteSpace(userText))
+            return false;
+
+        var lower = " " + userText.Trim().ToLowerInvariant() + " ";
+        return lower.Contains(" my ", StringComparison.Ordinal) ||
+               lower.Contains(" i'm ", StringComparison.Ordinal) ||
+               lower.Contains(" im ", StringComparison.Ordinal) ||
+               lower.Contains(" i've ", StringComparison.Ordinal) ||
+               lower.Contains(" ive ", StringComparison.Ordinal) ||
+               lower.Contains(" we ", StringComparison.Ordinal) ||
+               lower.Contains(" our ", StringComparison.Ordinal);
+    }
+
+    private static bool HarnessAllowsOnlyMemoryRetrieve()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        var tools = raw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(tool => !string.IsNullOrWhiteSpace(tool))
+            .ToList();
+        return tools.Count == 1 &&
+               (string.Equals(tools[0], ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tools[0], ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -570,13 +570,8 @@ public class FootmanRouterTests
             throw new HttpRequestException("LLM is down"));
 
         var router = new FastLlmFootmanRouter(llm);
-        // The test needs a prompt that does NOT match any deterministic
-        // short-circuit — otherwise we never call the LLM and the throw
-        // is irrelevant. A vague, opinion-ish ask has no single-family
-        // signal and is exactly the shape that should defer to the LLM.
-        const string ambiguousPrompt = "think about that for a moment";
-        var features = RoutingFeatures.Extract(ambiguousPrompt);
-        var decision = await router.RouteAsync(ambiguousPrompt, features);
+        const string mixedSignalPrompt = "find news about delis near me";
+        var decision = await router.RouteAsync(mixedSignalPrompt, MixedSignalFeatures());
 
         Assert.Equal(AgentState.Fallback, decision.NextState);
         Assert.True(decision.Abstain);
@@ -589,8 +584,8 @@ public class FootmanRouterTests
         var llm = new FakeLlmClient(_ => "I don't know how to route this message.");
 
         var router = new FastLlmFootmanRouter(llm);
-        var features = RoutingFeatures.Extract("test message");
-        var decision = await router.RouteAsync("test message", features);
+        const string mixedSignalPrompt = "find news about delis near me";
+        var decision = await router.RouteAsync(mixedSignalPrompt, MixedSignalFeatures());
 
         Assert.Equal(AgentState.Fallback, decision.NextState);
         Assert.True(decision.Abstain);
@@ -603,8 +598,8 @@ public class FootmanRouterTests
         var llm = new SlowFakeLlmClient(delayMs: 5000);
 
         var router = new FastLlmFootmanRouter(llm, timeout: TimeSpan.FromMilliseconds(50));
-        var features = RoutingFeatures.Extract("test");
-        var decision = await router.RouteAsync("test", features);
+        const string mixedSignalPrompt = "find news about delis near me";
+        var decision = await router.RouteAsync(mixedSignalPrompt, MixedSignalFeatures());
 
         Assert.Equal(AgentState.Fallback, decision.NextState);
         Assert.True(decision.Abstain);
@@ -625,13 +620,12 @@ public class FootmanRouterTests
     }
 
     [Fact]
-    public async Task HeuristicFootmanRouter_AmbiguousPrompt_FailsOpenWithoutLlm()
+    public async Task HeuristicFootmanRouter_MixedSignals_FailsOpenWithoutLlm()
     {
         var router = new HeuristicFootmanRouter();
-        const string ambiguousPrompt = "think about that for a moment";
-        var features = RoutingFeatures.Extract(ambiguousPrompt);
+        const string mixedSignalPrompt = "find news about delis near me";
 
-        var decision = await router.RouteAsync(ambiguousPrompt, features);
+        var decision = await router.RouteAsync(mixedSignalPrompt, MixedSignalFeatures());
 
         Assert.Equal(AgentState.Fallback, decision.NextState);
         Assert.True(decision.Abstain);
@@ -646,6 +640,12 @@ public class FootmanRouterTests
         var llm = new FakeLlmClient(_ => fixedResponse);
         return new FastLlmFootmanRouter(llm);
     }
+
+    private static RoutingFeatures MixedSignalFeatures() => new()
+    {
+        LooksLikeNewsLookup = true,
+        LooksLikeLocalBusiness = true,
+    };
 }
 
 /// <summary>
@@ -781,10 +781,12 @@ public class FootmanDeterministicRouteTests
     }
 
     [Fact]
-    public void No_signals_defers_to_LLM_classifier()
+    public void No_signals_routes_to_chat_fast_path()
     {
         var features = new RoutingFeatures();
-        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
-        Assert.Null(d);
+        var decision = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.NotNull(decision);
+        Assert.Equal(AgentState.Chat, decision!.NextState);
+        Assert.Equal("heuristic_chat", decision.ReasonCode);
     }
 }

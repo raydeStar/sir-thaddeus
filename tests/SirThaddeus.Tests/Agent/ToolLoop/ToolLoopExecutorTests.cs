@@ -686,9 +686,7 @@ public class ToolLoopExecutorTests
 
         Assert.True(response.Success);
         Assert.Equal(1, llmCallCount);
-        Assert.Equal(
-            "Live lookup timed out for this request, so I do not have confirmed results to quote right now. Please retry in a moment or narrow the query.",
-            response.Text);
+        Assert.Equal(ExplicitWebNoResultsContractNormalizer.TimeoutMessage, response.Text);
     }
 
     [Fact]

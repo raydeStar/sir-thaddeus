@@ -278,9 +278,11 @@ public class SearchOfflineFallbackTests
             ct: CancellationToken.None);
 
         Assert.True(response.Success);
-        // C# 13 "what changed" prompt triggers the stable software-changes fallback,
-        // which provides a real answer instead of an unavailable message.
-        Assert.Contains("C# 13", response.Text, StringComparison.OrdinalIgnoreCase);
+        // Live search returned 0 results, so the agent must not invent a feature list.
+        // It should report the lookup is unavailable and not silently fall back to the browser.
+        Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("params collections", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("System.Threading.Lock", response.Text, StringComparison.OrdinalIgnoreCase);
         var toolCall = Assert.Single(mcp.Calls);
         Assert.Equal("web_search", toolCall, ignoreCase: true);
         Assert.DoesNotContain(mcp.Calls, call =>
@@ -376,7 +378,7 @@ public class SearchOfflineFallbackTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_WhenKnownLatestVersionSearchReturnsNoResults_UsesPinnedDeterministicAnswer()
+    public async Task ExecuteAsync_WhenLatestVersionSearchReturnsNoResults_ReportsLookupUnavailable()
     {
         var llm = new FakeLlmClient((messages, _) =>
         {
@@ -430,9 +432,9 @@ public class SearchOfflineFallbackTests
             ct: CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.Equal(
-            "Answer: .NET 9 is the latest stable major release as of 2025.\nCommentary: Use the latest .NET 9.x patch SDK/runtime for current fixes and security updates.",
-            response.Text);
+        // Live search returned no results, so the agent must not invent any answer string.
+        // The only acceptable response is the generic unavailable status.
+        Assert.Equal(ExplicitWebNoResultsContractNormalizer.UnavailableMessage, response.Text);
         Assert.Contains(mcp.Calls, call =>
             call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(mcp.Calls, call =>
@@ -593,7 +595,7 @@ public class SearchOfflineFallbackTests
     }
 
     [Fact]
-    public async Task OfflineWebReasoningResponder_WhenStrictTwoLineFallbackIsUsed_DoesNotPrefixUnavailableBanner()
+    public async Task OfflineWebReasoningResponder_WhenStrictTwoLineLatestVersionPromptHasNoLiveData_DoesNotInventAnswer()
     {
         const string userMessage = "Use web_search to find the latest stable version of .NET as of 2025. Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.";
 
@@ -607,11 +609,12 @@ public class SearchOfflineFallbackTests
             failureReason: "tool_unavailable",
             cancellationToken: CancellationToken.None);
 
+        // Live data is unavailable, so the offline responder must NOT synthesize a clean
+        // "Answer: .NET X" two-line response — that would be a hard-coded answer pretending
+        // to know the current version. It should surface the outage instead.
         Assert.True(response.Success);
-        Assert.Equal(
-            "Answer: .NET 9 is the latest stable major release as of 2025.\nCommentary: Use the latest .NET 9.x patch SDK/runtime for current fixes and security updates.",
-            response.Text);
-        Assert.DoesNotContain("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"\.NET\s+\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase), response.Text);
     }
 
     [Fact]
@@ -1092,6 +1095,7 @@ public class SearchOfflineFallbackTests
             return Task.FromResult(result);
         }
     }
+
 }
 
 /// <summary>
@@ -1213,6 +1217,25 @@ public class BareResponseEnrichmentTests
     }
 
     [Fact]
+    public void SanitizeFinalResponse_OverlongTcpEssayWithoutSignature_CompressesToStructuredFallback()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "The TCP three-way handshake establishes a reliable connection before data can be exchanged. " +
+            "It starts with SYN from the client, continues with SYN-ACK from the server, and ends with ACK from the client. " +
+            "This is important because it confirms both sides are alive, reachable, willing to communicate, synchronized on initial sequence numbers, ready for retransmission handling, prepared for ordered byte streams, protected against half-open sessions, and moved into an established state before application data flows. " +
+            "Here is an extended explanation with repeated reliability details, timeout discussion, packet ordering, sequence tracking, state machines, retransmission windows, flow control, and error recovery that keeps going long past what a concise no-tool explanation needs to say for a user who asked for the basic handshake. " +
+            "The client sends SYN, the server sends SYN-ACK, the client sends ACK, and then the established connection can transfer data reliably with sequence-number synchronization.",
+            [],
+            "Explain how TCP three-way handshake works and why it matters for reliability.");
+
+        Assert.Contains("TCP three-way handshake", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1.", result, StringComparison.Ordinal);
+        Assert.Contains("SYN-ACK", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("-- Sir Thaddeus", result, StringComparison.Ordinal);
+        Assert.True(result.Length < 700, "Expected signatureless TCP explanations to stay concise too.");
+    }
+
+    [Fact]
     public void SanitizeFinalResponse_ToolBackedAnswer_StripsRawUrlCitation()
     {
         var result = _processor.SanitizeFinalResponse(
@@ -1257,7 +1280,7 @@ public class BareResponseEnrichmentTests
     }
 
     [Fact]
-    public void SanitizeFinalResponse_LocalBusinessBriefingShell_RebuildsShortlistFromToolResults()
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_UsesFirstTrustedWebSearchCandidate()
     {
         var result = _processor.SanitizeFinalResponse(
             "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com, tripadvisor.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
@@ -1283,9 +1306,10 @@ public class BareResponseEnrichmentTests
             },
             "Can you find me a good deli in Hillsboro, OR?");
 
+        Assert.Contains("plausible deli", result, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Bernie's Deli", result, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Verification recommended", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Verification recommended", result, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Briefing summary", result, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -1320,7 +1344,7 @@ public class BareResponseEnrichmentTests
     }
 
     [Fact]
-    public void SanitizeFinalResponse_LocalBusinessBriefingShell_PrefersPlacesLookupSeed_OverDirectoryNoise()
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_DoesNotUseUnavailablePlacesSeed_OverDirectoryNoise()
     {
         var result = _processor.SanitizeFinalResponse(
             "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com, tripadvisor.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
@@ -1350,13 +1374,14 @@ public class BareResponseEnrichmentTests
             },
             "Can you find me a good deli in Hillsboro, OR?");
 
-        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not confirm a trustworthy deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Dede's Deli", result, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Dandy's Deli", result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void SanitizeFinalResponse_LocalBusinessBriefingShell_UsesPlacesLookupSeed_EvenWhenPromptSignalIsVague()
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_DoesNotUseUnavailablePlacesSeed_WhenPromptSignalIsVague()
     {
         var result = _processor.SanitizeFinalResponse(
             "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
@@ -1372,11 +1397,12 @@ public class BareResponseEnrichmentTests
             },
             "Can you find me a good one in Hillsboro, OR?");
 
-        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not confirm a trustworthy local business", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void SanitizeFinalResponse_LocalBusinessBriefingShell_UsesRawPlacesLookupPayload_WhenArgumentsAreMalformed()
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_DoesNotUseMalformedUnavailablePlacesSeed()
     {
         var result = _processor.SanitizeFinalResponse(
             "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: restaurantji.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
@@ -1392,7 +1418,8 @@ public class BareResponseEnrichmentTests
             },
             "Can you find me a good one in Hillsboro, OR?");
 
-        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not confirm a trustworthy local business", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1431,7 +1458,7 @@ public class BareResponseEnrichmentTests
     }
 
     [Fact]
-    public void SanitizeFinalResponse_LocalBusinessBriefingShell_PrefersEarlyNonDirectoryBrowserSeed()
+    public void SanitizeFinalResponse_LocalBusinessBriefingShell_DoesNotTrustBrowserDirectorySeedAsRecommendation()
     {
         var result = _processor.SanitizeFinalResponse(
             "**Best Delis near Hillsboro, OR**\nVerification recommended\nSources checked: chamberofcommerce.com, restaurantji.com.\nBriefing summary: hours and review details are based on currently available web sources (2026).",
@@ -1454,7 +1481,8 @@ public class BareResponseEnrichmentTests
             },
             "Can you find me a good deli in Hillsboro, OR?");
 
-        Assert.Contains("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not confirm a trustworthy deli", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Isabella's Deli", result, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Dede's Deli", result, StringComparison.OrdinalIgnoreCase);
     }
 

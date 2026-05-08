@@ -1,6 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { Pencil, X } from 'lucide-react';
 import { PageScaffold } from '../components/PageScaffold';
+import { Markdown } from '../components/Markdown';
 import { createMemo, deleteMemo, listMemos, updateMemo } from '../lib/memoryApi';
 import type { Memo } from '@thaddeus/shared-types';
 
@@ -11,6 +13,19 @@ export const Route = createFileRoute('/memory')({
 const inputCls =
   'block w-full rounded-xl border border-line bg-canvas-raised px-3 py-2 text-sm text-ink placeholder:text-ink-subtle shadow-soft focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
 
+interface DraftFields {
+  title: string;
+  body: string;
+  tags: string;
+}
+
+function parseTags(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
 function MemoryRoute() {
   const [memos, setMemos] = useState<Memo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +33,9 @@ function MemoryRoute() {
   const [draftTitle, setDraftTitle] = useState('');
   const [draftBody, setDraftBody] = useState('');
   const [draftTags, setDraftTags] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [edit, setEdit] = useState<DraftFields>({ title: '', body: '', tags: '' });
+  const [editBusy, setEditBusy] = useState(false);
 
   const load = async () => {
     try {
@@ -36,11 +54,12 @@ function MemoryRoute() {
     setBusy(true);
     setError(null);
     try {
-      const tags = draftTags
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean);
-      await createMemo({ title: draftTitle, body: draftBody, tags, pinned: false });
+      await createMemo({
+        title: draftTitle,
+        body: draftBody,
+        tags: parseTags(draftTags),
+        pinned: false,
+      });
       setDraftTitle('');
       setDraftBody('');
       setDraftTags('');
@@ -67,6 +86,39 @@ function MemoryRoute() {
       await load();
     } catch (err) {
       setError((err as Error).message);
+    }
+  };
+
+  const beginEdit = (memo: Memo) => {
+    setEditingId(memo.id);
+    setEdit({
+      title: memo.title,
+      body: memo.body,
+      tags: memo.tags.join(', '),
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEdit({ title: '', body: '', tags: '' });
+  };
+
+  const saveEdit = async (memo: Memo) => {
+    if (editBusy) return;
+    setEditBusy(true);
+    setError(null);
+    try {
+      await updateMemo(memo.id, {
+        title: edit.title.trim(),
+        body: edit.body,
+        tags: parseTags(edit.tags),
+      });
+      cancelEdit();
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setEditBusy(false);
     }
   };
 
@@ -131,48 +183,116 @@ function MemoryRoute() {
         </p>
       ) : memos !== null ? (
         <ul data-testid="memo-list" className="space-y-3">
-          {memos.map((m) => (
-            <li
-              key={m.id}
-              data-testid={`memo-item-${m.id}`}
-              className="rounded-2xl border border-line bg-canvas-raised p-5"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-ink">
-                    {m.pinned ? '📌 ' : ''}
-                    {m.title}
-                  </h3>
-                  {m.tags.length > 0 ? (
-                    <p className="mt-0.5 text-xs text-ink-muted">
-                      {m.tags.map((t) => `#${t}`).join(' ')}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <button
-                    type="button"
-                    data-testid={`memo-pin-${m.id}`}
-                    onClick={() => void onTogglePin(m)}
-                    className="rounded-full border border-line bg-canvas-raised px-2.5 py-1 text-xs text-ink-muted transition hover:bg-accent-soft hover:text-ink"
-                  >
-                    {m.pinned ? 'Unpin' : 'Pin'}
-                  </button>
-                  <button
-                    type="button"
-                    data-testid={`memo-delete-${m.id}`}
-                    onClick={() => void onDelete(m)}
-                    className="rounded-full border border-rose-500/30 px-2.5 py-1 text-xs text-rose-500 transition hover:bg-rose-500/10"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-              {m.body ? (
-                <pre className="mt-2 whitespace-pre-wrap text-xs text-ink-muted">{m.body}</pre>
-              ) : null}
-            </li>
-          ))}
+          {memos.map((m) => {
+            const isEditing = editingId === m.id;
+            return (
+              <li
+                key={m.id}
+                data-testid={`memo-item-${m.id}`}
+                className="rounded-2xl border border-line bg-canvas-raised p-5"
+              >
+                {isEditing ? (
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      data-testid={`memo-edit-title-${m.id}`}
+                      value={edit.title}
+                      onChange={(e) => setEdit((d) => ({ ...d, title: e.target.value }))}
+                      placeholder="Title"
+                      className={inputCls}
+                    />
+                    <textarea
+                      data-testid={`memo-edit-body-${m.id}`}
+                      value={edit.body}
+                      onChange={(e) => setEdit((d) => ({ ...d, body: e.target.value }))}
+                      placeholder="Body (markdown)"
+                      rows={4}
+                      className={inputCls}
+                    />
+                    <input
+                      type="text"
+                      data-testid={`memo-edit-tags-${m.id}`}
+                      value={edit.tags}
+                      onChange={(e) => setEdit((d) => ({ ...d, tags: e.target.value }))}
+                      placeholder="Comma-separated tags"
+                      className={inputCls}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        data-testid={`memo-edit-save-${m.id}`}
+                        onClick={() => void saveEdit(m)}
+                        disabled={editBusy || !edit.title.trim()}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {editBusy ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`memo-edit-cancel-${m.id}`}
+                        onClick={cancelEdit}
+                        disabled={editBusy}
+                        className="rounded-full border border-line px-3 py-1.5 text-sm text-ink-muted transition hover:text-ink"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-semibold text-ink">
+                          {m.pinned ? '📌 ' : ''}
+                          {m.title}
+                        </h3>
+                        {m.tags.length > 0 ? (
+                          <p className="mt-0.5 text-xs text-ink-muted">
+                            {m.tags.map((t) => `#${t}`).join(' ')}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          type="button"
+                          data-testid={`memo-pin-${m.id}`}
+                          onClick={() => void onTogglePin(m)}
+                          className="rounded-full border border-line bg-canvas-raised px-2.5 py-1 text-xs text-ink-muted transition hover:bg-accent-soft hover:text-ink"
+                        >
+                          {m.pinned ? 'Unpin' : 'Pin'}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`memo-edit-${m.id}`}
+                          onClick={() => beginEdit(m)}
+                          aria-label="Edit memo"
+                          className="inline-flex items-center gap-1 rounded-full border border-line bg-canvas-raised px-2.5 py-1 text-xs text-ink-muted transition hover:bg-accent-soft hover:text-ink"
+                        >
+                          <Pencil className="h-3 w-3" strokeWidth={1.75} />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`memo-delete-${m.id}`}
+                          onClick={() => void onDelete(m)}
+                          aria-label="Delete memo"
+                          className="inline-flex items-center gap-1 rounded-full border border-rose-500/30 px-2.5 py-1 text-xs text-rose-500 transition hover:bg-rose-500/10"
+                        >
+                          <X className="h-3 w-3" strokeWidth={1.75} />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                    {m.body ? (
+                      <div className="mt-2" data-testid={`memo-body-${m.id}`}>
+                        <Markdown>{m.body}</Markdown>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </PageScaffold>

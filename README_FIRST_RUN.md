@@ -15,16 +15,31 @@ That's it. Everything else happens automatically.
 
 ## What happens on first run
 
-The **Setup Wizard** walks you through four steps:
+The **Setup Wizard** walks you through four short steps:
 
-1. **Connect your LLM** — the app scans for running local LLM servers (LM Studio, Ollama, etc.) and lets you pick one or enter a custom URL.
-2. **Set your name & context** — optional operator alias and system context.
-3. **Pick a personality** — choose the assistant's behavioral profile.
-4. **Voice asset download** — while you go through steps 1-3, voice backend assets (~320 MB) download in the background from GitHub Releases. If the download isn't done by step 3, you'll see a progress bar. If it finishes early, this step is skipped automatically.
+1. **Welcome** — confirm you understand Sir Thaddeus runs locally and stores
+   data on your machine.
+2. **Privacy** — review the privacy defaults (telemetry off, screen capture
+   off, local-only mode). All adjustable later in Settings → General.
+3. **Voice (optional)** — review the push-to-talk and stop-all hotkey
+   bindings. Voice is a Beta feature in v1.0; you can finish onboarding
+   without enabling it.
+4. **Done** — onboarding completes; the workspace opens.
 
-After setup, the app is fully operational and works **offline** for all subsequent launches.
+After onboarding, connect your model from **Settings → Models**: pick a
+provider preset (LM Studio / Ollama / OpenAI / Custom), confirm the base
+URL, and click **Test connection**.
 
-> **Internet required**: An internet connection is needed on first run to download voice assets (STT model, TTS engine, Python runtime). After that, everything runs locally.
+> **Personality admin and display-name / about-me UI are Deferred from
+> v1.0.** See [`V1_SCOPE.md`](V1_SCOPE.md) and
+> [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md).
+
+After setup, the app is fully operational and works **offline** for all
+subsequent launches (unless you chose a hosted provider like OpenAI).
+
+> **Internet required if you opted into voice**: voice backend assets
+> (STT model, TTS engine, Python runtime) download from GitHub Releases on
+> first use. After that, voice runs locally too.
 
 ## (Recommended) Verify checksum
 

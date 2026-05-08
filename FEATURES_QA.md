@@ -1,12 +1,24 @@
-# Sir Thaddeus v0.3.0 — Manual QA Checklist
+# Sir Thaddeus — Manual QA checklist
 
-A walkthrough of every user-visible feature in the front end, organized so you can shuffle through and decide what to keep, polish, or cut. Branch: `task/fix-near-me-and-status-check-routing`.
+A walkthrough of every user-visible feature in the front end, aligned with
+the v1.0 scope contract in [`V1_SCOPE.md`](V1_SCOPE.md).
 
-> **Legend:** `(?)` = suspected wired but not verified end-to-end; *(Windows only)* = does not exist on macOS/Linux.
+For the v1 release gate, use [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md);
+this file is the longer feature-by-feature reference that covers Beta and
+Deferred items as well.
+
+> **Legend**
+> - **Core** — must work for v1.0. Belongs to the v1 promise.
+> - **Beta** — present in v1.0 but not promoted. Skip-or-pass per the release
+>   checklist.
+> - **Deferred** — explicitly not in v1.0. Listed here only so the line is
+>   visible.
+> - *(Windows only)* — does not exist on macOS/Linux.
+> - `(?)` = wired but not verified end-to-end.
 
 ---
 
-## 1. Chat & Conversation
+## 1. Chat & Conversation **— Core**
 
 - [ ] **Send message to assistant** — Type and submit a chat. *Trigger:* `/chat`, type, Enter. *Expect:* streaming reply. *File:* [chat.$threadId.tsx](web/src/routes/chat.$threadId.tsx)
 - [ ] **Create new thread** — Start a fresh conversation. *Trigger:* "+" / "New Conversation" in `/chat`. *Expect:* new thread in sidebar.
@@ -22,7 +34,10 @@ A walkthrough of every user-visible feature in the front end, organized so you c
 
 ---
 
-## 2. Voice *(Windows only)*
+## 2. Voice **— Beta** *(Windows-validated only)*
+
+> Voice is Beta in v1.0. Test rows here are pass-or-skip per the release
+> checklist; v1 ships even if everything in this section is skipped.
 
 - [ ] **Push-to-talk hotkey** — Hold the configured key to record. *Expect:* recording indicator, transcribed text on release. *File:* [WindowsGlobalShortcutAdapter.cs](src/Thaddeus.Shell/Platform/Windows/WindowsGlobalShortcutAdapter.cs)
 - [ ] **Real-time STT transcription** — Speech is converted to text as you speak (Piper backend).
@@ -33,9 +48,9 @@ A walkthrough of every user-visible feature in the front end, organized so you c
 
 ---
 
-## 3. Tools (MCP)
+## 3. Tools (MCP) **— Core (3a–3e), Beta (3f, 3g), Core (3h)**
 
-### 3a. Web & Browser
+### 3a. Web & Browser **— Core**
 
 - [ ] **Web search with auto-read** — Searches the web and summarizes top results. *Trigger:* current-info questions ("latest news on X"). *File:* `packages/mcp-tools-core/WebSearchTools.cs`
   - *Edge case:* weather questions should route to `weather_geocode` first, NOT `web_search`.
@@ -43,7 +58,7 @@ A walkthrough of every user-visible feature in the front end, organized so you c
 - [ ] **Read single web page** — Fetch + extract from a specific URL. *Trigger:* "read this page: [URL]".
 - [ ] **Web search categories (general / news)** — Scope to news sources for current events.
 
-### 3b. Location & Places
+### 3b. Location & Places **— Core**
 
 - [ ] **Weather forecast** — Geocode then forecast pipeline. *Trigger:* "weather in Portland tomorrow".
   - *Edge case:* accepts `location` and `place` aliases; flat and nested coords (small models emit either).
@@ -53,41 +68,41 @@ A walkthrough of every user-visible feature in the front end, organized so you c
 - [ ] **Retailer availability fast path** — Deterministic fallback when site search returns nothing. *Trigger:* "is X in stock at [retailer]". *(recent commit a7c912c.)*
 - [ ] **Retailer stock-price fact fast path** — Direct price extraction. *Trigger:* "what's [stock] price". *(recent commit e4a914d.)*
 
-### 3c. Memory & Knowledge
+### 3c. Memory & Knowledge **— Core**
 
 - [ ] **Memory retrieval (conversation-scoped)** — Recalls relevant facts during a conversation.
 - [ ] **Memory append** — "Remember that I like hiking" stores a fact.
 - [ ] **User profile card** — About-Me / display name flows into greetings.
 
-### 3d. Files & Documents
+### 3d. Files & Documents **— Core**
 
 - [ ] **File read (multi-format)** — PDF, DOCX, XLSX, CSV, RTF, Markdown, plain text, JSON, source code. *Trigger:* "read this file: [path]". *Edge case:* 10 MB cap; allowed-roots only; truncates at default 4000 chars.
 - [ ] **File list with preview** — Browse directories. *Trigger:* "what files are in my Documents folder".
 
-### 3e. System & Utilities
+### 3e. System & Utilities **— Core**
 
 - [ ] **System command (allowlist)** — `whoami`, `hostname`, `date`, `systeminfo`, `dotnet`. *Edge case:* shell metacharacters (`& | > < ; \` $`) blocked.
 - [ ] **Time / date utilities** — Offline answer, no web call. *Trigger:* "what time is it" / "today's date".
 - [ ] **Holiday calendar lookup** — "Is today a holiday?" / "When is Thanksgiving?".
 - [ ] **Math / unit conversion** — Advanced math engine + structured lookups. *Trigger:* "convert 50 mph to km/h" / "integral of x^2".
 
-### 3f. Clipboard *(Windows only)*
+### 3f. Clipboard **— Beta** *(Windows-only)*
 
 - [ ] **Clipboard read** — "What's on my clipboard?".
 - [ ] **Clipboard write** — "Copy this to my clipboard: [text]". *Expect:* paste works elsewhere.
 
-### 3g. Screen Reading *(Windows only)*
+### 3g. Screen Reading **— Beta** *(Windows-only)*
 
 - [ ] **Layered screen capture** — UIA tree → browser URL extraction → HTTP page read → OCR fallback. *Trigger:* "what's on my screen". *Edge case:* 30s hard timeout; OCR text capped at 8000 chars.
 - [ ] **Full-screen capture** — Entire monitor, not just active window. *Trigger:* "show me the full screen".
 
-### 3h. Imperative Tool Selection
+### 3h. Imperative Tool Selection **— Core**
 
 - [ ] **"use web_search" / "try file_read" honors user choice** — Small models won't fabricate "I can't do that" when you explicitly name a tool. *(recent commit b75e098.)*
 
 ---
 
-## 4. Permissions & Safety
+## 4. Permissions & Safety **— Core**
 
 - [ ] **Permission prompt modal** — Modal with tool name + reason + (Deny / Once / Session / Always).
 - [ ] **Time-boxed tokens** — "Session" tokens expire on restart; verify by granting Session, restarting, expecting re-prompt.
@@ -104,7 +119,7 @@ A walkthrough of every user-visible feature in the front end, organized so you c
 
 ---
 
-## 5. Routines
+## 5. Routines **— Core**
 
 - [ ] **Seeded templates on first boot** — 5 default routines: Morning Launch, Evening Shutdown, Fitness Check-In, Project Focus, Weekly Review. *Expect:* present on first launch; not overwritten after edit.
 - [ ] **List routines** — `/routines` shows all with name, description, enabled state.
@@ -118,7 +133,7 @@ A walkthrough of every user-visible feature in the front end, organized so you c
 
 ---
 
-## 6. Memory (Memos)
+## 6. Memory (Memos) **— Core**
 
 - [ ] **Create memo** — Title + body + optional comma-separated tags. *Expect:* appears in list.
 - [ ] **List / browse memos** — `/memory` shows all, sorted by pin then date.
@@ -130,33 +145,39 @@ A walkthrough of every user-visible feature in the front end, organized so you c
 
 ---
 
-## 7. Profiles & Personalities
+## 7. Profiles & Personalities **— Deferred (not in v1.0)**
 
-- [ ] **User profile (display name, alias, about-me)** — Settings → General. *Expect:* greeting prompt reflects identity.
-- [ ] **Load AI personality** — Pre-built or user-defined.
-- [ ] **Create custom personality** — Name, description, system prompt.
-- [ ] **Import personality** — From JSON file.
-- [ ] **Export personality** — Download JSON.
+> The v2 hybrid runtime (`Thaddeus.Runtime`) does not expose `/api/profile`
+> or `/api/personalities`. The headless terminal in `apps/headless-runtime`
+> retains profile/personality machinery for harness use, but **the
+> workspace UI in v1.0 has no admin surface for either**. Verifying these
+> rows in v1.0 should fail; they belong on the v1.1+ roadmap.
+
+- [ ] *(Deferred)* User profile (display name, alias, about-me) in workspace.
+- [ ] *(Deferred)* Load AI personality from workspace.
+- [ ] *(Deferred)* Create custom personality from workspace.
+- [ ] *(Deferred)* Import personality (workspace UI).
+- [ ] *(Deferred)* Export personality (workspace UI).
 
 ---
 
-## 8. Settings & Configuration
+## 8. Settings & Configuration **— Core**
 
 - [ ] **Settings tabs render** — General, Models, Audio & Voice, Files, Location, Advanced.
-- [ ] **General tab** — Name, display name, theme (light / dark), about-me.
+- [ ] **General tab** — Appearance (Light / Dark / System), Desktop behavior, Shortcuts, Privacy. *(Display name / about-me are Deferred — see §7.)*
 - [ ] **Models tab** — Provider, base URL, key (masked), model name.
 - [ ] **LM provider presets** — LM Studio / Ollama / OpenAI / Custom auto-fill base URL; key only required where appropriate.
 - [ ] **Test LLM connectivity** — "Test Connection" returns model list or clear error.
-- [ ] **Audio & Voice tab** *(Windows)* — Piper voice dropdown, speed, volume.
+- [ ] **Audio & Voice tab** **— Beta** — KokoroSharp voice (default) or Piper (legacy fallback), audio devices, mic test, VoiceHost probe.
 - [ ] **Files tab** — Allowed file roots; add / remove.
 - [ ] **Location tab** — Default city / coords for weather and places fallback.
-- [ ] **Advanced tab** — SearXNG URL, web search mode, cache TTL.
+- [ ] **Advanced tab** — Tool budgets / limits. *(Saved to settings; not yet enforced by the runtime in v1.0 — see [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) §10.)*
 - [ ] **Save / apply** — Changes persist across restart.
 - [ ] **Safe mode recovery** — Corrupt `settings.json` → boot with defaults → flag clears on successful load and persists cleared. *(recent fix cde8c05.)*
 
 ---
 
-## 9. Tray & Shell *(Windows only)*
+## 9. Tray & Shell **— Beta** *(Windows-validated only)*
 
 - [ ] **Tray icon present** — Custom branded icon, not generic. *(recent commit 87a82aa.)*
 - [ ] **"At your service, sir"** — Open / restore workspace from tray.
@@ -167,19 +188,19 @@ A walkthrough of every user-visible feature in the front end, organized so you c
 
 ---
 
-## 10. Diagnostics & Observability
+## 10. Diagnostics & Observability **— Core**
 
 - [ ] **Runtime version badge** — Sidebar shows `v0.3.0` (release) or `dev` (local). Hover for full version.
 - [ ] **Diagnostics page** — `/diagnostics` shows state, uptime, thread count, voice availability, build version, PID.
 - [ ] **Refresh button** — Re-fetches and uptime increments.
 - [ ] **Runtime state snapshot** — `Idle | RequestingPermission | Processing | Stopping`.
 - [ ] **Startup diagnostics fire** — On launch, advisory results for `llm.reachable`, `voicehost.reachable`, `logs.writable`. *Expect:* visible in startup log; never blocks startup.
-- [ ] **Logs path discoverable** — User can find `%LocalAppData%\SirThaddeus\logs\` from Settings or docs.
+- [ ] **Logs path discoverable** — Diagnostics page shows the `Logs` row pointing at the active log directory (e.g. `%LocalAppData%\SirThaddeus\logs\` on Windows, `~/.thaddeus/logs/` on macOS/Linux).
 - [ ] **Status pill / connection indicator** — Top-bar pill reflects connected / disconnected / error states. *(recent commit ead8d7c.)*
 
 ---
 
-## 11. Onboarding
+## 11. Onboarding **— Core**
 
 - [ ] **First-run onboarding flow** — 4-step: welcome → privacy → voice → done.
 - [ ] **Configure LLM during onboarding** — Provider + endpoint test.
@@ -188,7 +209,13 @@ A walkthrough of every user-visible feature in the front end, organized so you c
 
 ---
 
-## 12. Headless Runtime (Terminal — separate test path)
+## 12. Headless Runtime (Terminal) **— Not part of v1.0 product surface**
+
+> The terminal runtime under `apps/headless-runtime` remains in the repo
+> for harness use and transitional workflows. It is **not** the v1.0
+> product surface — that is the Shell + Runtime + workspace combination
+> in §1–§11. Test the rows below if you ship the terminal as a separate
+> tool; do not block v1.0 on them.
 
 Launch with `dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime` or `./dev/terminal.ps1`.
 
@@ -206,7 +233,7 @@ Launch with `dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRunt
 
 ---
 
-## 13. Runtime Management API (light touch — verify they don't 500)
+## 13. Runtime Management API **— Core** *(light touch — verify they don't 500)*
 
 - [ ] **`GET /api/health`** — `{ status, version, pid, startedAt }`.
 - [ ] **`GET /api/runtime-info`** — `managedByShell` flag distinguishes shell-spawned vs standalone.
@@ -214,16 +241,28 @@ Launch with `dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRunt
 
 ---
 
-## Known Limitations
+## Cross-references
 
-- **(?) "Deeper thinking" / extended reasoning mode** — referenced in code; verify there's a UI control, not just an internal flag.
-- **Knowledge graph visualization** — not implemented; no UI route for it.
+- v1.0 contract: [`V1_SCOPE.md`](V1_SCOPE.md)
+- Honest boundaries: [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)
+- Pre-release gate: [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)
+- Roadmap (where Deferred items land): [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
+## Known caveats not covered above
+
+- **"Deeper thinking" / extended reasoning** — internal flag; no v1.0 UI
+  control. Treat as Deferred.
+- **Knowledge-graph visualization** — not implemented. Not on the v1.0 or
+  v1.1 roadmap.
 - **Multi-language UI** — English only.
-- **Mobile / tablet support** — not designed for; Windows desktop only for full experience.
+- **Mobile / tablet** — not a target.
 
-## Removed in v0.3.0 (don't expect these)
+## Removed before v1.0 (don't expect these)
 
-- **Automations / scheduled background agents** — ripped out and replaced with user-invoked **Routines**. If you find any UI element labeled "Automations" or any route that 404s, that's a leftover bug.
+- **Automations / scheduled background agents** — removed in 0.3.0. Replaced
+  with manual **Routines**. A meta-test enforces the "no scheduler" property.
+  If you find any leftover UI element labeled "Automations" or any route
+  that 404s, that's a leftover bug worth filing.
 
 ---
 
@@ -231,8 +270,10 @@ Launch with `dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRunt
 
 1. Complete onboarding on first run to set up LLM and (optional) voice.
 2. Every tool call requires explicit approval — Deny / Once / Session / Always.
-3. STOP must always halt execution and revoke permissions immediately. This is a brand promise.
-4. Voice (PTT + TTS) is **Windows only** at v0.3.0.
+3. STOP must always halt execution and revoke permissions immediately. This is a v1.0 brand promise.
+4. Voice (PTT + TTS) is **Beta** in v1.0 and Windows-validated only.
 5. All data stays local. No telemetry.
-6. Logs: `%LocalAppData%\SirThaddeus\logs\{component}\` — daily rolling JSON.
-7. If `settings.json` is corrupted, app boots with defaults; safe-mode flag self-clears on next successful load.
+6. Logs path is shown on the Diagnostics page. On Windows that resolves to
+   `%LocalAppData%\SirThaddeus\logs\`; on macOS/Linux to `~/.thaddeus/logs/`.
+7. If `runtime-settings.json` is corrupted, the runtime boots with defaults
+   and a safe-mode flag self-clears on next successful load.

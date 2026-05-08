@@ -102,6 +102,9 @@ function DiagnosticsRoute() {
           <Row label="Build" value={data.buildVersion} testId="diagnostics-build" />
           <Row label="PID" value={String(data.pid)} testId="diagnostics-pid" />
           <Row label="Thread store" value={data.threadStoreRoot} testId="diagnostics-store" />
+          {data.logsRoot ? (
+            <Row label="Logs" value={data.logsRoot} testId="diagnostics-logs" />
+          ) : null}
         </dl>
       )}
     </PageScaffold>
