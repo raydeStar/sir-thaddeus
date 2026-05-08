@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus local AI copilot logo" width="180" />
+  <img src="assets/svg/sir-thaddeus.svg" alt="Sir Thaddeus" width="180" />
 
   <h1>Sir Thaddeus</h1>
 
-  <p><strong>AI that runs on your computer. Not theirs.</strong></p>
+  <p><strong>A local-first AI workspace for controlled agentic workflows.</strong></p>
 
   <p>
     <a href="https://github.com/raydeStar/sir-thaddeus/releases">
@@ -12,382 +12,215 @@
     <a href="https://github.com/raydeStar/sir-thaddeus/blob/main/LICENSE">
       <img src="https://img.shields.io/github/license/raydeStar/sir-thaddeus" alt="Apache 2.0 license" />
     </a>
-    <img src="https://img.shields.io/badge/LLM-Local%20Models%20%7C%20LM%20Studio-orange" alt="Supports local models and LM Studio" />
+    <img src="https://img.shields.io/badge/runtime-.NET%2010-blue" alt=".NET 10 runtime" />
+    <img src="https://img.shields.io/badge/UI-React%20%2B%20Vite-black" alt="React + Vite UI" />
   </p>
 </div>
 
 ---
 
-Sir Thaddeus is a local-first AI copilot. It handles chat, voice, desktop tasks, and browsing while keeping permissions explicit and actions visible. It connects to local language models — such as [LM Studio](https://lmstudio.ai/) — and runs entirely under your control.
+Sir Thaddeus is a chat-and-tools workspace that runs on your machine, talks to
+a model **you** chose, only uses tools **you** approved, and keeps every action
+visible and stoppable.
 
-The full desktop experience — voice, global push-to-talk, screen reading, tray — runs on **Windows today**. The cross-platform headless runtime and MCP toolkit also build for **macOS and Linux**, where voice and desktop-automation features are not yet implemented (see [docs/migration/non-transferrable-functionality.md](docs/migration/non-transferrable-functionality.md)).
+It is designed for power users — developers, researchers, technical operators —
+who want agentic workflows without giving up control or sending data to a
+provider they don't host.
 
-No telemetry by default. No silent background autonomy. No hidden actions.
-
-If it acts, you see it. If you press **STOP**, it stops.
-
-**[Privacy policy →](PRIVACY.md)** · **[Security policy →](SECURITY.md)** · **[v2 hybrid shell →](docs/hybrid-shell.md)**
-
-> **Heads up — v2 hybrid shell (Phase 1) has landed on `task/hybrid-shell-phase1`.**
-> The new default surface is a single self-contained `Thaddeus.Runtime` binary that
-> hosts a React UI + local API. The old Avalonia desktop client has been removed.
-> The legacy terminal runtime in `apps/headless-runtime` remains only for the
-> harness and transitional workflows and will be retired in a follow-up phase. See
-> [docs/hybrid-shell.md](docs/hybrid-shell.md) and [docs/packaging.md](docs/packaging.md).
-
----
-
-## What It Feels Like to Use
-
-Hold the push-to-talk hotkey and say:
-
-> "When is the local grocery store open?"
-
-Before doing anything, Sir Thaddeus proposes the next step. You can see:
-
-- **What access is requested**
-- **Why it is needed**
-- **How long the permission lasts**
-
-You approve. It runs. You get the result. Permission expires.
-
-That same interaction model applies throughout the runtime:
-
-- Nothing runs silently
-- Nothing lingers in the background without approval
-- Every important action is recorded locally
+> **What this is not.** Not an unattended automation platform. Not a hosted
+> service. Not a cloud product. There is no sign-up. There is no telemetry.
 
 <div align="center">
-  <img src="assets/images/sir-thaddeus-screenshot.png" alt="Sir Thaddeus desktop UI showing permission-based local AI workflow" width="800" />
+  <img src="assets/images/sir-thaddeus-screenshot.png" alt="Sir Thaddeus workspace screenshot" width="800" />
+  <br /><sub><i>Workspace screenshot — chat, tool activity, and permission prompt.</i></sub>
 </div>
 
 ---
 
-## Privacy, in plain English
+## Why this exists
 
-No telemetry. No analytics. No sign-up. No cloud sync.
+Most AI assistants are easy to use because they make decisions for you. Sir
+Thaddeus is the opposite: it surfaces every decision and lets you say yes or no.
 
-Sir Thaddeus does not phone home. Your prompts go to your local model server. Your data stays on your machine. If you ask it to browse a website, it connects only to the sites you asked it to reach — nothing else runs in the background.
+- **Local model, local data.** Threads, memos, wiki pages, and audit logs live
+  in `~/.thaddeus/` (or `%LocalAppData%\SirThaddeus\` on Windows). The runtime
+  binds `127.0.0.1:<random-port>` and accepts only the per-launch bearer token.
+- **Tools cross a permission boundary.** Every MCP tool call (web fetch, file
+  read, screen capture, system command) goes through a broker that asks you,
+  records the decision, and can be revoked at any time.
+- **Stop is real.** A red kill switch lives in the header. Pressing it tears
+  down active tool calls, sidecars, and the runtime itself.
 
-**[Full privacy details \u2192](PRIVACY.md)**
-
----
-
-<details>
-<summary><strong>Features</strong></summary>
-
-### Voice and Interface
-
-- **Push-to-talk voice input** with release-to-send behavior *(Windows only)*
-- **KokoroSharp text-to-speech** is the default spoken-response engine, with Piper kept as an explicit legacy fallback
-- **Command palette** for keyboard-first workflows
-- **Global STOP kill switch** to halt active execution
-- **Tray-first Windows experience** with local desktop controls
-
-### Local AI Runtime
-
-- **Local LLM integration** through LM Studio and OpenAI-compatible endpoints
-- **Reasoning pipeline** for breaking down logic questions step by step
-- **Small-model support** with routing assistance for better tool use
-- **Supported document formats**: PDF, DOCX, XLSX, CSV, RTF, Markdown, and plain text
-- **In-memory result caching** with configurable TTLs for web search, weather, and location data
-- **Conversation-scoped memory retrieval** for better continuity across multi-turn chats
-- **Automatic history persistence** for chat and briefing context in memory-backed flows
-
-### Permissioned Tooling via MCP
-
-- **Web search and browser actions**
-- **Screen reading** and active-window context *(Windows only; uses UIAutomation)*
-- **Read-only file listing and reading** with limits
-- **Clipboard read/write** for seamless copy/paste integration
-- **Allowlisted system actions**
-- **Built-in utilities** for math, conversions, and structured lookups
-
-### Trust and Safety
-
-- **Explicit permission prompts** before tool execution
-- **Time-boxed permission tokens**
-- **Local audit logging**
-- **Fail-closed behavior** when something goes sideways
-- **Tool budgets** to prevent runaway loops and token burn
-
-</details>
+If "AI agent that you can actually audit" sounds boring, that's the point.
 
 ---
 
-## Quick Start
+## Quickstart
 
-No cloud account required.
+### Requirements
 
-1. Download the latest release from the [Releases page](https://github.com/raydeStar/sir-thaddeus/releases) and unzip the archive
-2. Run `Thaddeus.Runtime.exe`  
-   *Windows SmartScreen may appear — choose **More Info → Run Anyway***
-3. Start [LM Studio](https://lmstudio.ai/) or another OpenAI-compatible local model server
-4. Complete the first-run setup inside the app
-5. Hold the push-to-talk hotkey and ask something
+- **.NET 10 SDK** for building from source. Single-file binaries are coming via
+  [`dev/package-runtime.ps1`](dev/package-runtime.ps1); see
+  [`docs/packaging.md`](docs/packaging.md).
+- **Node.js 18+** (or any version compatible with Vite 5) to build the web UI
+  during development.
+- **A local model server**, OpenAI-compatible. We test against:
+  - [LM Studio](https://lmstudio.ai/) (default — `http://127.0.0.1:1234/v1`)
+  - [Ollama](https://ollama.com/) (`http://127.0.0.1:11434/v1`)
+  - OpenAI hosted (`https://api.openai.com/v1`, requires API key)
+  - Any other OpenAI-compatible endpoint via the **Custom** preset.
 
-That is it.
-
----
-
-<details>
-<summary><strong>Headless Runtime</strong></summary>
-
-A terminal entry point exists for chat-first runs:
+### Run from source (recommended for v1.0)
 
 ```bash
-dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime
-```
+# 1) Build the web bundle and sync it into the runtime's wwwroot.
+cd web
+npm install
+npm run build
+cd ..
 
-Convenience launch scripts are available:
+# (Windows / PowerShell) Copy the bundle into wwwroot.
+Copy-Item web/dist/index.html src/Thaddeus.Runtime/wwwroot/index.html -Force
+Copy-Item web/dist/assets/* src/Thaddeus.Runtime/wwwroot/assets/ -Recurse -Force
 
-```powershell
-# Windows PowerShell
-./dev/terminal.ps1
-```
+# (macOS / Linux)
+cp web/dist/index.html src/Thaddeus.Runtime/wwwroot/index.html
+cp -R web/dist/assets/. src/Thaddeus.Runtime/wwwroot/assets/
 
-```bash
-# Linux/macOS shell
-./dev/terminal.sh
-# (or: bash ./dev/terminal.sh)
-```
-
-Commands:
-- `/help`
-- `/reset`
-- `/tools`
-- `/whoami`
-- `/quickstart`
-- `/exit`
-
-Tooling in headless mode is optional:
-
-```bash
-dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime -- --tools
-```
-
-MCP now has a split tool model:
-- Core tools run cross-platform (`net10.0`)
-- Windows-only tools (screen capture / OCR) load only on Windows
-
-Runtime API composition has also been modularized into focused endpoint groups
-(`core`, `memory`, `runs`, `profiles`, `personalities`) to reduce regression risk
-and improve production maintainability.
-
-</details>
-
----
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for release notes and recent updates.
-
----
-
-## Core Principles
-
-### 1. You are in control
-
-Sir Thaddeus proposes actions. You approve them.
-
-### 2. Nothing runs silently
-
-If it acts, you can see it.
-
-### 3. STOP always works
-
-The kill switch revokes permissions and halts execution immediately.
-
-Sir Thaddeus is not designed to replace your judgment. It is designed to extend your capability without taking away your agency.
-
----
-
-<details>
-<summary><strong>Architecture</strong></summary>
-
-Sir Thaddeus uses a five-layer architecture that separates loop control, interface, model access, tools, and voice runtime.
-
-**Execution loop:** `propose -> validate -> execute -> observe -> verify -> repair -> repeat`
-
-```mermaid
-flowchart LR
-  subgraph loop [Layer 1: Loop - packages/agent]
-    Loop[Bounded Agent Loop]
-    Context[Run Context and History]
-    Router[Intent Router]
-    Gate[Policy Gate]
-    Validate[Action and Completion Validation]
-    Repair[Targeted Repair]
-  end
-
-  subgraph frontend [Layer 2: Interface - src/Thaddeus.Runtime + web + apps/headless-runtime]
-    Overlay[React UI]
-    Runtime[Hybrid Runtime]
-    PTT[Audio Input]
-    Playback[Audio Playback]
-    Palette[Command Palette]
-  end
-
-  subgraph model [Layer 3: Model - packages/llm-client]
-    LmStudio[LM Studio / OpenAI-compatible]
-  end
-
-  subgraph tools [Layer 4: Tools - apps/mcp-server + packages/memory + memory-sqlite]
-    Server[MCP Server - stdio]
-    Toolset[Browser / File / System / Screen / WebSearch / Weather / Utilities]
-    Memory[SQLite Memory and Retrieval]
-  end
-
-  subgraph voice [Layer 5: Voice - apps/voice-host + voice-backend]
-    VoiceHost[VoiceHost]
-    TtsEngine[ITtsEngine - KokoroSharp default]
-    VoiceBackend[Voice Backend - Python ASR]
-    VoiceBackend --> VoiceHost
-    TtsEngine --> VoiceHost
-  end
-
-  PTT -->|audio buffer| VoiceHost
-  VoiceHost -->|transcribed text| Loop
-  Palette -->|typed request| Loop
-
-  Loop --> Router --> Gate
-  Gate -->|allowed tools + budgets| Loop
-
-  Loop -->|model prompt| LmStudio
-  LmStudio -->|tool_calls / next action| Loop
-
-  Loop --> Validate
-  Validate -->|blocked/ok| Loop
-  Validate -->|complete/partial/missing| Repair
-  Repair -->|targeted follow-up| Loop
-
-  Loop -->|tools/call| Server
-  Server --> Toolset
-  Server --> Memory
-  Server -->|tool result| Loop
-
-  Loop -->|final text| VoiceHost
-  VoiceHost -->|audio stream| Playback
-
-  Loop -->|events| Runtime
-  Runtime --> Overlay
-```
-
-### Layer Responsibilities
-
-| Layer | Project(s) | Responsibility | Talks to |
-| --- | --- | --- | --- |
-| Layer 1: Loop | `packages/agent` | Route, gate, validate, repair, complete | Interface, Model, Tools, Voice |
-| Layer 2: Interface | `src/Thaddeus.Runtime`, `web`, `apps/headless-runtime` | Hybrid web runtime + legacy terminal runtime | Loop, Voice |
-| Layer 3: Model | `packages/llm-client` | OpenAI-style model calls and embeddings | LM Studio, Loop |
-| Layer 4: Tools | `apps/mcp-server`, `packages/memory`, `packages/memory-sqlite` | MCP tools plus local memory retrieval/storage | Loop |
-| Layer 5: Voice | `apps/voice-host`, `apps/voice-backend`, `src/Thaddeus.Tts.*` | Local ASR plus swappable TTS engines | Interface, Loop |
-
-### TTS engine selection
-
-VoiceHost serves `/tts` through the stable `ITtsEngine` abstraction. The default engine is `kokoro-sharp` via the `KokoroSharp.CPU` NuGet package; it returns mono 24 kHz PCM wrapped as WAV for the existing browser playback path. Settings normalize blank, `kokoro`, and older Windows SAPI values to `kokoro-sharp`, and the settings UI no longer exposes Windows SAPI as an active engine.
-
-Piper remains in the codebase as a legacy fallback. To roll back for a machine that needs it, choose `Piper (legacy fallback)` in Settings or set the voice setting/VoiceHost argument to `piper` and provide the Piper voice model path as before.
-
-</details>
-
----
-
-<details>
-<summary><strong>Project Structure</strong></summary>
-
-```text
-sir-thaddeus/
-|-- apps/
-|   |-- headless-runtime/
-|   |-- voice-host/
-|   |-- voice-backend/
-|   `-- mcp-server/
-|-- assets/
-|-- packages/
-|-- src/
-|-- tests/
-|-- tools/
-|-- Microsoft/
-`-- project-notes/
-```
-
-</details>
-
----
-
-<details>
-<summary><strong>Development</strong></summary>
-
-### Prerequisites
-
-- .NET 10.0 SDK
-- (Optional) LM Studio or any OpenAI-compatible local model server
-- (Optional) SearXNG for local web search (bundled setup available)
-
-### Build
-
-```bash
-dotnet build SirThaddeus.sln
-```
-
-### Test
-
-```bash
-dotnet test SirThaddeus.sln
-```
-
-### Run (headless)
-
-```bash
-dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRuntime
-```
-
-### Run (Hybrid Runtime)
-
-```bash
+# 2) Run the runtime directly (development).
 dotnet run --project src/Thaddeus.Runtime
+
+# 3) Or launch the Windows shell (supervises the runtime, opens the webview).
+dotnet run --project src/Thaddeus.Shell
 ```
 
-</details>
+The runtime prints a loopback URL such as
+`http://127.0.0.1:54971/?access_token=...`. Open it in any modern browser, or
+— on Windows — let `Thaddeus.Shell` open the embedded webview for you.
+
+For self-contained binaries, see
+[`dev/package-runtime.ps1`](dev/package-runtime.ps1) and
+[`docs/packaging.md`](docs/packaging.md).
+
+### First-run setup
+
+1. Onboarding walks you through privacy defaults and a model probe.
+2. Settings → **Models** → pick a provider preset and **Test connection**.
+3. Send your first message. Approve any tool prompts that appear.
 
 ---
 
-<details>
-<summary><strong>Technical Notes</strong></summary>
+## What's in v1.0
 
-- Tested primarily with **LM Studio** and smaller local models
-- Other local runtimes may work, but support may vary
-- Smaller reasoning models can take longer to respond, especially in deeper thinking modes
-- The runtime is designed around **permissioned execution**, **local visibility**, and **practical reliability**
+For the full contract, see [`V1_SCOPE.md`](V1_SCOPE.md).
 
-</details>
+### Core v1 features
+
+| Surface | What it does |
+|---|---|
+| **Hybrid runtime** | Single `Thaddeus.Runtime` binary; Shell supervises it on Windows. |
+| **Workspace UI** | React + Vite + TanStack Router, served from the runtime over loopback. |
+| **Chat** | Threaded, streaming, persistent. Tool activity inline. Source cards for web-search results. |
+| **Models** | LM Studio / Ollama / OpenAI / custom OpenAI-compatible. Optional gatekeeper model for tool routing. |
+| **MCP tools** | Web search, file read, document parse (PDF / DOCX / XLSX / CSV / RTF / Markdown / text), system allowlist, math, time, holidays. |
+| **Permissions** | Deny / Once / Session / Always, with persisted policy and per-call audit. |
+| **Wiki / canvas** | CRUD, revisions, import/export, search, page chat, draft, selected-text rewrite. |
+| **Routines** | User-invoked checklists with run history. No background firing. |
+| **Activity & diagnostics** | Live activity feed, runtime state pill, diagnostics page (uptime, threads, voice, build, logs path). |
+| **Stop-all / kill** | Red kill switch in the header; `/api/stop-all` aborts in-flight tool work. |
+
+### Beta — works on the maintainer's box; not the headline
+
+- Voice (Whisper.cpp ASR + KokoroSharp TTS, Piper as legacy fallback).
+- Push-to-talk global hotkey.
+- Tray integration and minimize-to-tray.
+- Compact panel (`/compact`) — Phase-2 stub today.
+- Clipboard read / write and screen capture tools (Windows-only).
+
+### Deferred — not in v1, intentionally
+
+- Scheduled / unattended automations (removed in 0.3.0).
+- Profile / personality admin in the workspace UI.
+- Polished installers (MSIX, signed `.app`, AppImage).
+- Auto-update.
+- Cross-platform desktop UX parity (macOS/Linux run the runtime; Shell ergonomics are Windows-first).
+
+See [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) for the
+honest version.
 
 ---
 
-## Who This Is For
+## Trust and control
 
-Sir Thaddeus is for:
+| Property | How it's enforced |
+|---|---|
+| Local-first | Runtime binds `127.0.0.1` only. No outbound calls except those triggered by a tool you approved. |
+| Per-launch token | Bearer token rotates each launch. Browsers cannot reach the runtime without it. |
+| Permission gate | Every MCP tool call goes through `ToolPermissionGate`. Decisions are persisted to settings. |
+| Audit | `~/.thaddeus/logs/audit.jsonl` records every tool call, permission decision, and outcome. |
+| Stop | `/api/stop-all` aborts active turns and sidecar processes. |
+| No telemetry | None. Not anonymized, not opt-in. The setting exists in case the policy ever changes. |
 
-- Developers exploring **local AI tooling**
-- Privacy-conscious users who want **AI without telemetry**
-- Builders interested in **MCP architecture**, **tool routing**, and **permissioned agents**
-- Anyone who wants an AI copilot they can actually control
+---
 
-It is not intended to be an unbounded autonomous agent that runs freely on your machine.
+## Architecture (short version)
+
+- **Shell** (`src/Thaddeus.Shell`) — Windows supervisor. Starts the runtime,
+  opens the embedded webview, owns tray + global hotkeys. Optional.
+- **Runtime** (`src/Thaddeus.Runtime`) — ASP.NET Core minimal API on loopback.
+  Hosts `wwwroot/` (the built React bundle), exposes REST + WebSocket.
+- **Web** (`web/`) — React + Vite + TanStack Router workspace.
+- **MCP server** (`apps/mcp-server`) — stdio MCP server hosting the toolset.
+- **Tools** (`packages/mcp-tools-core`, `packages/mcp-tools-windows`) — split
+  between cross-platform (`net10.0`) and Windows-only.
+- **Wiki** (`packages/wiki`) — durable Markdown-backed knowledge with revisions.
+- **Voice** (`apps/voice-host`, `apps/voice-backend`, `src/Thaddeus.Tts.*`) —
+  optional sidecars for ASR and TTS. Beta.
+
+For a 10-minute read, see [`docs/ARCHITECTURE_PUBLIC.md`](docs/ARCHITECTURE_PUBLIC.md).
+For the full version, [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+---
+
+## Development
+
+```bash
+# Solution build (Debug)
+dotnet build SirThaddeus.sln
+
+# Solution build + tests (Release)
+pwsh dev/test.ps1 -Configuration Release
+
+# Full preflight (bootstrap + Release tests)
+pwsh dev/preflight.ps1
+
+# Web typecheck + build
+cd web && npm install && npm run typecheck && npm run build
+
+# Web E2E (Playwright)
+cd web && npm run test:e2e
+```
+
+For platform packaging, see [`docs/packaging.md`](docs/packaging.md).
 
 ---
 
 ## Documentation
 
-- [Architecture Overview](docs/ARCHITECTURE.md)
-- [Settings Reference](docs/SETTINGS.md)
-- [Contributing](CONTRIBUTING.md)
-- [Privacy Policy](PRIVACY.md)
-- [Security Policy](SECURITY.md)
+- [`V1_SCOPE.md`](V1_SCOPE.md) — what v1 is and is not.
+- [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) — golden 3–5 minute demo.
+- [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) — honest boundaries.
+- [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) — pre-release gate.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — v1.0 → v1.1 → v2.0.
+- [`docs/ARCHITECTURE_PUBLIC.md`](docs/ARCHITECTURE_PUBLIC.md) — architecture in 10 minutes.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full architecture.
+- [`docs/SETTINGS.md`](docs/SETTINGS.md) — settings reference.
+- [`docs/hybrid-shell.md`](docs/hybrid-shell.md) — Phase-1 hybrid notes.
+- [`docs/packaging.md`](docs/packaging.md) — building self-contained binaries.
+- [`PRIVACY.md`](PRIVACY.md), [`SECURITY.md`](SECURITY.md), [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
 ## License
 
-Licensed under **Apache 2.0**. See [LICENSE](LICENSE) for details.
+Apache 2.0. See [`LICENSE`](LICENSE).

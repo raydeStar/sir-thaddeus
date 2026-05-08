@@ -12,8 +12,9 @@ REST + WebSocket API on `127.0.0.1`.
 | Threads + chat | ✅ Phase 4 |
 | Voice + activity feed | ✅ Phase 5 |
 | Settings (with secret masking) | ✅ Phase 6 |
-| Memory (memos + tags + pin) | ✅ Phase 7.1 |
-| Automations (CRUD + run + activity) | ✅ Phase 7.2 |
+| Memory (memos + tags + pin + edit + Markdown body) | ✅ Phase 7.1 |
+| Routines (manual checklists + run history) | ✅ replaces Automations as of 0.3.0 |
+| Wiki / canvas (CRUD, revisions, import/export, search, page chat / draft / rewrite) | ✅ |
 | Onboarding (4-step wizard + persisted flag) | ✅ Phase 8.1 |
 | Self-contained packaging | ✅ Phase 8.2 |
 
@@ -51,7 +52,7 @@ auto-update channel).
 - `src/Thaddeus.Runtime/` — ASP.NET Core minimal-API host.
 - `src/Thaddeus.Runtime/wwwroot/` — built React bundle (synced from `web/dist/`).
 - `web/` — React + TanStack Router source. `npm run build` then sync.
-- `packages/shared-types/` — cs+ts shared DTOs (Settings, Memo, Automation, Activity, Voice).
+- `packages/shared-types/` — cs+ts shared DTOs (Settings, Memo, Routine, Activity, Voice, Wiki).
 - `tests/runtime/` — runtime xUnit tests (84/84 green at Phase 8.1).
 - `web/tests/e2e/` — Playwright smoke tests (9/9 green at Phase 8.1).
 
