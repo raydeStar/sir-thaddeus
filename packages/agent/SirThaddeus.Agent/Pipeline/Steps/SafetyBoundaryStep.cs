@@ -18,6 +18,13 @@ namespace SirThaddeus.Agent.Pipeline.Steps;
 /// </summary>
 public sealed class SafetyBoundaryStep : ITurnStep
 {
+    private readonly Func<string?>? _resolveActiveProfileId;
+
+    public SafetyBoundaryStep(Func<string?>? resolveActiveProfileId = null)
+    {
+        _resolveActiveProfileId = resolveActiveProfileId;
+    }
+
     public string Name => "SafetyBoundary";
 
     public Task<StepResult> ExecuteAsync(TurnContext context, CancellationToken cancellationToken)
@@ -28,9 +35,13 @@ public sealed class SafetyBoundaryStep : ITurnStep
         if (!OrchestratorMessageHelpers.LooksLikeHighRiskIllicitInstructionRequest(context.UserText))
             return Task.FromResult<StepResult>(new StepResult.Continue(context));
 
+        var reply = string.Equals(_resolveActiveProfileId?.Invoke(), "sir_thaddeus", StringComparison.OrdinalIgnoreCase)
+            ? OrchestratorMessageHelpers.BuildSirThaddeusSafetyBoundaryWithAlternativeReply()
+            : OrchestratorMessageHelpers.BuildSafetyBoundaryWithAlternativeReply();
+
         var response = new AgentResponse
         {
-            Text = OrchestratorMessageHelpers.BuildSafetyBoundaryWithAlternativeReply(),
+            Text = reply,
             Success = true,
             ToolCallsMade = [],
             LlmRoundTrips = 0,

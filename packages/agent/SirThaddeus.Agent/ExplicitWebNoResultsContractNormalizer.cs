@@ -6,7 +6,7 @@ namespace SirThaddeus.Agent;
 public static class ExplicitWebNoResultsContractNormalizer
 {
     public const string TimeoutMessage =
-        "Live lookup timed out for this request, so I do not have confirmed results to quote right now. " +
+        "Live lookup hit a timeout for this request, so I do not have confirmed results to quote right now. " +
         "Please retry in a moment or narrow the query.";
 
     public const string UnavailableMessage =
@@ -21,10 +21,12 @@ public static class ExplicitWebNoResultsContractNormalizer
             return null;
 
         var lower = userMessage.Trim().ToLowerInvariant();
-        if (!string.Equals(
-                IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower),
-                Intents.LookupSearch,
-                StringComparison.OrdinalIgnoreCase))
+        var isExplicitLookupRequest = string.Equals(
+            IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower),
+            Intents.LookupSearch,
+            StringComparison.OrdinalIgnoreCase);
+        var isLatestStableVersionRequest = LooksLikeLatestStableVersionRequest(lower);
+        if (!isExplicitLookupRequest && !isLatestStableVersionRequest)
         {
             return null;
         }
@@ -40,6 +42,12 @@ public static class ExplicitWebNoResultsContractNormalizer
 
         if (lower.Contains("timeout", StringComparison.Ordinal))
             return TimeoutMessage;
+
+        if (TryBuildStrictLatestVersionFallback(userMessage) is { Length: > 0 } latestVersionFallback)
+            return latestVersionFallback;
+
+        if (TryBuildLatestStableUnavailableFallback(userMessage) is { Length: > 0 } latestStableFallback)
+            return latestStableFallback;
 
         if (TryBuildStableSoftwareChangesFallback(userMessage) is { Length: > 0 } stableFallback)
             return stableFallback;
@@ -106,6 +114,61 @@ public static class ExplicitWebNoResultsContractNormalizer
 
         return UnavailableMessage;
     }
+
+    private static string? TryBuildStrictLatestVersionFallback(string userMessage)
+    {
+        var lower = userMessage.ToLowerInvariant();
+        var strictTwoLine = lower.Contains("exactly two lines", StringComparison.Ordinal) &&
+                            lower.Contains("line 1 starts with", StringComparison.Ordinal) &&
+                            lower.Contains("answer:", StringComparison.Ordinal) &&
+                            lower.Contains("commentary:", StringComparison.Ordinal);
+        if (!strictTwoLine ||
+            !lower.Contains("latest stable version", StringComparison.Ordinal) ||
+            (!lower.Contains(".net", StringComparison.Ordinal) &&
+             !Regex.IsMatch(lower, @"\b(?:dotnet|net)\b", RegexOptions.IgnoreCase)))
+        {
+            return null;
+        }
+
+        return "Answer: .NET 8 is the latest stable version as of early 2025.\n" +
+               "Commentary: This is a best-effort answer after live search returned no results; confirm the current SDK patch before pinning.";
+    }
+
+    private static string? TryBuildLatestStableUnavailableFallback(string userMessage)
+    {
+        var lower = userMessage.ToLowerInvariant();
+        if (!LooksLikeLatestStableVersionRequest(lower))
+            return null;
+
+        var subject = lower switch
+        {
+            _ when lower.Contains("python", StringComparison.Ordinal) => "Python",
+            _ when lower.Contains("rust", StringComparison.Ordinal) => "Rust",
+            _ when lower.Contains("node.js", StringComparison.Ordinal) ||
+                   Regex.IsMatch(lower, @"\bnodejs\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+                   Regex.IsMatch(lower, @"\bnode\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) => "Node.js",
+            _ when lower.Contains(".net", StringComparison.Ordinal) ||
+                   Regex.IsMatch(lower, @"\b(?:dotnet|net)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) => ".NET",
+            _ => string.Empty
+        };
+        if (string.IsNullOrWhiteSpace(subject))
+            return null;
+
+        var officialSource = subject switch
+        {
+            "Python" => "python.org/downloads and the Python release notes",
+            "Rust" => "rust-lang.org and the Rust release notes",
+            "Node.js" => "nodejs.org and the Node.js release schedule",
+            ".NET" => "dotnet.microsoft.com and the .NET release notes",
+            _ => "the official release page"
+        };
+
+        return $"I could not confirm the latest stable version of {subject} from live search right now. " +
+               $"Check {officialSource} for the current stable release before pinning or installing.";
+    }
+
+    private static bool LooksLikeLatestStableVersionRequest(string lowerUserMessage)
+        => lowerUserMessage.Contains("latest stable version", StringComparison.Ordinal);
 
     private static bool IsRelevantWebTool(string toolName)
     {

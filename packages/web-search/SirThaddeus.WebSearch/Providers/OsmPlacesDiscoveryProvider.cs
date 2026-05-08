@@ -454,19 +454,34 @@ public sealed class OsmPlacesDiscoveryProvider : IPlacesDiscoveryProvider, IDisp
 
     private static string? ResolveLocationHint(string query, string? userLocationHint)
     {
-        if (!string.IsNullOrWhiteSpace(userLocationHint))
+        if (!string.IsNullOrWhiteSpace(userLocationHint) && !IsGenericLocationHint(userLocationHint))
             return userLocationHint.Trim();
 
         var lower = query.ToLowerInvariant();
         var marker = lower.LastIndexOf(" in ", StringComparison.Ordinal);
         if (marker >= 0)
-            return query[(marker + 4)..].Trim().TrimEnd('?', '.', '!');
+            return NormalizeLocationHintCandidate(query[(marker + 4)..]);
 
         marker = lower.LastIndexOf(" near ", StringComparison.Ordinal);
         if (marker >= 0)
-            return query[(marker + 6)..].Trim().TrimEnd('?', '.', '!');
+            return NormalizeLocationHintCandidate(query[(marker + 6)..]);
 
         return null;
+    }
+
+    private static string? NormalizeLocationHintCandidate(string value)
+    {
+        var candidate = value.Trim().TrimEnd('?', '.', '!');
+        return IsGenericLocationHint(candidate) ? null : candidate;
+    }
+
+    private static bool IsGenericLocationHint(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return true;
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized is "me" or "near me" or "nearby" or "here" or "around here" or "my area" or "current location" or "this area" or "local";
     }
 
     private PlacesDiscoveryResult BuildErrorResult(

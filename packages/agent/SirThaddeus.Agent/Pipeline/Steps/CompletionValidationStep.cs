@@ -46,6 +46,13 @@ public sealed class CompletionValidationStep : ITurnStep
         if (string.IsNullOrWhiteSpace(context.AssistantDraft))
             return new StepResult.Continue(context);
 
+        if (ToolBackedResponseQualityGuards.TryBuildCurrentTimeInLocationFallback(
+                context.UserText ?? string.Empty,
+                context.ToolCallsMade) is { Length: > 0 } currentTimeDraft)
+        {
+            return new StepResult.Continue(context with { AssistantDraft = currentTimeDraft });
+        }
+
         CompletionValidationResult validation;
         try
         {

@@ -57,6 +57,26 @@ public sealed class ExplicitWebNoResultsContractNormalizerTests
     }
 
     [Fact]
+    public void TryBuildResponse_WhenLatestStablePythonHasNoResults_PreservesSubject()
+    {
+        var response = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(
+            "What is the latest stable version of Python?",
+            [new ToolCallRecord
+            {
+                ToolName = "web_search",
+                Arguments = "{}",
+                Result = "[search: 0 result(s) returned]",
+                Success = true
+            }]);
+
+        Assert.NotNull(response);
+        Assert.Contains("Python", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("latest stable version", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("python.org", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Please retry", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void TryBuildResponse_WhenPromptIsNotExplicitToolInvocation_ReturnsNull()
     {
         var response = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(

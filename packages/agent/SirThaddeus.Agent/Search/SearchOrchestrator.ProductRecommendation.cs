@@ -252,6 +252,18 @@ public sealed partial class SearchOrchestrator
         };
     }
 
+    private static string BuildRetailerLabelList(IReadOnlyList<string> retailerDomains)
+        => string.Join(
+            ", ",
+            retailerDomains.Select(domain => domain switch
+            {
+                "amazon.com" => "Amazon",
+                "walmart.com" => "Walmart",
+                "ebay.com" => "eBay",
+                "etsy.com" => "Etsy",
+                _ => domain
+            }));
+
     private async Task<AgentResponse> ExecuteProductRecommendationAsync(
         string userMessage,
         string memoryPackText,
@@ -300,7 +312,7 @@ public sealed partial class SearchOrchestrator
             allSources.AddRange(ParseSourcesFromToolResult(toolResult));
         }
 
-        var filteredSources = FilterProductSources(allSources, constraints.ProductType);
+        var filteredSources = FilterProductSources(allSources, constraints);
         var rankedCandidates = RankProductCandidates(filteredSources, constraints);
         await HydrateTopCandidatesAsync(rankedCandidates, toolCallsMade, ct);
 
@@ -526,12 +538,12 @@ public sealed partial class SearchOrchestrator
 
     private static IReadOnlyList<SourceItem> FilterProductSources(
         IReadOnlyList<SourceItem> sources,
-        string productType)
+        ProductConstraints constraints)
     {
         if (sources.Count == 0)
             return [];
 
-        var tokens = Tokenize(productType);
+        var tokens = Tokenize(constraints.ProductType);
 
         return sources
             .Where(source =>
@@ -548,18 +560,47 @@ public sealed partial class SearchOrchestrator
                     return false;
                 }
 
-                var hasRetailerAnchor = ProductRetailerDomains.Any(domain =>
+                if (IsProductEditorialOrAggregatorSource(source))
+                    return false;
+
+                var hasRequestedRetailerAnchor = constraints.RetailerDomains.Any(domain =>
                     source.Domain.Contains(domain, StringComparison.OrdinalIgnoreCase) ||
                     source.Url.Contains(domain, StringComparison.OrdinalIgnoreCase));
 
                 var hasProductAnchor = tokens.Count == 0 || tokens.Any(token =>
-                    lower.Contains(token, StringComparison.OrdinalIgnoreCase));
+                    lower.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                    source.Url.Contains(token, StringComparison.OrdinalIgnoreCase));
 
-                return hasRetailerAnchor || hasProductAnchor;
+                return hasRequestedRetailerAnchor && hasProductAnchor;
             })
             .GroupBy(source => source.Url, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToList();
+    }
+
+    private static bool IsProductEditorialOrAggregatorSource(SourceItem source)
+    {
+        var lowerUrl = (source.Url ?? string.Empty).ToLowerInvariant();
+        var lowerDomain = (source.Domain ?? string.Empty).ToLowerInvariant();
+        var lowerTitle = (source.Title ?? string.Empty).ToLowerInvariant();
+
+        if (lowerUrl.Contains("news.google.", StringComparison.Ordinal) ||
+            lowerDomain.Contains("news.google", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (lowerTitle.Contains("best ", StringComparison.Ordinal) ||
+            Regex.IsMatch(lowerTitle, @"\b\d+\s+best\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+            lowerTitle.Contains("buying guide", StringComparison.Ordinal) ||
+            lowerTitle.Contains("reviewed", StringComparison.Ordinal))
+        {
+            return !ProductRetailerDomains.Any(domain =>
+                lowerDomain.Contains(domain, StringComparison.Ordinal) ||
+                lowerUrl.Contains(domain, StringComparison.Ordinal));
+        }
+
+        return false;
     }
 
     private static List<ProductCandidate> RankProductCandidates(
@@ -678,11 +719,9 @@ public sealed partial class SearchOrchestrator
         if (mode == ProductResponseMode.HonestDegraded)
         {
             if (candidates.Count == 0)
-            {
-                return "Reliable retailer listing evidence is still missing for this product request. " +
-                       "Direct listing pages (not generic editorial snippets) are needed before naming a defensible recommendation. " +
-                       $"I can retry using retailer-focused queries across {string.Join(", ", constraints.RetailerDomains)} and return a shortlist once I have concrete candidates.";
-            }
+                return $"I could not confirm a single best {constraints.ProductType} from this live lookup. " +
+                       "Direct retailer listing pages, not generic editorial snippets or news aggregators, are needed before naming a defensible recommendation. " +
+                       $"For {BuildRetailerLabelList(constraints.RetailerDomains)}, compare current listings for third-party testing, standardized extract/dose, current high-volume reviews, seller transparency, and ingredient clarity before buying.";
 
             var fallbackNames = string.Join("; ", candidates.Take(2).Select(candidate => candidate.Title));
             return "A single best pick is not established yet, but these plausible candidates are a useful starting point: " +
@@ -783,6 +822,12 @@ public sealed partial class SearchOrchestrator
 
         return score;
     }
+
+    internal static IReadOnlyList<SourceItem> TestHook_FilterProductSources(
+        IReadOnlyList<SourceItem> sources,
+        IReadOnlyList<string> retailerDomains,
+        string productType)
+        => FilterProductSources(sources, new ProductConstraints(productType, retailerDomains, ProductDefaultCount));
 
     private static string InferRetailerLabel(SourceItem source)
     {

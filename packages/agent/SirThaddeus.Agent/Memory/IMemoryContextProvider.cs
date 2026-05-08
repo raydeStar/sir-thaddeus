@@ -40,6 +40,7 @@ public sealed record MemoryContextResult
     public string PackText { get; init; } = "";
     public bool OnboardingNeeded { get; init; }
     public string? Error { get; init; }
+    public string? RawResult { get; init; }
     public MemoryContextProvenance Provenance { get; init; } = new();
 }
 

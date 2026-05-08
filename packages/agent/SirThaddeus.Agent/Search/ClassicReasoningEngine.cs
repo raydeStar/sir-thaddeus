@@ -16,7 +16,7 @@ public static class ClassicReasoningEngine
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex TargetLiterRegex = new(
-        @"(?:exactly|get|obtain|measure)\s+(?<n>\d+)\s*(?:-| )?(?:liter|litre|l)\b",
+        @"(?:exactly|get|obtain|measure(?:\s+exactly)?)\s+(?<n>\d+)\s*(?:-| )?(?:liters?|litres?|l)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex FloorRegex = new(
@@ -56,7 +56,7 @@ public static class ClassicReasoningEngine
         RegexOptions.Compiled);
 
     private static readonly Regex QuotedWordRegex = new(
-        "[\"'`“”](?<word>[A-Za-z]{2,})[\"'`“”]",
+        "[\"'`“”](?<word>[A-Za-z]{2,})[,.!?;:]?[\"'`“”]",
         RegexOptions.Compiled);
 
     private static readonly Dictionary<string, int> NumberWords = new(StringComparer.OrdinalIgnoreCase)
@@ -153,17 +153,17 @@ public static class ClassicReasoningEngine
             Answer = BuildLogicBreakdown(
                 facts:
                 [
-                    $"You have a {jugA}L jug and a {jugB}L jug.",
-                    $"You must measure exactly {target}L.",
+                    $"You have a {jugA}-liter jug and a {jugB}-liter jug.",
+                    $"You must measure exactly {target} liters ({target}L).",
                     "Allowed operations are fill, empty, and pour."
                 ],
-                goal: $"Find a valid state sequence ending with exactly {target}L.",
+                goal: $"Find a valid state sequence ending with exactly {target} liters.",
                 checks:
                 [
-                    $"Reachability check: gcd({jugA}, {jugB}) = {gcd}, so {target}L is reachable.",
+                    $"Reachability check: gcd({jugA}, {jugB}) = {gcd}, so {target} liters is reachable.",
                     $"A shortest valid path was found with {actions.Count} moves."
                 ],
-                answer: $"A valid sequence is: {sequence}. Final state is ({finalState.A}L, {finalState.B}L), so {target}L is in {measuredIn}.")
+                answer: $"A valid sequence is: {sequence}. Final state is ({finalState.A}L, {finalState.B}L), so {target} liters ({target}L) is in {measuredIn}.")
         };
     }
 
@@ -306,8 +306,9 @@ public static class ClassicReasoningEngine
                 goal: "Find the hypothesis that explains both normal and rainy behavior.",
                 checks:
                 [
-                    $"Reach-limitation hypothesis score: {shortReachScore}.",
-                    $"Stamina/weather hypothesis score: {staminaScore}."
+                    $"He can reach floor {partialFloor} without help.",
+                    "On rainy days he has an umbrella.",
+                    "The umbrella extends his reach to the higher button."
                 ],
                 answer: answer)
         };

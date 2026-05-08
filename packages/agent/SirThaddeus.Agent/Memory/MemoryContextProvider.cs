@@ -214,6 +214,7 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
             {
                 PackText = packText,
                 OnboardingNeeded = onboarding,
+                RawResult = call.Result,
                 Provenance = new MemoryContextProvenance
                 {
                     SourceTool = call.ToolName,

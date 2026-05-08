@@ -54,6 +54,9 @@ public sealed class UtilityFastPathStep : ITurnStep
         if (match is null || match.Confidence < _minConfidence)
             return Task.FromResult<StepResult>(new StepResult.Continue(context));
 
+        if (ShouldDeferPersonalPromptToMemory(context))
+            return Task.FromResult<StepResult>(new StepResult.Continue(context));
+
         // Deterministic answer wins the turn. No tools, no LLM; surface
         // the canned answer and stop the pipeline.
         var response = new AgentResponse
@@ -62,5 +65,46 @@ public sealed class UtilityFastPathStep : ITurnStep
             Success = true,
         };
         return Task.FromResult<StepResult>(new StepResult.Terminate(response));
+    }
+
+    private static bool ShouldDeferPersonalPromptToMemory(TurnContext context)
+    {
+        var userText = context.UserText ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(userText))
+            return false;
+
+        if (HasPersonalContextCue(userText))
+            return true;
+
+        var hasMemoryRetrieve = context.ToolDefs.Any(def =>
+            string.Equals(def.Function?.Name, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(def.Function?.Name, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase));
+        if (!hasMemoryRetrieve && !HarnessAllowsMemoryRetrieve())
+            return false;
+
+        return HasPersonalContextCue(userText);
+    }
+
+    private static bool HasPersonalContextCue(string userText)
+    {
+        var lower = " " + userText.Trim().ToLowerInvariant() + " ";
+        return lower.Contains(" my ", StringComparison.Ordinal) ||
+               lower.Contains(" i'm ", StringComparison.Ordinal) ||
+               lower.Contains(" im ", StringComparison.Ordinal) ||
+               lower.Contains(" i've ", StringComparison.Ordinal) ||
+               lower.Contains(" we ", StringComparison.Ordinal) ||
+               lower.Contains(" our ", StringComparison.Ordinal);
+    }
+
+    private static bool HarnessAllowsMemoryRetrieve()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        return raw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(tool =>
+                string.Equals(tool, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tool, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase));
     }
 }

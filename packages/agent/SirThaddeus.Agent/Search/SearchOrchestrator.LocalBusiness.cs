@@ -3353,8 +3353,20 @@ public sealed partial class SearchOrchestrator
         CancellationToken ct,
         bool surfaceConfigMessage = true)
     {
-        var location = ResolveLocalBusinessLocationContext(userMessage);
-        var label = GetRequestedLocalBusinessLabel(userMessage);
+        if (HarnessDisallowsPlacesTools())
+            return null;
+
+        var safeUserMessage = userMessage ?? string.Empty;
+        var lowerMessage = safeUserMessage.ToLowerInvariant();
+        if (!IntentFeatureExtractor.HasLocalBusinessProximitySignals(lowerMessage) &&
+            !IntentFeatureExtractor.LooksLikeGenericLocalBusinessDiscovery(lowerMessage) &&
+            !IsSpecificLocalBusinessVerificationRequest(safeUserMessage))
+        {
+            return null;
+        }
+
+        var location = ResolveLocalBusinessLocationContext(safeUserMessage);
+        var label = GetRequestedLocalBusinessLabel(safeUserMessage);
         var singular = SingularizeBusinessLabel(label);
 
         var queries = new List<string>();
@@ -3362,7 +3374,7 @@ public sealed partial class SearchOrchestrator
         {
             queries.Add($"{label} near {location}");
 
-            foreach (var alias in GetLocalBusinessRetryAliases(userMessage))
+            foreach (var alias in GetLocalBusinessRetryAliases(safeUserMessage))
             {
                 queries.Add($"{alias} in {location}");
                 queries.Add($"{alias} near {location}");
@@ -3374,7 +3386,7 @@ public sealed partial class SearchOrchestrator
         {
             queries.Add($"{label} near me");
 
-            foreach (var alias in GetLocalBusinessRetryAliases(userMessage))
+            foreach (var alias in GetLocalBusinessRetryAliases(safeUserMessage))
             {
                 queries.Add($"{alias} near me");
                 queries.Add(alias);
@@ -3438,14 +3450,14 @@ public sealed partial class SearchOrchestrator
 
         Session.RecordSearchResults(
             SearchMode.WebFactFind,
-            userMessage,
+            safeUserMessage,
             "any",
             sourceItems,
             DateTimeOffset.UtcNow);
         Session.LastWasLocalBusinessDiscovery = true;
         Session.RecordLocalBusinessCandidates(label, sourceItems);
 
-        return BuildEnrichedLocalBusinessResponse(userMessage, enriched, location, toolCallsMade, includesSupplementalSpots: false);
+        return BuildEnrichedLocalBusinessResponse(safeUserMessage, enriched, location, toolCallsMade, includesSupplementalSpots: false);
     }
 
     private AgentResponse BuildDirectoryLocalBusinessResponse(

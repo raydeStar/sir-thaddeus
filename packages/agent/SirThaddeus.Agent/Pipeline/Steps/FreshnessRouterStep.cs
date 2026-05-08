@@ -28,6 +28,8 @@ public sealed class FreshnessRouterStep : ITurnStep
 {
     private const string WebSearchToolName = "web_search";
     private const string WeatherGeocodeToolName = "weather_geocode";
+    private const string ResolveTimezoneToolName = "resolve_timezone";
+    private const string MemoryRetrieveToolName = "memory_retrieve";
 
     // Weather-shaped asks: "weather in Seattle", "forecast for Tokyo",
     // "is it raining", "how cold", "use weather tools for X". When the
@@ -68,6 +70,20 @@ public sealed class FreshnessRouterStep : ITurnStep
         @"(?:\s+(?:tool|function|command|action))?" +
         @"\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex TimeInLocationPattern = new(
+        @"\b(?:what(?:'s|\s+is)\s+)?(?:the\s+)?(?:current\s+)?time\b.*\b(?:in|at|for)\s+" +
+        @"(?:the\s+)?[a-z][\w\s,.'-]{1,80}(?:\?|\s+right\s+now|\s+now)?\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex PersonalContextPattern = new(
+        @"\b(?:my|our|i'm|im|i've|ive|we)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ProductRecommendationPattern = new(
+        @"\b(?:recommend|recommendation|best|good|which|what)\b.{0,80}\b(?:amazon(?:\.com)?|product|supplement|brand|buy|purchase)\b|" +
+        @"\b(?:amazon(?:\.com)?)\b.{0,80}\b(?:recommend|best|good|supplement|product)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     // ── Gate 1: the prompt must look like a factual question ────────────
     // "is there", "does X exist", "when did", "what year", "how much".
@@ -138,6 +154,26 @@ public sealed class FreshnessRouterStep : ITurnStep
             }
         }
 
+        if (!HasMemoryRetrieveCall(context) &&
+            (HasTool(context, MemoryRetrieveToolName) || HarnessAllowsOnlyMemoryRetrieve()) &&
+            PersonalContextPattern.IsMatch(userText))
+        {
+            return Task.FromResult<StepResult>(new StepResult.Continue(context with
+            {
+                ForcedTool = MemoryRetrieveToolName,
+            }));
+        }
+
+        if (HasTool(context, WeatherGeocodeToolName) &&
+            HasTool(context, ResolveTimezoneToolName) &&
+            TimeInLocationPattern.IsMatch(userText))
+        {
+            return Task.FromResult<StepResult>(new StepResult.Continue(context with
+            {
+                ForcedTool = WeatherGeocodeToolName,
+            }));
+        }
+
         // ── Weather intent ───────────────────────────────────────────────
         // Prefer weather_geocode when the prompt is weather-shaped AND
         // the tool is available. Without this, the 2B model reaches for
@@ -159,6 +195,14 @@ public sealed class FreshnessRouterStep : ITurnStep
         // Falls through to a regular LLM answer (best-effort from memory).
         if (!HasTool(context, WebSearchToolName))
             return Task.FromResult<StepResult>(new StepResult.Continue(context));
+
+        if (ProductRecommendationPattern.IsMatch(userText))
+        {
+            return Task.FromResult<StepResult>(new StepResult.Continue(context with
+            {
+                ForcedTool = WebSearchToolName,
+            }));
+        }
 
         if (SuppressPattern.IsMatch(userText))
             return Task.FromResult<StepResult>(new StepResult.Continue(context));
@@ -182,5 +226,41 @@ public sealed class FreshnessRouterStep : ITurnStep
                 return true;
         }
         return false;
+    }
+
+    private static bool HasOnlyTool(TurnContext context, string toolName)
+    {
+        var toolCount = 0;
+        var matched = false;
+        for (var i = 0; i < context.ToolDefs.Count; i++)
+        {
+            var name = context.ToolDefs[i].Function?.Name;
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+
+            toolCount++;
+            if (string.Equals(name, toolName, StringComparison.OrdinalIgnoreCase))
+                matched = true;
+        }
+
+        return matched && toolCount == 1;
+    }
+
+    private static bool HasMemoryRetrieveCall(TurnContext context)
+        => context.ToolCallsMade.Any(call =>
+            string.Equals(call.ToolName, MemoryRetrieveToolName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(call.ToolName, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HarnessAllowsOnlyMemoryRetrieve()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        var tools = raw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(tool => !string.IsNullOrWhiteSpace(tool))
+            .ToList();
+        return tools.Count == 1 &&
+               string.Equals(tools[0], MemoryRetrieveToolName, StringComparison.OrdinalIgnoreCase);
     }
 }

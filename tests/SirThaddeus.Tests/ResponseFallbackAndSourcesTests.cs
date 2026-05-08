@@ -1213,6 +1213,25 @@ public class BareResponseEnrichmentTests
     }
 
     [Fact]
+    public void SanitizeFinalResponse_OverlongTcpEssayWithoutSignature_CompressesToStructuredFallback()
+    {
+        var result = _processor.SanitizeFinalResponse(
+            "The TCP three-way handshake establishes a reliable connection before data can be exchanged. " +
+            "It starts with SYN from the client, continues with SYN-ACK from the server, and ends with ACK from the client. " +
+            "This is important because it confirms both sides are alive, reachable, willing to communicate, synchronized on initial sequence numbers, ready for retransmission handling, prepared for ordered byte streams, protected against half-open sessions, and moved into an established state before application data flows. " +
+            "Here is an extended explanation with repeated reliability details, timeout discussion, packet ordering, sequence tracking, state machines, retransmission windows, flow control, and error recovery that keeps going long past what a concise no-tool explanation needs to say for a user who asked for the basic handshake. " +
+            "The client sends SYN, the server sends SYN-ACK, the client sends ACK, and then the established connection can transfer data reliably with sequence-number synchronization.",
+            [],
+            "Explain how TCP three-way handshake works and why it matters for reliability.");
+
+        Assert.Contains("TCP three-way handshake", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1.", result, StringComparison.Ordinal);
+        Assert.Contains("SYN-ACK", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("-- Sir Thaddeus", result, StringComparison.Ordinal);
+        Assert.True(result.Length < 700, "Expected signatureless TCP explanations to stay concise too.");
+    }
+
+    [Fact]
     public void SanitizeFinalResponse_ToolBackedAnswer_StripsRawUrlCitation()
     {
         var result = _processor.SanitizeFinalResponse(

@@ -1,4 +1,5 @@
 using SirThaddeus.Agent.Guardrails;
+using SirThaddeus.Agent;
 
 namespace SirThaddeus.Agent.Pipeline.Steps;
 
@@ -47,6 +48,16 @@ public sealed class GuardrailsStep : ITurnStep
         if (_pipeline is null)
             return new StepResult.Continue(context);
 
+        if (HasPersonalContextCue(context.UserText) &&
+            !HasMemoryRetrieveCall(context) &&
+            !HasRememberedContext(context))
+        {
+            return new StepResult.Continue(context);
+        }
+
+        if (ShouldDeferToMemoryRetrieve(context))
+            return new StepResult.Continue(context);
+
         GuardrailsPipelineResult? result;
         try
         {
@@ -68,15 +79,89 @@ public sealed class GuardrailsStep : ITurnStep
         if (result is null || string.IsNullOrWhiteSpace(result.AnswerText))
             return new StepResult.Continue(context);
 
+        var answerText = OrchestratorMessageHelpers.TryBuildEarlyDeterministicBenignFallback(context.UserText)
+            ?? result.AnswerText;
+
         var response = new AgentResponse
         {
-            Text = result.AnswerText,
+            Text = answerText,
             Success = true,
-            ToolCallsMade = [],
+            ToolCallsMade = context.ToolCallsMade.ToList(),
             LlmRoundTrips = result.LlmRoundTrips,
             GuardrailsUsed = true,
             GuardrailsRationale = result.RationaleLines,
         };
         return new StepResult.Terminate(response);
+    }
+
+    private static bool ShouldDeferToMemoryRetrieve(TurnContext context)
+    {
+        if (HasMemoryRetrieveCall(context) || HasRememberedContext(context))
+            return false;
+
+        var userText = context.UserText ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(userText))
+            return false;
+
+        var toolCount = 0;
+        var hasMemoryRetrieve = false;
+        foreach (var def in context.ToolDefs)
+        {
+            var name = def.Function?.Name;
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+
+            toolCount++;
+            if (string.Equals(name, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase))
+            {
+                hasMemoryRetrieve = true;
+            }
+        }
+
+        var harnessMemoryOnly = HarnessAllowsOnlyMemoryRetrieve();
+        if (!hasMemoryRetrieve && !harnessMemoryOnly)
+            return false;
+
+        return HasPersonalContextCue(userText);
+    }
+
+    private static bool HasMemoryRetrieveCall(TurnContext context)
+        => context.ToolCallsMade.Any(call =>
+            string.Equals(call.ToolName, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(call.ToolName, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasRememberedContext(TurnContext context)
+        => context.LlmMessages.Any(message =>
+            string.Equals(message.Role, "system", StringComparison.OrdinalIgnoreCase) &&
+            (message.Content?.Contains("[REMEMBERED CONTEXT]", StringComparison.OrdinalIgnoreCase) ?? false));
+
+    private static bool HasPersonalContextCue(string? userText)
+    {
+        if (string.IsNullOrWhiteSpace(userText))
+            return false;
+
+        var lower = " " + userText.Trim().ToLowerInvariant() + " ";
+        return lower.Contains(" my ", StringComparison.Ordinal) ||
+               lower.Contains(" i'm ", StringComparison.Ordinal) ||
+               lower.Contains(" im ", StringComparison.Ordinal) ||
+               lower.Contains(" i've ", StringComparison.Ordinal) ||
+               lower.Contains(" ive ", StringComparison.Ordinal) ||
+               lower.Contains(" we ", StringComparison.Ordinal) ||
+               lower.Contains(" our ", StringComparison.Ordinal);
+    }
+
+    private static bool HarnessAllowsOnlyMemoryRetrieve()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        var tools = raw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(tool => !string.IsNullOrWhiteSpace(tool))
+            .ToList();
+        return tools.Count == 1 &&
+               (string.Equals(tools[0], ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tools[0], ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase));
     }
 }

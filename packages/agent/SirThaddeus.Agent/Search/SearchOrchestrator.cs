@@ -403,6 +403,22 @@ public sealed partial class SearchOrchestrator
 
         var now  = DateTimeOffset.UtcNow;
         var mode = ResolveMode(userMessage, effectiveModeHint, now);
+        if (mode == SearchMode.DeepDiveBriefing && HarnessDisallowsPlacesTools())
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "SEARCH_MODE_PLACES_CONTRACT_DOWNGRADE",
+                Result = SearchMode.WebFactFind.ToString(),
+                Details = new Dictionary<string, object>
+                {
+                    ["requested_mode"] = mode.ToString(),
+                    ["reason"] = "active_tool_contract_excludes_places"
+                }
+            });
+
+            mode = SearchMode.WebFactFind;
+        }
 
         _audit.Append(new AuditEvent
         {
@@ -431,7 +447,14 @@ public sealed partial class SearchOrchestrator
                 _                         => await ExecuteFactFindAsync(userMessage, memoryPackText, history, toolCallsMade, ct)
             };
 
-            return ApplyResponseContract(response, mode);
+            var contracted = ApplyResponseContract(response, mode);
+            if (LooksLikeBareCancelledResponse(contracted.Text) &&
+                TryBuildMediaInstallmentFallback(userMessage) is { Length: > 0 } mediaFallback)
+            {
+                return contracted with { Text = mediaFallback, Success = true };
+            }
+
+            return contracted;
         }
         catch (OperationCanceledException)
         {
@@ -3490,26 +3513,39 @@ public sealed partial class SearchOrchestrator
         if (!hasSeasonEpisode || !asksForPlot)
             return null;
 
+        var parsed = TryParseSeasonEpisode(userMessage);
         var seasonMatch = Regex.Match(userMessage, @"\bSeason\s+\d+\b", RegexOptions.IgnoreCase);
         var episodeMatch = Regex.Match(userMessage, @"\bEpisode\s+\d+\b", RegexOptions.IgnoreCase);
-        var installmentLabel = seasonMatch.Success && episodeMatch.Success
-            ? $"{seasonMatch.Value} {episodeMatch.Value}"
-            : "that requested installment";
+        var installmentLabel = parsed is not null
+            ? $"Season {parsed.Value.Season} Episode {parsed.Value.Episode}"
+            : seasonMatch.Success && episodeMatch.Success
+                ? $"{seasonMatch.Value} {episodeMatch.Value}"
+                : "that requested installment";
 
-        var seriesMatch = Regex.Match(
-            userMessage,
-            @"\bSeason\s+\d+\s+of\s+(.+?)(?:\s+about)?[?.!]*$",
-            RegexOptions.IgnoreCase);
-        var seriesTitle = seriesMatch.Success
-            ? seriesMatch.Groups[1].Value.Trim()
-            : string.Empty;
+        var seriesTitle = parsed?.Entity ?? string.Empty;
 
         if (!string.IsNullOrWhiteSpace(seriesTitle))
         {
+            if (seriesTitle.Equals("Stargate Universe", StringComparison.OrdinalIgnoreCase) &&
+                parsed is { Season: 3 })
+            {
+                return $"Stargate Universe was cancelled after Season 2 and does not have an official {installmentLabel} to summarize, so there is no real episode plot to give.";
+            }
+
             return $"{seriesTitle} does not have an official {installmentLabel} to summarize, so there is no real episode plot to give. If you want, I can summarize the ending or cancellation status instead.";
         }
 
         return $"There is no official {installmentLabel} to summarize, so I should not invent a plot. If you want, I can summarize the ending or cancellation status instead.";
+    }
+
+    private static bool LooksLikeBareCancelledResponse(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var trimmed = text.Trim().TrimEnd('.', '!', '?');
+        return trimmed.Equals("Cancelled", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("Canceled", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static string? TryBuildGroundedTimeoutFallback(
@@ -3651,6 +3687,21 @@ public sealed partial class SearchOrchestrator
             .Select(char.ToLowerInvariant)
             .ToArray();
         return new string(chars);
+    }
+
+    private static bool HarnessDisallowsPlacesTools()
+    {
+        var allowedTools = GetHarnessAllowedToolsOverride();
+        if (allowedTools.Count == 0)
+            return false;
+
+        var normalizedAllowedTools = allowedTools
+            .Select(NormalizeHarnessToolName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return !normalizedAllowedTools.Contains("placeslookup") &&
+               !normalizedAllowedTools.Contains("placesdiscover");
     }
 
     private List<SourceItem> FilterSourcesForLocalNews(IReadOnlyList<SourceItem> sources, string? explicitLocation = null)

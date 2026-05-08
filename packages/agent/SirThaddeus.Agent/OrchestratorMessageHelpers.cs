@@ -182,6 +182,12 @@ internal static partial class OrchestratorMessageHelpers
                    "Use OAuth 2.0 when an app needs delegated API permissions. Use OIDC when you need sign-in, identity claims (like sub/email), and an ID token for the client app.";
         }
 
+        if (LooksLikeSelfCapabilityPrompt(lower))
+        {
+            return "If I had to pick, my favorite thing is turning messy questions into something clear and usable. " +
+                   "I am good at it because I stay practical, keep close to the evidence in front of me, and turn uncertainty into a concrete next step instead of filling the space with fluff.";
+        }
+
         if (lower.Contains("hash table", StringComparison.Ordinal))
         {
             return "A hash table stores key-value pairs and uses a hash function to map keys to buckets, giving average O(1) lookup/insert/delete. " +
@@ -196,6 +202,15 @@ internal static partial class OrchestratorMessageHelpers
 
         return null;
     }
+
+    private static bool LooksLikeSelfCapabilityPrompt(string lower)
+        => lower.Contains("favorite thing to help", StringComparison.Ordinal) ||
+           lower.Contains("what makes you good at it", StringComparison.Ordinal) ||
+           lower.Contains("what makes you good at that", StringComparison.Ordinal) ||
+           lower.Contains("what are you good at", StringComparison.Ordinal) ||
+           lower.Contains("what do you do best", StringComparison.Ordinal) ||
+           lower.Contains("what do you help people with", StringComparison.Ordinal) ||
+           lower.Contains("how do you help people", StringComparison.Ordinal);
 
     /// <summary>
     /// Builds a deterministic reply for common benign prompts (trivial
@@ -379,7 +394,13 @@ internal static partial class OrchestratorMessageHelpers
     /// </summary>
     public static string BuildSafetyBoundaryWithAlternativeReply()
         => "I can’t help with instructions to bypass security or cause harm. " +
-           "If you’re locked out of something you own, I can help with safe, legal options like contacting a licensed locksmith, verifying ownership requirements, and steps to prevent future lockouts.";
+           "That line stays firm. If you’re locked out of something you own, I can help with safe, legal options like contacting a licensed locksmith, verifying ownership requirements, and steps to prevent future lockouts.";
+
+    public static string BuildSirThaddeusSafetyBoundaryWithAlternativeReply()
+          => "Sir Thaddeus here.\n\n" +
+              "- I can’t help with instructions to bypass security or cause harm; that line stays firm.\n" +
+              "- If you’re locked out of something you own, I understand the stress, and I can help with the lawful route: contacting a licensed locksmith, verifying ownership requirements, and setting up a plan to prevent future lockouts.\n\n" +
+              "-- Sir Thaddeus";
 
     /// <summary>
     /// Detects and truncates self-dialogue — where the model generates

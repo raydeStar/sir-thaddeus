@@ -48,6 +48,20 @@ public class FreshnessRouterStepTests
         Assert.Equal("web_search", cont.Next.ForcedTool);
     }
 
+    [Theory]
+    [InlineData("Can you recommend a good Ashwagandha on Amazon.com?")]
+    [InlineData("What is the best supplement brand to buy on Amazon?")]
+    public async Task Forces_web_search_on_product_recommendation_shapes(string userText)
+    {
+        var step = new FreshnessRouterStep();
+        var ctx = WithTools(userText, "memory_retrieve", "web_search", "browser_navigate");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("web_search", cont.Next.ForcedTool);
+    }
+
     // ── Negative: prompts that must NOT force a search ──────────────────
     // These are the cases the user worried about — "willy-nilly" search
     // on casual chat, opinion, and self-referential queries.

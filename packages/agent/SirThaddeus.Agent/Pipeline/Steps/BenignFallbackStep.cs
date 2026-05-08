@@ -40,6 +40,9 @@ public sealed class BenignFallbackStep : ITurnStep
 
         var lower = userText.Trim().ToLowerInvariant();
 
+        if (HasPersonalContextCue(userText))
+            return Task.FromResult<StepResult>(new StepResult.Continue(context));
+
         // Defensive gates: if the message looks like it wants a tool,
         // let the tool loop handle it and don't stamp a benign reply on
         // top. Covers explicit invocation ("call X"), web search shapes,
@@ -66,5 +69,17 @@ public sealed class BenignFallbackStep : ITurnStep
             LlmRoundTrips = 0,
         };
         return Task.FromResult<StepResult>(new StepResult.Terminate(response));
+    }
+
+    private static bool HasPersonalContextCue(string userText)
+    {
+        var lower = " " + userText.Trim().ToLowerInvariant() + " ";
+        return lower.Contains(" my ", StringComparison.Ordinal) ||
+               lower.Contains(" i'm ", StringComparison.Ordinal) ||
+               lower.Contains(" im ", StringComparison.Ordinal) ||
+               lower.Contains(" i've ", StringComparison.Ordinal) ||
+               lower.Contains(" ive ", StringComparison.Ordinal) ||
+               lower.Contains(" we ", StringComparison.Ordinal) ||
+               lower.Contains(" our ", StringComparison.Ordinal);
     }
 }

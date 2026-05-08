@@ -1,4 +1,5 @@
 using SirThaddeus.LlmClient;
+using SirThaddeus.Agent.Tools;
 
 namespace SirThaddeus.Agent.Pipeline;
 
@@ -182,6 +183,19 @@ public sealed class PipelineBackedAgentOrchestrator : IHeadlessAgent, IDisposabl
             return Array.Empty<ToolDefinition>();
         }
 
+        var harnessAllowedTools = GetHarnessAllowedToolsOverride();
+        if (harnessAllowedTools.Count > 0)
+        {
+            mcpTools = ToolDefinitionBuilder.FilterHarnessAllowedTools(mcpTools, harnessAllowedTools);
+            if (HarnessAllowsTool(harnessAllowedTools, ToolNames.MemoryRetrieve) &&
+                !mcpTools.Any(tool =>
+                    string.Equals(tool.Name, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(tool.Name, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase)))
+            {
+                mcpTools = mcpTools.Concat([BuildMemoryRetrieveToolInfo()]).ToList();
+            }
+        }
+
         var defs = new List<ToolDefinition>(mcpTools.Count);
         foreach (var t in mcpTools)
         {
@@ -197,4 +211,52 @@ public sealed class PipelineBackedAgentOrchestrator : IHeadlessAgent, IDisposabl
         }
         return defs;
     }
+
+    private static IReadOnlyList<string> GetHarnessAllowedToolsOverride()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        if (string.IsNullOrWhiteSpace(raw))
+            return [];
+
+        return raw
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool HarnessAllowsTool(IReadOnlyList<string> allowedTools, string toolName)
+        => allowedTools.Any(tool =>
+            string.Equals(tool, toolName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(AuditedMcpToolClient.Canonicalize(tool), AuditedMcpToolClient.Canonicalize(toolName), StringComparison.OrdinalIgnoreCase));
+
+    private static McpToolInfo BuildMemoryRetrieveToolInfo()
+        => new()
+        {
+            Name = ToolNames.MemoryRetrieve,
+            Description = "Retrieves relevant memory context for the current query.",
+            InputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    query = new
+                    {
+                        type = "string",
+                        description = "The user's query to find relevant memories for"
+                    },
+                    conversationId = new
+                    {
+                        type = "string",
+                        description = "Optional conversation ID for scoping"
+                    },
+                    mode = new
+                    {
+                        type = "string",
+                        description = "Optional mode hint: greet, chat, planning, or technical"
+                    }
+                },
+                required = new[] { "query" }
+            }
+        };
 }

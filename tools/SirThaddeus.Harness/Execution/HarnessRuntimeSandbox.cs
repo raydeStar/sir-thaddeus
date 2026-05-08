@@ -99,9 +99,11 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         environment["ST_CHAT_HISTORY_PATH"] = Path.Combine(dataDirectory, "chat-history.json");
         environment["ST_BRIEFING_HISTORY_PATH"] = Path.Combine(dataDirectory, "briefing-history.json");
 
-        if (test.Assertions.AllowedToolsOnly && test.AllowedTools.Count > 0)
+        if (test.Assertions.AllowedToolsOnly)
         {
-            environment["ST_HARNESS_ALLOWED_TOOLS"] = string.Join(",", test.AllowedTools);
+            environment["ST_HARNESS_ALLOWED_TOOLS"] = test.AllowedTools.Count == 0
+                ? "__none__"
+                : string.Join(",", test.AllowedTools);
         }
 
         // Propagate stub configuration so the MCP server can force-fail

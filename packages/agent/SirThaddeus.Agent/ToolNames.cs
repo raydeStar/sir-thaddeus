@@ -11,6 +11,8 @@ public static class ToolNames
 {
     public const string WebSearch           = "web_search";
     public const string WebSearchAlt        = "WebSearch";
+    public const string PlacesLookup        = "places_lookup";
+    public const string PlacesLookupAlt     = "PlacesLookup";
     public const string PlacesDiscover      = "places_discover";
     public const string PlacesDiscoverAlt   = "PlacesDiscover";
     public const string WeatherGeocode      = "weather_geocode";
@@ -19,6 +21,8 @@ public static class ToolNames
     public const string WeatherForecastAlt  = "WeatherForecast";
     public const string ResolveTimezone     = "resolve_timezone";
     public const string ResolveTimezoneAlt  = "ResolveTimezone";
+    public const string TimeNow             = "time_now";
+    public const string TimeNowAlt          = "TimeNow";
     public const string HolidaysGet         = "holidays_get";
     public const string HolidaysGetAlt      = "HolidaysGet";
     public const string HolidaysNext        = "holidays_next";
@@ -33,6 +37,8 @@ public static class ToolNames
     public const string DocumentReadAlt     = "DocumentRead";
     public const string FileRead            = "file_read";
     public const string FileReadAlt         = "FileRead";
+    public const string ToolPing            = "tool_ping";
+    public const string ToolPingAlt         = "ToolPing";
     public const string FileList            = "file_list";
     public const string FileListAlt         = "FileList";
     public const string ClipboardRead       = "clipboard_read";

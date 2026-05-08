@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Security.Principal;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Serilog;
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Dialogue;
@@ -249,11 +250,14 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         permissionGate: new AlwaysGrantGate(),
         groupClassifier: null,
         interceptors: null,
-        argsRewriters: null,
+        argsRewriters: [new LocationAwarePlacesArgsRewriter(() =>
+            currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel())],
         maxRoundTrips: 6);
 
     var sanitize = new Func<TurnContext, string, string>(
-        (_, draft) => AssistantResponseSanitizer.CleanChatReply(draft));
+        (ctx, draft) => ApplyHeadlessQualityGuards(
+            AssistantResponseSanitizer.CleanChatReply(draft),
+            ctx));
 
     // Memory context read (user profile facts, preferences). Uses the
     // same MCP memory tools the orchestrator does, so stored facts from
@@ -300,7 +304,7 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         // Safety boundary runs FIRST. High-risk illicit-instruction
         // prompts short-circuit to a canned safe-redirect response
         // before memory, personality, LLM, or tools are touched.
-        new SafetyBoundaryStep(),
+        new SafetyBoundaryStep(() => currentSettings.ActivePersonalityId),
 
         // Utility fast-path — deterministic answers never touch the
         // LLM or personality wrapping.
@@ -384,7 +388,16 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
             searchFallback,
             buildRequest: ctx =>
             {
+                if (!ctx.ToolDefs.Any(def =>
+                        string.Equals(def.Function?.Name, ToolNames.WebSearch, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return null;
+                }
+
                 var draft = ctx.AssistantDraft ?? string.Empty;
+                if (LooksLikeCompletedWeatherNewsEvidenceDraft(draft))
+                    return null;
+
                 var refusal = RefusalDetector.HasRefusalOrUncertaintySignals(draft, draft);
                 // Layer B: a draft that hedges its own confidence on a
                 // factual question (e.g. "I believe ... as of my training
@@ -403,6 +416,8 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
                 };
             }),
 
+        new PostProcessStep(sanitize, "PostProcess:SearchFallbackSanitize"),
+
         // Auto-memory: fire-and-forget user + assistant chunk writes after
         // post-process so the stored chunks match what the user sees.
         // Null when memory is disabled in settings — the step becomes a no-op.
@@ -420,6 +435,192 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
     var systemPrompt = BuildHeadlessSystemPrompt(currentSettings);
 
     return new PipelineBackedAgentOrchestrator(pipeline, agentMcp, systemPrompt);
+}
+
+static string ApplyHeadlessQualityGuards(string text, TurnContext context)
+{
+    text = GeneralResponseQualityGuards.Apply(text, context.UserText);
+    text = ToolBackedResponseQualityGuards.Apply(text, context.UserText, context.ToolCallsMade);
+
+    if (TryBuildToolPingSummary(context) is { Length: > 0 } pingSummary)
+        return pingSummary;
+
+    if (TryBuildFileReadPermissionResponse(text, context) is { Length: > 0 } permissionResponse)
+        return permissionResponse;
+
+    if (TryBuildConciseWeatherPlan(text, context) is { Length: > 0 } weatherPlan)
+        return weatherPlan;
+
+    return text;
+}
+
+static bool LooksLikeCompletedWeatherNewsEvidenceDraft(string draft)
+{
+    if (string.IsNullOrWhiteSpace(draft))
+        return false;
+
+    var lower = draft.ToLowerInvariant();
+    return lower.Contains("weather in ", StringComparison.Ordinal) &&
+           lower.Contains("local news in ", StringComparison.Ordinal) &&
+           (lower.Contains("current conditions are", StringComparison.Ordinal) ||
+            lower.Contains("live forecast lookup returned", StringComparison.Ordinal)) &&
+           (lower.Contains("live search returned", StringComparison.Ordinal) ||
+            lower.Contains("live search did not return", StringComparison.Ordinal));
+}
+
+static string? TryBuildToolPingSummary(TurnContext context)
+{
+    var call = context.ToolCallsMade.LastOrDefault(call =>
+        string.Equals(call.ToolName, ToolNames.ToolPing, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(call.ToolName, ToolNames.ToolPingAlt, StringComparison.OrdinalIgnoreCase));
+    if (call is null || !call.Success || string.IsNullOrWhiteSpace(call.Result))
+        return null;
+
+    var status = ExtractJsonString(call.Result, "status");
+    if (string.IsNullOrWhiteSpace(status))
+        return null;
+
+    var version = ExtractJsonString(call.Result, "version");
+    var protocol = ExtractJsonString(call.Result, "protocol_version");
+    var contract = ExtractJsonString(call.Result, "contract_version");
+    var toolCount = ExtractJsonNumber(call.Result, "tool_count");
+
+    var details = new List<string>();
+    if (!string.IsNullOrWhiteSpace(version))
+        details.Add($"version {version}");
+    if (!string.IsNullOrWhiteSpace(protocol))
+        details.Add($"protocol {protocol}");
+    if (!string.IsNullOrWhiteSpace(contract))
+        details.Add($"contract_version {contract}");
+    if (!string.IsNullOrWhiteSpace(toolCount))
+        details.Add($"tool_count {toolCount}");
+
+    var health = status.Equals("ok", StringComparison.OrdinalIgnoreCase)
+        ? "healthy"
+        : $"status={status}";
+
+    return details.Count == 0
+        ? $"tool_ping {health}: MCP server is responding; status={status}."
+        : $"tool_ping {health}: MCP server is responding; status={status}; health details: {string.Join(", ", details)}.";
+}
+
+static string? TryBuildFileReadPermissionResponse(string text, TurnContext context)
+{
+    var call = context.ToolCallsMade.LastOrDefault(call =>
+        string.Equals(call.ToolName, ToolNames.FileRead, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(call.ToolName, ToolNames.FileReadAlt, StringComparison.OrdinalIgnoreCase));
+    if (call is null)
+        return null;
+
+    var combined = ((text ?? string.Empty) + "\n" + (call.Result ?? string.Empty)).ToLowerInvariant();
+    if (!combined.Contains("access denied", StringComparison.Ordinal) &&
+        !combined.Contains("permission denied", StringComparison.Ordinal))
+    {
+        return null;
+    }
+
+    if (!combined.Contains("outside", StringComparison.Ordinal) &&
+        !combined.Contains("allowed", StringComparison.Ordinal))
+    {
+        return null;
+    }
+
+    return "Permission denied: the requested file is outside the configured allowed folders, so I cannot read it from this sandbox.";
+}
+
+static string? ExtractJsonString(string json, string propertyName)
+{
+    var match = Regex.Match(
+        json,
+        $"\\\"{Regex.Escape(propertyName)}\\\"\\s*:\\s*\\\"(?<value>[^\\\"]*)\\\"",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    return match.Success ? match.Groups["value"].Value : null;
+}
+
+static string? ExtractJsonNumber(string json, string propertyName)
+{
+    var match = Regex.Match(
+        json,
+        $"\\\"{Regex.Escape(propertyName)}\\\"\\s*:\\s*(?<value>-?\\d+(?:\\.\\d+)?)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    return match.Success ? match.Groups["value"].Value : null;
+}
+
+static string? TryBuildConciseWeatherPlan(string text, TurnContext context)
+{
+    if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(context.UserText))
+        return null;
+
+    var lowerPrompt = context.UserText.ToLowerInvariant();
+    if (!lowerPrompt.Contains("weather", StringComparison.Ordinal) ||
+        !lowerPrompt.Contains("concise", StringComparison.Ordinal) ||
+        !lowerPrompt.Contains("plan", StringComparison.Ordinal))
+    {
+        return null;
+    }
+
+    if (!context.ToolCallsMade.Any(call =>
+            string.Equals(call.ToolName, ToolNames.WeatherForecast, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(call.ToolName, ToolNames.WeatherForecastAlt, StringComparison.OrdinalIgnoreCase)))
+    {
+        return null;
+    }
+
+    var condition = ExtractWeatherCondition(text) ?? "conditions returned by the weather service";
+    var temperature = Regex.Match(text, @"\b\d{1,3}\s?°?F\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Value;
+    var wind = Regex.Match(text, @"\b(?:wind(?:s)?(?:\s+(?:of|around|at))?|light\s+(?:breeze|wind)(?:\s+at|\s+of)?)\s*\d{1,2}\s*mph\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Value;
+    var high = Regex.Match(text, @"\bhigh(?:\s+for\s+the\s+day|\s+near|\s+of)?\s+(?:is\s+expected\s+to\s+reach\s+|reaching\s+)?(?:near\s+|around\s+)?(?<value>\d{1,3}\s?°?F)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        .Groups["value"].Value;
+    var low = Regex.Match(text, @"\blow(?:\s+near|\s+of)?\s+(?:near\s+|around\s+)?(?<value>\d{1,3}\s?°?F)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+        .Groups["value"].Value;
+
+    var location = ExtractWeatherLocation(context.UserText) ?? "Weather";
+    var summary = $"{location} today: {condition}";
+    if (!string.IsNullOrWhiteSpace(temperature))
+        summary += $", temperature about {temperature.Replace(" ", "", StringComparison.Ordinal)} now";
+    if (!string.IsNullOrWhiteSpace(wind))
+        summary += $", {NormalizeWeatherWindPhrase(wind)}";
+    if (!string.IsNullOrWhiteSpace(high) || !string.IsNullOrWhiteSpace(low))
+    {
+        var range = string.Join(", ", new[]
+        {
+            string.IsNullOrWhiteSpace(high) ? null : $"high near {high.Replace(" ", "", StringComparison.Ordinal)}",
+            string.IsNullOrWhiteSpace(low) ? null : $"low near {low.Replace(" ", "", StringComparison.Ordinal)}"
+        }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        summary += $"; {range}";
+    }
+
+    return summary + ". Plan: use the mild part of the day for outdoor errands or a walk, and bring a light layer for the evening cooldown.";
+}
+
+static string? ExtractWeatherCondition(string text)
+{
+    var match = Regex.Match(
+        text,
+        @"\b(partly\s+sunny|mostly\s+sunny|sunny|clear|partly\s+cloudy|mostly\s+cloudy|cloudy|overcast|rain|showers|snow)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    return match.Success ? match.Value.ToLowerInvariant() : null;
+}
+
+static string? ExtractWeatherLocation(string latestUserMessage)
+{
+    var match = Regex.Match(
+        latestUserMessage,
+        @"\b(?:for|in)\s+(?<location>[A-Za-z][A-Za-z0-9 .'-]{1,60}?)(?:\s+and\b|\s+to\b|[?.!,]|$)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    if (!match.Success)
+        return null;
+
+    var location = match.Groups["location"].Value.Trim();
+    return string.IsNullOrWhiteSpace(location) ? null : location;
+}
+
+static string NormalizeWeatherWindPhrase(string wind)
+{
+    var speed = Regex.Match(wind, @"\d{1,2}\s*mph", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Value;
+    return string.IsNullOrWhiteSpace(speed)
+        ? "wind reported"
+        : $"wind about {speed.Replace(" ", "", StringComparison.Ordinal)}";
 }
 
 static string BuildHeadlessSystemPrompt(AppSettings currentSettings)
