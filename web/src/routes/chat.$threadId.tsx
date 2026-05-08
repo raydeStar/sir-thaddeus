@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Check, Copy, Loader2, Mic, Plus, RotateCcw, Square, Volume2 } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
@@ -199,7 +199,6 @@ function ChatThreadRoute() {
         if (acquired.usedDefault && acquired.requestedName) {
           // Surface a hint in the console so we can diagnose mismatches
           // without spamming a toast for every capture.
-          // eslint-disable-next-line no-console
           console.warn(
             `[mic] Selected device "${acquired.requestedName}" not found in browser; using default "${acquired.resolvedLabel ?? 'unknown'}".`,
           );
@@ -340,7 +339,10 @@ function ChatThreadRoute() {
     };
   }, []);
 
-  const messages = thread?.messages ?? [];
+  // Memoize the message array so the speak-on-voice-reply effect below
+  // doesn't re-fire every render when `thread?.messages` returns a fresh
+  // `[]` literal (the `?? []` fallback created a new array each call).
+  const messages = useMemo(() => thread?.messages ?? [], [thread?.messages]);
   const latestMessage = messages[messages.length - 1];
   const latestAssistantResponseId =
     !activeTurn && String(latestMessage?.role || '').toLowerCase() === 'assistant' && latestMessage?.text?.trim()
@@ -691,7 +693,7 @@ function chunkSpeechText(text: string): string[] {
 
   // Quick split on sentence boundaries; the regex preserves the punctuation.
   const parts = trimmed
-    .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(\[])/)
+    .split(/(?<=[.!?])\s+(?=[A-Z0-9"'([])/)
     .map((s) => s.trim())
     .filter(Boolean);
 
