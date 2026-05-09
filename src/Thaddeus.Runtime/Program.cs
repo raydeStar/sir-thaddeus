@@ -283,6 +283,7 @@ public static class Program
             app.MapAudioApi();
             app.MapVoiceApi();
             app.MapPermissionsApi();
+            app.MapHarnessApi();
             app.MapWorkspaceHosting();
 
             await app.RunAsync().ConfigureAwait(false);

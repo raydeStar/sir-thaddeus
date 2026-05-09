@@ -81,6 +81,13 @@ public sealed class ToolPermissionGate
             .ToArray();
     }
 
+    /// <summary>
+    /// Drops every cached "Session" approval. Used by the harness reset
+    /// endpoint between tests so a prior test's granted group never
+    /// auto-approves the next test's tool calls.
+    /// </summary>
+    public void ClearSessionGrants() => _sessionAllow.Clear();
+
     public async Task<ToolPermissionDecision> DecideAsync(
         string toolName,
         string argumentsJson,
