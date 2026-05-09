@@ -41,8 +41,8 @@ internal sealed class SingleTestRunner
             _context.SuiteName,
             test.Id,
             iteration);
-        await _context.HeadlessClient.InitializeAsync(cancellationToken);
-        var headlessResult = await _context.HeadlessClient.ExecuteAsync(test, cancellationToken);
+        await _context.Host.InitializeAsync(cancellationToken);
+        var headlessResult = await _context.Host.ExecuteAsync(test, cancellationToken);
         var modelName = settings.Llm.Model;
 
         await _artifactWriter.WriteInputAsync(
@@ -124,7 +124,11 @@ internal sealed class SingleTestRunner
 
 }
 
-internal sealed record HeadlessExecutionResult
+/// <summary>
+/// Outcome of a single test run against a host adapter. Generic across
+/// host implementations — see <see cref="IHarnessHostAdapter"/>.
+/// </summary>
+internal sealed record HostExecutionResult
 {
     public required AgentResponse Response { get; init; }
     public required IReadOnlyList<TraceStep> Steps { get; init; }
@@ -150,5 +154,5 @@ internal sealed record SuiteRunContext
     public required HarnessCommandOptions Options { get; init; }
     public required string SuiteName { get; init; }
     public required string RunId { get; init; }
-    public required HeadlessRuntimeHarnessClient HeadlessClient { get; init; }
+    public required IHarnessHostAdapter Host { get; init; }
 }

@@ -12,13 +12,16 @@ using SirThaddeus.Harness.Tracing;
 namespace SirThaddeus.Harness.Execution;
 
 /// <summary>
-/// Black-box harness client that starts the real headless runtime server,
-/// drives the public /api/chat endpoint, auto-approves permission prompts,
-/// and reconstructs tool calls from runtime audit events.
+/// v1-headless adapter. Starts the legacy headless runtime, drives the
+/// public /api/chat endpoint, auto-approves permission prompts, and
+/// reconstructs tool calls from the JSONL audit log. Reuses one process
+/// across every test in a harness run.
 ///
-/// This is the closest test path to the actual UI/runtime behavior.
+/// Implements <see cref="IHarnessHostAdapter"/> so the harness orchestrator
+/// can swap in the v2 hybrid runtime adapter (see
+/// <c>HybridRuntimeHostAdapter</c>) once that path is wired.
 /// </summary>
-internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
+internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
 {
     private readonly AppSettings _baseSettings;
     private readonly int _port;
@@ -90,7 +93,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         }
     }
 
-    internal async Task<HeadlessExecutionResult> ExecuteAsync(
+    public async Task<HostExecutionResult> ExecuteAsync(
         HarnessTestCase test,
         CancellationToken cancellationToken)
     {
@@ -151,7 +154,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 
         totalStopwatch.Stop();
 
-        return new HeadlessExecutionResult
+        return new HostExecutionResult
         {
             Response = response,
             Steps = finalSteps,

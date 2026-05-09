@@ -36,7 +36,7 @@ public sealed class HarnessApplication
         var summaries = new List<string>();
         var reportResults = new List<SuiteReporter.TestResult>();
 
-        await using var headlessClient = new HeadlessRuntimeHarnessClient(settings);
+        await using var host = HarnessHostFactory.Create(options, settings);
 
         foreach (var suite in selectedSuites)
         {
@@ -47,7 +47,7 @@ public sealed class HarnessApplication
                 Options = options,
                 SuiteName = suite.Name,
                 RunId = runId,
-                HeadlessClient = headlessClient
+                Host = host
             };
 
             var runner = new SingleTestRunner(

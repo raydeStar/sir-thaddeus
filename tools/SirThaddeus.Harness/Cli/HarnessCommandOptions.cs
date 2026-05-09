@@ -35,11 +35,24 @@ public enum HarnessJudgeMode
     Model
 }
 
+/// <summary>
+/// Which runtime host the harness drives. Both share the same agent
+/// pipeline; the difference is the chat surface (v1 has /api/chat + SSE,
+/// v2 has /api/threads + /ws). Defaults to v1 today; v2 adapter is a
+/// work in progress (see HybridRuntimeHostAdapter).
+/// </summary>
+public enum HarnessHostTarget
+{
+    HeadlessV1,
+    HybridV2
+}
+
 public sealed record HarnessCommandOptions
 {
     public HarnessCommandKind Command { get; init; } = HarnessCommandKind.Run;
     public HarnessExecutionMode Mode { get; init; } = HarnessExecutionMode.Headless;
     public HarnessJudgeMode JudgeMode { get; init; } = HarnessJudgeMode.None;
+    public HarnessHostTarget HostTarget { get; init; } = HarnessHostTarget.HeadlessV1;
 
     public bool RunAllSuites { get; init; }
     public string SuiteName { get; init; } = "";
