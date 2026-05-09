@@ -33,6 +33,24 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         Environment = environment;
     }
 
+    /// <summary>
+    /// Creates a sandbox shared across every test in a harness run. The
+    /// per-test env-var overrides (allowed_tools, stub failures) are NOT
+    /// baked here — the harness applies them via the runtime's
+    /// /api/harness/reset endpoint between tests so the runtime process
+    /// can be reused.
+    /// </summary>
+    public static HarnessRuntimeSandbox CreateShared(AppSettings baseSettings)
+    {
+        ArgumentNullException.ThrowIfNull(baseSettings);
+
+        var sandboxRoot = Path.Combine(
+            Path.GetTempPath(),
+            "SirThaddeus.Harness",
+            $"shared-{Guid.NewGuid():N}");
+        return CreateInternal(baseSettings, sandboxRoot, test: null);
+    }
+
     public static HarnessRuntimeSandbox Create(AppSettings baseSettings, HarnessTestCase test)
     {
         ArgumentNullException.ThrowIfNull(baseSettings);
@@ -42,6 +60,14 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
             Path.GetTempPath(),
             "SirThaddeus.Harness",
             $"{SanitizePathSegment(test.Id)}-{Guid.NewGuid():N}");
+        return CreateInternal(baseSettings, sandboxRoot, test);
+    }
+
+    private static HarnessRuntimeSandbox CreateInternal(
+        AppSettings baseSettings,
+        string sandboxRoot,
+        HarnessTestCase? test)
+    {
         var dataDirectory = Path.Combine(sandboxRoot, "data");
         var knowledgeDirectory = Path.Combine(sandboxRoot, "knowledge-store");
         var profilesDirectory = Path.Combine(sandboxRoot, "profiles");
@@ -99,17 +125,20 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         environment["ST_CHAT_HISTORY_PATH"] = Path.Combine(dataDirectory, "chat-history.json");
         environment["ST_BRIEFING_HISTORY_PATH"] = Path.Combine(dataDirectory, "briefing-history.json");
 
-        if (test.Assertions.AllowedToolsOnly)
+        if (test is not null)
         {
-            environment["ST_HARNESS_ALLOWED_TOOLS"] = test.AllowedTools.Count == 0
-                ? "__none__"
-                : string.Join(",", test.AllowedTools);
-        }
+            if (test.Assertions.AllowedToolsOnly)
+            {
+                environment["ST_HARNESS_ALLOWED_TOOLS"] = test.AllowedTools.Count == 0
+                    ? "__none__"
+                    : string.Join(",", test.AllowedTools);
+            }
 
-        // Propagate stub configuration so the MCP server can force-fail
-        // specific tools during contract tests.
-        if (string.Equals(test.Mode, "stub", StringComparison.OrdinalIgnoreCase))
-            ApplyStubEnvironment(environment, test.Stub);
+            // Propagate stub configuration so the MCP server can force-fail
+            // specific tools during contract tests.
+            if (string.Equals(test.Mode, "stub", StringComparison.OrdinalIgnoreCase))
+                ApplyStubEnvironment(environment, test.Stub);
+        }
 
         return new HarnessRuntimeSandbox(
             sandboxRoot,

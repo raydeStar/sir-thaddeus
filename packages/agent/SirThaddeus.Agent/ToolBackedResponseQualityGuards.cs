@@ -1,5 +1,6 @@
 using System.Text;
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using SirThaddeus.Agent.Routing;
@@ -21,11 +22,17 @@ public static class ToolBackedResponseQualityGuards
             return structuredResearch;
         }
 
+        if (TryBuildGroundedNewsDigest(text, latestUserMessage, toolCallsMade) is { Length: > 0 } newsDigest)
+            return newsDigest;
+
         if (LooksLikeBareCancelled(text) &&
             SearchOrchestrator.TryBuildMediaInstallmentFallback(latestUserMessage) is { Length: > 0 } mediaFallback)
         {
             return mediaFallback;
         }
+
+        if (TryBuildReleasedProductExistenceResponse(latestUserMessage, toolCallsMade) is { Length: > 0 } existenceResponse)
+            return existenceResponse;
 
         if (LooksLikeIrrelevantMediaInstallmentAnswer(text, latestUserMessage) &&
             SearchOrchestrator.TryBuildMediaInstallmentFallback(latestUserMessage) is { Length: > 0 } mediaInstallmentFallback)
@@ -115,6 +122,51 @@ public static class ToolBackedResponseQualityGuards
         var trimmed = text.Trim().TrimEnd('.', '!', '?');
         return trimmed.Equals("Cancelled", StringComparison.OrdinalIgnoreCase) ||
                trimmed.Equals("Canceled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static string? TryBuildReleasedProductExistenceResponse(
+        string latestUserMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        if (string.IsNullOrWhiteSpace(latestUserMessage))
+            return null;
+
+        if (!IntentFeatureExtractor.LooksLikeReleasedProductExistenceLookup(latestUserMessage.ToLowerInvariant()))
+            return null;
+
+        var webSearchCalls = toolCallsMade
+            .Where(call =>
+                call.Success &&
+                (call.ToolName.Equals(ToolNames.WebSearch, StringComparison.OrdinalIgnoreCase) ||
+                 call.ToolName.Equals(ToolNames.WebSearchAlt, StringComparison.OrdinalIgnoreCase)) &&
+                !string.IsNullOrWhiteSpace(call.Result))
+            .ToList();
+        if (webSearchCalls.Count == 0)
+            return null;
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sources = new List<SourceItem>();
+        foreach (var call in webSearchCalls)
+        {
+            foreach (var source in SearchOrchestrator.ParseSourcesFromToolResult(call.Result))
+            {
+                var key = string.IsNullOrWhiteSpace(source.SourceId) ? source.Url : source.SourceId;
+                if (seen.Add(key))
+                    sources.Add(source);
+            }
+        }
+
+        if (sources.Count == 0)
+            return null;
+
+        var answer = SearchOrchestrator.BuildReleasedProductExistenceAnswer(latestUserMessage, sources);
+        if (string.IsNullOrWhiteSpace(answer) ||
+            answer.Contains("I could not confirm from the returned snippets", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return answer;
     }
 
     private static bool LooksLikeIrrelevantMediaInstallmentAnswer(string text, string latestUserMessage)
@@ -871,6 +923,138 @@ public static class ToolBackedResponseQualityGuards
         return merged;
     }
 
+    private static string? TryBuildGroundedNewsDigest(
+        string text,
+        string latestUserMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        if (!LooksLikeNewsRequest(latestUserMessage) || !LooksLikeWeakNewsDigest(text))
+            return null;
+
+        var sources = MergeNewsDigestSources(latestUserMessage, toolCallsMade)
+            .Where(source => !LooksLikeWeatherSource(source))
+            .Where(source => !LooksLikeNewsLandingPage(source))
+            .Take(5)
+            .ToList();
+        if (sources.Count == 0)
+            return null;
+
+        var lines = new List<string> { "Here are the main stories I found:" };
+        var index = 1;
+        foreach (var source in sources)
+        {
+            var headline = CleanNewsHeadline(source.Title);
+            if (string.IsNullOrWhiteSpace(headline))
+                headline = CleanNewsHeadline(source.Snippet);
+            if (string.IsNullOrWhiteSpace(headline))
+                continue;
+
+            var detail = CleanNewsDetail(source.Snippet, headline);
+            var rendered = string.IsNullOrWhiteSpace(detail)
+                ? $"{index}. {headline}"
+                : $"{index}. {headline} - {detail}";
+            lines.Add(rendered);
+            index++;
+        }
+
+        return lines.Count <= 1 ? null : string.Join("\n", lines);
+    }
+
+    private static bool LooksLikeNewsRequest(string latestUserMessage)
+    {
+        var lower = latestUserMessage.ToLowerInvariant();
+        return lower.Contains("news", StringComparison.Ordinal) ||
+               lower.Contains("headlines", StringComparison.Ordinal) ||
+               lower.Contains("stories today", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeWeakNewsDigest(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var lower = text.ToLowerInvariant();
+        if (lower.Contains("&n", StringComparison.Ordinal) ||
+            lower.Contains("get the latest", StringComparison.Ordinal) ||
+            lower.Contains("stay updated", StringComparison.Ordinal) ||
+            lower.Contains("latest technology today news", StringComparison.Ordinal) ||
+            lower.Contains("latest news, reviews", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return Regex.IsMatch(text, @"(?m)^\s*\d+[.)]\s+.+\s+-{1,2}\s+.+") &&
+               Regex.IsMatch(text, @"(?im)^\s*\d+[.)]\s+.*\b(?:news|headlines|latest)\b.*\b(?:news|headlines|latest)\b");
+    }
+
+    private static List<SourceItem> MergeNewsDigestSources(
+        string latestUserMessage,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var location = ExtractNewsLocationFromPrompt(latestUserMessage);
+        var localSources = MergeUsableNewsSearchSources(toolCallsMade, location);
+        if (localSources.Count > 0)
+            return localSources;
+
+        return MergeWebSearchSources(toolCallsMade);
+    }
+
+    private static bool LooksLikeNewsLandingPage(SourceItem source)
+    {
+        var title = CleanLooseSourceText(source.Title).ToLowerInvariant();
+        var snippet = CleanLooseSourceText(source.Snippet).ToLowerInvariant();
+        var url = (source.Url ?? string.Empty).Trim().TrimEnd('/').ToLowerInvariant();
+        var combined = $"{title} {snippet}";
+
+        if (Regex.IsMatch(title, @"^(?:tech|technology|world|business|sports|entertainment|local)\s+news(?:\b|,)", RegexOptions.CultureInvariant) &&
+            (snippet.Contains("get the latest", StringComparison.Ordinal) ||
+             snippet.Contains("stay updated", StringComparison.Ordinal) ||
+             snippet.Contains("latest news", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        if (combined.Contains("latest technology news today", StringComparison.Ordinal) ||
+            combined.Contains("new gadgets, phones, laptops", StringComparison.Ordinal) ||
+            combined.Contains("news, reviews, and updates", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return Regex.IsMatch(url, @"/(?:tech|technology|news|world|business|sports|entertainment)$", RegexOptions.CultureInvariant) &&
+               (snippet.Contains("get the latest", StringComparison.Ordinal) ||
+                snippet.Contains("stay updated", StringComparison.Ordinal));
+    }
+
+    private static string CleanNewsHeadline(string? value)
+    {
+        var cleaned = CleanLooseSourceText(value);
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return string.Empty;
+
+        cleaned = Regex.Replace(cleaned, @"\s+\.\.\.$", string.Empty);
+        cleaned = Regex.Replace(cleaned, @"\s*[-|]\s*(?:CNBC|Reuters|AP News|Associated Press|BBC|CNN|NBC News|ABC News|CBS News|NPR|The Indian Express|NDTV|New York Times|Washington Post|The Guardian)\s*$",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return TrimSentence(cleaned);
+    }
+
+    private static string CleanNewsDetail(string? snippet, string headline)
+    {
+        var cleaned = CleanLooseSourceText(snippet);
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return string.Empty;
+
+        cleaned = Regex.Replace(cleaned, @"^(?:Tech|Technology|World|Business|Sports|Entertainment)\s+News\s+News:\s*", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        cleaned = Regex.Replace(cleaned, @"^(?:Tech|Technology|World|Business|Sports|Entertainment)\s+News:\s*", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        cleaned = Regex.Replace(cleaned, Regex.Escape(headline), string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Trim(' ', '-', ':', '.');
+        if (LooksLikeNewsLandingPage(new SourceItem { Url = "", Title = headline, Snippet = cleaned }))
+            return string.Empty;
+
+        cleaned = TrimSentence(cleaned);
+        return cleaned.Length > 220 ? TrimSentence(cleaned[..220]) : cleaned;
+    }
+
     private static bool LooksLikeWeatherSource(SourceItem source)
     {
         var combined = ((source.Title ?? string.Empty) + " " + (source.Snippet ?? string.Empty)).ToLowerInvariant();
@@ -1114,11 +1298,17 @@ public static class ToolBackedResponseQualityGuards
                lower.Contains("need to perform a broader search", StringComparison.Ordinal) ||
                lower.Contains("only have a single snippet", StringComparison.Ordinal) ||
                lower.Contains("only have one snippet", StringComparison.Ordinal) ||
+               lower.Contains("only have one substantial source", StringComparison.Ordinal) ||
+               lower.Contains("only have one source", StringComparison.Ordinal) ||
                lower.Contains("would need more information", StringComparison.Ordinal) ||
                lower.Contains("broader context to compare", StringComparison.Ordinal) ||
                lower.Contains("try and dig deeper", StringComparison.Ordinal) ||
                lower.Contains("single snippet", StringComparison.Ordinal) ||
-               lower.Contains("let me know if", StringComparison.Ordinal);
+               lower.Contains("skip to main content", StringComparison.Ordinal) ||
+               lower.Contains("get the latest release", StringComparison.Ordinal) ||
+               lower.Contains("let me know if", StringComparison.Ordinal) ||
+               lower.Contains("should you wish", StringComparison.Ordinal) ||
+               lower.Contains("please advise", StringComparison.Ordinal);
     }
 
     private static string? TryBuildStructuredResearchResponse(
@@ -1240,11 +1430,52 @@ public static class ToolBackedResponseQualityGuards
 
     private static string PickSourceFocus(SourceItem source)
     {
-        if (!string.IsNullOrWhiteSpace(source.Snippet) && Regex.Matches(source.Snippet, "[A-Za-z]").Count >= 12)
-            return source.Snippet!.Trim();
-        if (!string.IsNullOrWhiteSpace(source.Title))
-            return source.Title!.Trim();
+        var snippet = CleanResearchFocus(source.Snippet, source.Title);
+        if (!string.IsNullOrWhiteSpace(snippet) && Regex.Matches(snippet, "[A-Za-z]").Count >= 12)
+            return snippet;
+
+        var title = CleanResearchFocus(source.Title, string.Empty);
+        if (!string.IsNullOrWhiteSpace(title))
+            return title;
+
         return "the returned source gives only a high-level signal";
+    }
+
+    private static string CleanResearchFocus(string? value, string? title)
+    {
+        var cleaned = CleanLooseSourceText(value);
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            var cleanTitle = CleanLooseSourceText(title);
+            if (!string.IsNullOrWhiteSpace(cleanTitle))
+                cleaned = Regex.Replace(cleaned, Regex.Escape(cleanTitle), string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        cleaned = Regex.Replace(cleaned, @"\bSkip to main content\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        cleaned = Regex.Replace(cleaned, @"\bGet the latest release\b\s*", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        cleaned = Regex.Replace(cleaned, @"\b(?:Principal Product Manager|Product Manager|Senior Product Manager)\b.*$", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        cleaned = Regex.Replace(cleaned, @"\b(?:has arrived|is here)!\s*", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim(' ', '-', ':', ';', '.');
+
+        if (cleaned.Length > 180)
+            cleaned = TrimSentence(cleaned[..180]);
+
+        return cleaned;
+    }
+
+    private static string CleanLooseSourceText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var cleaned = WebUtility.HtmlDecode(value).Replace('\u00A0', ' ');
+        cleaned = Regex.Replace(cleaned, @"&[A-Za-z]?$", string.Empty);
+        cleaned = Regex.Replace(cleaned, @"\s+", " ");
+        cleaned = Regex.Replace(cleaned, @"\s+([,.;:!?])", "$1");
+        return cleaned.Trim();
     }
 
     private static string TrimSentence(string value)
@@ -1257,6 +1488,15 @@ public static class ToolBackedResponseQualityGuards
 
         var cleaned = Regex.Replace(
             text.Trim(),
+            @"(?is)\n\s*\*\*\*\s*\n\s*\*?\s*Sir\s+Thaddeus(?:'s\s+Note)?\s*:?.*?\*?\s*$",
+            string.Empty).TrimEnd();
+        cleaned = CleanCommonMojibake(cleaned);
+        cleaned = Regex.Replace(
+            cleaned,
+            @"(?is)\n\s*\*\*\*\s*\n\s*\*?\s*A\s+brief\s+note\s+from\s+Sir\s+Thaddeus\s*:.*?\*?\s*$",
+            string.Empty).TrimEnd();
+        cleaned = Regex.Replace(
+            cleaned,
             @"(?is)\n\s*\*\*\*\s*\n\s*\*?\s*Sir\s+Thaddeus\s*\*?\s*$",
             string.Empty).TrimEnd();
         cleaned = Regex.Replace(
@@ -1285,6 +1525,16 @@ public static class ToolBackedResponseQualityGuards
             string.Empty).TrimEnd();
         return cleaned;
     }
+
+    private static string CleanCommonMojibake(string text)
+        => text
+            .Replace("\u00E2\u20AC\u201D", "-", StringComparison.Ordinal)
+            .Replace("\u00E2\u20AC\u201C", "-", StringComparison.Ordinal)
+            .Replace("\u00E2\u20AC\u02DC", "'", StringComparison.Ordinal)
+            .Replace("\u00E2\u20AC\u2122", "'", StringComparison.Ordinal)
+            .Replace("\u00E2\u20AC\u0153", "\"", StringComparison.Ordinal)
+            .Replace("\u00E2\u20AC\u009D", "\"", StringComparison.Ordinal)
+            .Replace("\u00C2 ", " ", StringComparison.Ordinal);
 
     private static string? TryBuildConservativeLocalBusinessResponse(
         string text,

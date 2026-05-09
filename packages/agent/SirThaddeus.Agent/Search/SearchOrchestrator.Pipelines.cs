@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.LlmClient;
@@ -1253,4 +1255,5 @@ public sealed partial class SearchOrchestrator
             _       => []
         };
     }
+
 }

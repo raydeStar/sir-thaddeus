@@ -49,6 +49,82 @@ public sealed class ToolBackedResponseQualityGuardsTests
     }
 
     [Fact]
+    public void ExistenceSearchArgsRewriter_WhenReleasedProductExistenceRequest_UsesAllTimeOfficialQuery()
+    {
+        var rewriter = new ExistenceSearchArgsRewriter();
+        var context = new TurnContext
+        {
+            ThreadId = "thread",
+            MessageId = "message",
+            UserText = "Does Vendor Z1 exist as a released product?"
+        };
+
+        var rewritten = rewriter.Rewrite(
+            context,
+            ToolNames.WebSearch,
+            "{\"query\":\"Vendor Z1 latest rumors\",\"recency\":\"month\"}");
+
+        using var document = JsonDocument.Parse(rewritten);
+        Assert.Equal("Vendor Z1 official release date specifications model list", document.RootElement.GetProperty("query").GetString());
+        Assert.Equal("any", document.RootElement.GetProperty("recency").GetString());
+    }
+
+    [Fact]
+    public void ExistenceSearchArgsRewriter_WhenNotExistenceRequest_LeavesSearchUntouched()
+    {
+        var rewriter = new ExistenceSearchArgsRewriter();
+        var context = new TurnContext
+        {
+            ThreadId = "thread",
+            MessageId = "message",
+            UserText = "What is the weather today?"
+        };
+
+        var original = "{\"query\":\"weather today\",\"recency\":\"day\"}";
+        var rewritten = rewriter.Rewrite(context, ToolNames.WebSearch, original);
+
+        Assert.Equal(original, rewritten);
+    }
+
+    [Fact]
+    public void FactSearchArgsRewriter_WhenLatestStableVersionRequest_UsesAllTimeOfficialVersionQuery()
+    {
+        var rewriter = new FactSearchArgsRewriter();
+        var context = new TurnContext
+        {
+            ThreadId = "thread",
+            MessageId = "message",
+            UserText = "What is the latest stable version of .NET as of 2025?"
+        };
+
+        var rewritten = rewriter.Rewrite(
+            context,
+            ToolNames.WebSearch,
+            "{\"query\":\"latest stable version of .NET 2025\",\"recency\":\"week\"}");
+
+        using var document = JsonDocument.Parse(rewritten);
+        Assert.Equal("latest stable version of dotnet official documentation release notes", document.RootElement.GetProperty("query").GetString());
+        Assert.Equal("any", document.RootElement.GetProperty("recency").GetString());
+    }
+
+    [Fact]
+    public void FactSearchArgsRewriter_WhenNotVersionFactRequest_LeavesSearchUntouched()
+    {
+        var rewriter = new FactSearchArgsRewriter();
+        var context = new TurnContext
+        {
+            ThreadId = "thread",
+            MessageId = "message",
+            UserText = "What are the top technology news stories today?"
+        };
+
+        var original = "{\"query\":\"top technology news\",\"recency\":\"day\"}";
+        var rewritten = rewriter.Rewrite(context, ToolNames.WebSearch, original);
+
+        Assert.Equal(original, rewritten);
+    }
+
+    [Fact]
     public async Task OsmPlacesDiscover_WhenQueryUsesNearMeWithoutLocation_ReturnsMissingLocation()
     {
         using var provider = new OsmPlacesDiscoveryProvider(new HttpClient(new ThrowingHandler()));
@@ -791,6 +867,138 @@ public sealed class ToolBackedResponseQualityGuardsTests
     }
 
     [Fact]
+    public void Apply_WhenStructuredSearchEchoesPageChrome_RebuildsCleanSourceFocus()
+    {
+        const string chromeLeakingResponse = """
+            Overview: .NET Aspire has continued to evolve over the last year.
+
+            Common Points:
+            - Recent sources overlap on developer tooling.
+
+            Differences:
+            - One emphasis is: What's New in Aspire 13.3 | Aspire Blog Skip to main content Aspire 13.3 has arrived! Get the latest release that brings Kubernetes support, agent-assisted Aspirification, and more. Get Aspire 13.3 Maddy Montaquila Principal Product Manager Aspire.
+
+            Practical Takeaway: Use the official release notes first.
+            """;
+
+        var response = ToolBackedResponseQualityGuards.Apply(
+            chromeLeakingResponse,
+            "Search for recent updates and developments in .NET Aspire from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\".NET Aspire recent updates and developments last year\"}",
+                    Result = """
+                        [search: 2 result(s) returned]
+
+                        <!-- SOURCES_JSON -->
+                        {"sources":[{"url":"https://example.com/aspire-13-3","title":"What's New in Aspire 13.3 | Aspire Blog","domain":"example.com","snippet":"What's New in Aspire 13.3 | Aspire Blog Skip to main content Aspire 13.3 has arrived! Get the latest release that brings Kubernetes support, agent-assisted Aspirification, and more. Get Aspire 13.3 Maddy Montaquila Principal Product Manager Aspire."},{"url":"https://example.com/aspire-13-2","title":"Aspire 13.2 release notes","domain":"example.com","snippet":"A list of new features, updates, and breaking changes in Aspire 13.2."}]}
+                        """,
+                    Success = true
+                }
+            ]);
+
+        Assert.Contains("Overview:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Kubernetes support", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Skip to main content", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Get the latest release", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Principal Product Manager", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Apply_WhenNewsDigestContainsLandingPageAndClippedSnippet_RebuildsFromStorySources()
+    {
+        const string weakResponse = """
+            Here are the main stories I found:
+            1. Tech News, Latest Technology News Today, New Gadgets, Phones, Laptops ... -- Tech News: Get the latest technology today news, reviews, and updates on smartphones, laptops, gaming, wearables, and more. Stay updated on Apple, Samsung, Google, Microsoft, and other tech giants with The Indian Express
+            2. Six years after 'public breakup', Apple goes back to Intel due to what ... -- Tech News News: Apple has reached a preliminary agreement with Intel to manufacture some chips for its devices -- a deal that would end years of estrangement between the
+            3. White House Considers AI Vetting, Sparks Tech Industry Panic -- The White House is scrambling to find its footing on AI policy, as the development of new, more powerful models forces the administration to rethink its strategy on&n
+            """;
+
+        var response = ToolBackedResponseQualityGuards.Apply(
+            weakResponse,
+            "Give me the top technology news stories today.",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\"top technology news\",\"categories\":[\"news\"],\"recency\":\"day\"}",
+                    Result = """
+                        [search: 4 result(s) returned]
+
+                        <!-- SOURCES_JSON -->
+                        {"sources":[{"url":"https://indianexpress.com/section/technology/","title":"Tech News, Latest Technology News Today, New Gadgets, Phones, Laptops ...","domain":"indianexpress.com","snippet":"Tech News: Get the latest technology today news, reviews, and updates on smartphones, laptops, gaming, wearables, and more. Stay updated on Apple, Samsung, Google, Microsoft, and other tech giants with The Indian Express"},{"url":"https://timesofindia.example/apple-intel","title":"Six years after 'public breakup', Apple goes back to Intel due to what ...","domain":"timesofindia.example","snippet":"Tech News News: Apple has reached a preliminary agreement with Intel to manufacture some chips for its devices - a deal that would end years of estrangement between the companies."},{"url":"https://wired.example/ai-vetting","title":"White House Considers AI Vetting, Sparks Tech Industry Panic","domain":"wired.example","snippet":"The White House is scrambling to find its footing on AI policy, as the development of new, more powerful models forces officials to rethink their strategy on oversight."},{"url":"https://cnbc.example/nvidia-ai-investor","title":"Nvidia embraces AI investor, topping $40 billion in equity bets 2026 - CNBC","domain":"cnbc.example","snippet":"Nvidia is pouring billions of dollars at a time into companies across the AI infrastructure stack, while also signing commercial deals with them."}]}
+                        """,
+                    Success = true
+                }
+            ]);
+
+        Assert.StartsWith("Here are the main stories I found:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Tech News, Latest Technology News Today", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Get the latest technology today news", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("&n", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Apple goes back to Intel", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("White House Considers AI Vetting", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Nvidia embraces AI investor", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Apply_WhenFactAnswerAddsSirThaddeusNote_StripsOrnamentalTail()
+    {
+        const string responseWithNote = """
+            Answer: The latest stable version is .NET 10.0.7.
+
+            Commentary: Official version listings are the best source for this kind of changing fact.
+
+            ***
+            *Sir Thaddeus's Note: Always treat documentation with a healthy dose of skepticism.*
+            """;
+
+        var response = ToolBackedResponseQualityGuards.Apply(
+            responseWithNote,
+            "What is the latest stable version of .NET?",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\"latest stable version of .NET\"}",
+                    Result = """
+                        [search: 1 result(s) returned]
+
+                        <!-- SOURCES_JSON -->
+                        {"sources":[{"url":"https://example.com/dotnet-versions","title":".NET versions","domain":"example.com","snippet":".NET 10.0.7 is listed as active LTS."}]}
+                        """,
+                    Success = true
+                }
+            ]);
+
+        Assert.Contains("Answer: The latest stable version is .NET 10.0.7.", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Sir Thaddeus", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("healthy dose of skepticism", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Apply_WhenToolBackedAnswerHasMojibakeDash_CleansReadablePunctuation()
+    {
+        var response = ToolBackedResponseQualityGuards.Apply(
+            "Here are the main stories I found:\n1. Example headline \u00E2\u20AC\u201D 2026-05-09 10:00 UTC",
+            "Give me the top technology news stories today.",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\"top technology news\",\"recency\":\"day\"}",
+                    Result = "[search: 1 result(s) returned]",
+                    Success = true
+                }
+            ]);
+
+        Assert.Contains("Example headline - 2026-05-09", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\u00E2\u20AC\u201D", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Apply_WhenLocalNewsNoResultsDeflects_ReturnsEvidenceFallback()
     {
         const string weakResponse = "It seems my attempt to fetch live news for Boise, ID, yielded no immediate results. I will await further instruction. _Sir Thaddeus_";
@@ -906,6 +1114,72 @@ public sealed class ToolBackedResponseQualityGuardsTests
         Assert.Contains("source=photon", response, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("clock=system UTC", response, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("would need to check", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Apply_WhenReleasedProductExistenceAnswerIsWeak_ReplacesFromSearchEvidence()
+    {
+        const string weakResponse = "It certainly does exist, based on what I gathered. The search results also mention future models, which gives context.";
+
+        var response = ToolBackedResponseQualityGuards.Apply(
+            weakResponse,
+            "Does Vendor Z1 exist as a released product?",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\"Vendor Z1 official release\"}",
+                    Result = """
+                        [search: 2 result(s) returned]
+
+                        <!-- SOURCES_JSON -->
+                        {"sources":[
+                          {"url":"https://vendor.example/support/z1","title":"Vendor Z1 - Tech Specs","domain":"vendor.example","snippet":"Year introduced: 2024. Vendor Z1 tech specs and support."},
+                          {"url":"https://vendor.example/compare","title":"Compare Vendor Z1 models","domain":"vendor.example","snippet":"Compare released Vendor Z1 models."}
+                        ]}
+                        """,
+                    Success = true
+                }
+            ]);
+
+        Assert.StartsWith("Yes", response);
+        Assert.Contains("Vendor Z1 exists as a released product", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2024", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Evidence checked", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("future models", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Apply_WhenReleasedProductMissingFromReleaseLists_ReplacesWithNegativeEvidenceSummary()
+    {
+        const string weakResponse = "It appears the Vendor Z99 does not exist. I recommend consulting official announcements.";
+
+        var response = ToolBackedResponseQualityGuards.Apply(
+            weakResponse,
+            "Does Vendor Z99 exist as a released product?",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\"Vendor Z99 release history\"}",
+                    Result = """
+                        [search: 2 result(s) returned]
+
+                        <!-- SOURCES_JSON -->
+                        {"sources":[
+                          {"url":"https://vendor.example/models","title":"List of Vendor Z models","domain":"vendor.example","snippet":"Vendor Z is a line of devices. Current released models include Vendor Z1 and Vendor Z2."},
+                          {"url":"https://industry.example/vendor-z-history","title":"Every Vendor Z release in chronological order","domain":"industry.example","snippet":"Release history and model list for the Vendor Z family."}
+                        ]}
+                        """,
+                    Success = true
+                }
+            ]);
+
+        Assert.StartsWith("No", response);
+        Assert.Contains("Vendor Z99", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("release/model-list evidence", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Evidence checked", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("consulting official announcements", response, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class ThrowingHandler : HttpMessageHandler

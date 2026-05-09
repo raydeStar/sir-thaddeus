@@ -87,7 +87,8 @@ public sealed class HarnessApplication
                         Score = single.Score,
                         FinalResponse = single.Response.Text,
                         ArtifactDirectory = single.ArtifactPaths.RootDirectory,
-                        JudgeResult = single.JudgeResult
+                        JudgeResult = single.JudgeResult,
+                        Timing = single.Timing
                     };
                 }
 
@@ -110,6 +111,7 @@ public sealed class HarnessApplication
                 Console.WriteLine($"Result: {resultLabel} | score={best.Score.FinalScore:0.00} | min={minScore:0.00}");
                 Console.WriteLine($"Attempts: {attempts.Count}");
                 Console.WriteLine($"Artifacts: {best.ArtifactDirectory}");
+                PrintTimingSummary(attempts);
                 Console.WriteLine();
 
                 summaries.Add(BuildSummaryLine(suite.Name, test, best, passed, minScore));
@@ -164,6 +166,24 @@ public sealed class HarnessApplication
         Console.WriteLine($"Failed: {failCount}");
 
         return failCount == 0 ? 0 : 1;
+    }
+
+    private static void PrintTimingSummary(IReadOnlyList<TestAttemptResult> attempts)
+    {
+        var warmup = attempts.Sum(a => a.Timing.RuntimeWarmupSeconds);
+        var reset = attempts.Sum(a => a.Timing.ResetSeconds);
+        var work = attempts.Sum(a => a.Timing.TestWorkSeconds);
+        var total = attempts.Sum(a => a.Timing.TotalSeconds);
+        if (total <= 0)
+            return;
+
+        var builder = new StringBuilder("Timing: ");
+        if (warmup > 0)
+            builder.Append($"runtime_warmup={warmup:0.00}s ");
+        builder.Append($"reset={reset:0.00}s test_work={work:0.00}s total={total:0.00}s");
+        if (attempts.Count > 1)
+            builder.Append($" attempts={attempts.Count}");
+        Console.WriteLine(builder.ToString());
     }
 
     private static string BuildSummaryLine(

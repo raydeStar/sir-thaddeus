@@ -40,7 +40,7 @@ public class ExistenceGateTests
     }
 
     [Fact]
-    public void ReleasedProductExistenceAnswer_MissingModelInGenericLists_UsesUnclearWording()
+    public void ReleasedProductExistenceAnswer_MissingModelInGenericLists_UsesCatalogAbsenceWording()
     {
         var sources = new List<SourceItem>
         {
@@ -67,12 +67,13 @@ public class ExistenceGateTests
             sources);
 
         Assert.NotNull(answer);
-        Assert.Contains("could not confirm from the returned snippets", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("No", answer);
+        Assert.Contains("release/model-list evidence", answer, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("iPhone 99", answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ReleasedProductExistenceAnswer_ExplicitNegativeSignals_UsesLikelyDoesNotExistWording()
+    public void ReleasedProductExistenceAnswer_ExplicitNegativeSignals_UsesNoEvidenceWording()
     {
         var sources = new List<SourceItem>
         {
@@ -99,8 +100,57 @@ public class ExistenceGateTests
             sources);
 
         Assert.NotNull(answer);
-        Assert.Contains("likely does not exist", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("No", answer);
+        Assert.Contains("negative indicators", answer, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("iPhone 99", answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReleasedProductExistenceAnswer_CommunityDiscussionOnly_DoesNotTreatAsOfficialReleaseEvidence()
+    {
+        var sources = new List<SourceItem>
+        {
+            new()
+            {
+                Url = "https://discussions.apple.com/thread/123",
+                Title = "iPhone 15 question - Apple Community",
+                Domain = "discussions.apple.com",
+                Snippet = "A community member asks about iPhone 15 settings.",
+                SourceId = SourceItem.ComputeSourceId("https://discussions.apple.com/thread/123")
+            }
+        };
+
+        var answer = SearchOrchestrator.BuildReleasedProductExistenceAnswer(
+            "Does iPhone 15 exist as a released product?",
+            sources);
+
+        Assert.NotNull(answer);
+        Assert.Contains("could not confirm from the returned snippets", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("exists as a released product", answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReleasedProductExistenceAnswer_LifecycleSupportEvidence_CountsAsReleasedProductEvidence()
+    {
+        var sources = new List<SourceItem>
+        {
+            new()
+            {
+                Url = "https://endoflife.example/vendor-z1",
+                Title = "Vendor Z1 lifecycle",
+                Domain = "endoflife.example",
+                Snippet = "Vendor Z1 is supported from platform version 4 through version 8.",
+                SourceId = SourceItem.ComputeSourceId("https://endoflife.example/vendor-z1")
+            }
+        };
+
+        var answer = SearchOrchestrator.BuildReleasedProductExistenceAnswer(
+            "Does Vendor Z1 exist as a released product?",
+            sources);
+
+        Assert.NotNull(answer);
+        Assert.StartsWith("Yes", answer);
+        Assert.Contains("Vendor Z1 exists as a released product", answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

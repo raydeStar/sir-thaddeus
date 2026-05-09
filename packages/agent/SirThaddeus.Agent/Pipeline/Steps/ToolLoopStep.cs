@@ -854,6 +854,7 @@ public sealed class ToolLoopStep : ITurnStep
         return match.Success ? match.Groups["value"].Value : null;
     }
 
+
     private string ApplyArgsRewriters(TurnContext context, string toolName, string args)
     {
         var current = args;

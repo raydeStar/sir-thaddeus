@@ -657,6 +657,9 @@ public sealed partial class QueryBuilder
         if (LooksLikeProductRecommendationQuery(lower))
             return true;
 
+        if (LooksLikeVersionFactLookup(lower))
+            return true;
+
         if (entity is null)
             return false;
 
@@ -728,6 +731,13 @@ public sealed partial class QueryBuilder
                 : string.Empty;
             query = $"{prefix}{productSubject} {productNoun} reviews";
         }
+        else if (LooksLikeVersionFactLookup(lower))
+        {
+            var versionSubject = ExtractVersionFactSubject(userMessage ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(versionSubject))
+                versionSubject = subject;
+            query = $"latest stable version of {FormatVersionFactSubject(versionSubject)} official documentation release notes";
+        }
         else if (lower.Contains("update", StringComparison.Ordinal) ||
             lower.Contains("updates", StringComparison.Ordinal) ||
             lower.Contains("developments", StringComparison.Ordinal) ||
@@ -757,6 +767,41 @@ public sealed partial class QueryBuilder
             query = query[..80].TrimEnd();
 
         return query;
+    }
+
+    private static bool LooksLikeVersionFactLookup(string lower)
+        => (lower.Contains("latest", StringComparison.Ordinal) ||
+            lower.Contains("current", StringComparison.Ordinal)) &&
+           lower.Contains("version", StringComparison.Ordinal) &&
+           (lower.Contains("stable", StringComparison.Ordinal) ||
+            lower.Contains("release", StringComparison.Ordinal));
+
+    private static string ExtractVersionFactSubject(string userMessage)
+    {
+        var normalized = userMessage.Trim().TrimEnd('?', '.', '!');
+        var match = Regex.Match(
+            normalized,
+            @"\bversion\s+of\s+(?<subject>.+?)(?:\s+as\s+of\b|\s+right\s+now\b|\s+today\b|[?.!]|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        return match.Success
+            ? CollapseWhitespace(match.Groups["subject"].Value).Trim(',', ':', ';', '-', ' ')
+            : string.Empty;
+    }
+
+    private static string FormatVersionFactSubject(string subject)
+    {
+        var normalized = subject.Trim();
+        if (normalized.Equals(".NET", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("NET", StringComparison.OrdinalIgnoreCase))
+        {
+            return "dotnet";
+        }
+
+        if (Regex.IsMatch(normalized, @"[^A-Za-z0-9 +#-]", RegexOptions.CultureInvariant))
+            return $"\"{normalized.Replace("\"", string.Empty, StringComparison.Ordinal)}\"";
+
+        return normalized;
     }
 
     private static bool LooksLikeMediaComparisonQuery(string lower)

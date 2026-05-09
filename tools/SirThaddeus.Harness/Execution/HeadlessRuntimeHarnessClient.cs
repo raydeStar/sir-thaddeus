@@ -29,6 +29,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 
     private Process? _process;
     private HarnessRuntimeSandbox? _sandbox;
+    private bool _processSpawnedThisCall;
 
     // Built once per process to avoid per-test DLL copy races when the
     // previous runtime process still holds file handles after Kill().
@@ -95,50 +96,17 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(test);
 
+        var totalStopwatch = Stopwatch.StartNew();
+
         EnsureRuntimeBuilt();
-        await EnsureFreshRuntimeAsync(test, cancellationToken);
+        var warmupStopwatch = Stopwatch.StartNew();
+        await EnsureRuntimeProcessAsync(cancellationToken);
+        warmupStopwatch.Stop();
+        var warmupSeconds = _processSpawnedThisCall ? warmupStopwatch.Elapsed.TotalSeconds : 0;
+        _processSpawnedThisCall = false;
 
-        var runtimeProject = ResolveHeadlessRuntimeProject();
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            Arguments = $"run --project \"{runtimeProject}\" --no-build -- --server --tools --port {_port}",
-            WorkingDirectory = Directory.GetCurrentDirectory(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        foreach (var pair in _sandbox!.Environment)
-            startInfo.Environment[pair.Key] = pair.Value;
-
-        _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        _process.OutputDataReceived += (_, e) =>
-        {
-            if (!string.IsNullOrWhiteSpace(e.Data))
-            {
-                lock (_stdout)
-                    _stdout.Add(e.Data);
-            }
-        };
-        _process.ErrorDataReceived += (_, e) =>
-        {
-            if (!string.IsNullOrWhiteSpace(e.Data))
-            {
-                lock (_stderr)
-                    _stderr.Add(e.Data);
-            }
-        };
-
-        _process.Start();
-        _process.BeginOutputReadLine();
-        _process.BeginErrorReadLine();
-
-        await WaitForHealthyAsync(cancellationToken);
-        await WaitForSearxngReadyAsync(cancellationToken);
-
-        await ClearSessionAsync(cancellationToken);
+        var resetStopwatch = Stopwatch.StartNew();
+        await ApplyHarnessResetAsync(test, cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(test.PersonalityId))
         {
@@ -146,9 +114,16 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         }
 
         var auditBaseline = await GetAuditEntriesAsync(cancellationToken);
+        resetStopwatch.Stop();
+        var resetSeconds = resetStopwatch.Elapsed.TotalSeconds;
+
+        var workStopwatch = Stopwatch.StartNew();
         var auditCaptureStart = DateTimeOffset.UtcNow;
         var startResponse = await PostChatAsync(test.UserMessage, cancellationToken);
         var runOutcome = await ReadRunToCompletionAsync(startResponse.RunId, cancellationToken);
+        workStopwatch.Stop();
+        var workSeconds = workStopwatch.Elapsed.TotalSeconds;
+
         var auditEntries = FilterNewAuditEntries(
             auditCaptureStart,
             auditBaseline,
@@ -174,26 +149,151 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
             LlmRoundTrips = 0
         };
 
+        totalStopwatch.Stop();
+
         return new HeadlessExecutionResult
         {
             Response = response,
             Steps = finalSteps,
-            ToolTurns = toolTurns
+            ToolTurns = toolTurns,
+            Timing = new HarnessTiming(
+                RuntimeWarmupSeconds: warmupSeconds,
+                ResetSeconds: resetSeconds,
+                TestWorkSeconds: workSeconds,
+                TotalSeconds: totalStopwatch.Elapsed.TotalSeconds)
         };
     }
 
-    private async Task EnsureFreshRuntimeAsync(HarnessTestCase test, CancellationToken cancellationToken)
+    /// <summary>
+    /// Spawns the headless runtime exactly once per harness run and reuses
+    /// it for every test. The first call pays the dotnet startup, health
+    /// probe, and SearxNG warm-up costs (~10–45s); subsequent tests only
+    /// pay a sub-second reset round-trip.
+    /// </summary>
+    private async Task EnsureRuntimeProcessAsync(CancellationToken cancellationToken)
     {
+        if (_process is { HasExited: false })
+            return;
+
         DisposeRuntimeProcess();
-        _sandbox?.Dispose();
-        _sandbox = HarnessRuntimeSandbox.Create(_baseSettings, test);
+        _processSpawnedThisCall = true;
+        _sandbox ??= HarnessRuntimeSandbox.CreateShared(_baseSettings);
 
         lock (_stdout)
             _stdout.Clear();
         lock (_stderr)
             _stderr.Clear();
 
-        await InitializeAsync(cancellationToken);
+        var runtimeDll = ResolveHeadlessRuntimeAssembly();
+        var startInfo = new ProcessStartInfo
+        {
+            // Direct DLL invocation skips ~0.5s of `dotnet run` project
+            // resolution and dependency-graph loading. EnsureRuntimeBuilt
+            // already produced the assembly, so this is safe.
+            FileName = "dotnet",
+            Arguments = $"exec \"{runtimeDll}\" --server --tools --port {_port}",
+            WorkingDirectory = Directory.GetCurrentDirectory(),
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var pair in _sandbox.Environment)
+            startInfo.Environment[pair.Key] = pair.Value;
+        // Marker so the runtime exposes /api/harness/reset only when the
+        // harness is the parent process.
+        startInfo.Environment["ST_HARNESS_RUN_ACTIVE"] = "true";
+
+        _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        _process.OutputDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+            {
+                lock (_stdout)
+                    _stdout.Add(e.Data);
+            }
+        };
+        _process.ErrorDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+            {
+                lock (_stderr)
+                    _stderr.Add(e.Data);
+            }
+        };
+
+        _process.Start();
+        _process.BeginOutputReadLine();
+        _process.BeginErrorReadLine();
+
+        await WaitForHealthyAsync(cancellationToken);
+        await WaitForSearxngReadyAsync(cancellationToken);
+        await PrewarmAgentPipelineAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Pays the agent-pipeline / MCP-client / HTTP-client lazy-init cost
+    /// during the runtime warmup phase instead of letting it land on the
+    /// first real test. Sends a tiny chat with no tools allowed so the LLM
+    /// composes a one-shot reply and the pipeline JITs end-to-end. Reset
+    /// runs after this to clear the warmup conversation from history.
+    /// </summary>
+    private async Task PrewarmAgentPipelineAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var resetRequest = new HarnessResetRequest(
+                AllowedTools: "__none__",
+                StubOverrides: null,
+                ClearMemoryData: true,
+                ClearChatHistory: true);
+            using (var resetResponse = await _http.PostAsJsonAsync(
+                "api/harness/reset", resetRequest, JsonOptions, cancellationToken))
+            {
+                resetResponse.EnsureSuccessStatusCode();
+            }
+
+            // Short, literal prompt the LLM can answer in <= 1 token. Cuts
+            // generation time during warmup vs an open-ended "ping" that
+            // might produce a paragraph-long preamble.
+            var startResponse = await PostChatAsync("Reply with only the word ok.", cancellationToken);
+            await ReadRunToCompletionAsync(startResponse.RunId, cancellationToken);
+        }
+        catch
+        {
+            // Warmup is best-effort. If it fails, the first real test will
+            // simply pay the cold-start cost — not worth aborting the run.
+        }
+    }
+
+    private async Task ApplyHarnessResetAsync(HarnessTestCase test, CancellationToken cancellationToken)
+    {
+        var allowedTools = test.Assertions.AllowedToolsOnly
+            ? (test.AllowedTools.Count == 0 ? "__none__" : string.Join(",", test.AllowedTools))
+            : string.Empty; // empty string clears the override server-side
+
+        Dictionary<string, string?>? stubOverrides = null;
+        if (string.Equals(test.Mode, "stub", StringComparison.OrdinalIgnoreCase) &&
+            test.Stub.PerToolFailures.Count > 0)
+        {
+            stubOverrides = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (toolName, failure) in test.Stub.PerToolFailures)
+                stubOverrides[toolName] = failure;
+        }
+
+        var request = new HarnessResetRequest(
+            AllowedTools: allowedTools,
+            StubOverrides: stubOverrides,
+            ClearMemoryData: true,
+            ClearChatHistory: true);
+
+        using var response = await _http.PostAsJsonAsync(
+            "api/harness/reset",
+            request,
+            JsonOptions,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
     }
 
     private static IReadOnlyList<AuditEntryDto> FilterNewAuditEntries(
@@ -433,7 +533,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
                 lastError = ex;
             }
 
-            await Task.Delay(250, cancellationToken);
+            await Task.Delay(100, cancellationToken);
         }
 
         throw new TimeoutException($"Timed out waiting for headless runtime health. Last error: {lastError?.Message}");
@@ -509,6 +609,27 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
             throw new FileNotFoundException("Headless runtime project not found.", projectPath);
 
         return projectPath;
+    }
+
+    private static string ResolveHeadlessRuntimeAssembly()
+    {
+        var repoRoot = Directory.GetCurrentDirectory();
+        var assemblyPath = Path.Combine(
+            repoRoot,
+            "apps",
+            "headless-runtime",
+            "SirThaddeus.HeadlessRuntime",
+            "bin",
+            "Debug",
+            "net10.0",
+            "SirThaddeus.HeadlessRuntime.dll");
+
+        if (!File.Exists(assemblyPath))
+            throw new FileNotFoundException(
+                "Headless runtime assembly not found — EnsureRuntimeBuilt should run first.",
+                assemblyPath);
+
+        return assemblyPath;
     }
 
     private static int GetFreeTcpPort()

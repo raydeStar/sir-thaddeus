@@ -250,8 +250,13 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         permissionGate: new AlwaysGrantGate(),
         groupClassifier: null,
         interceptors: null,
-        argsRewriters: [new LocationAwarePlacesArgsRewriter(() =>
-            currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel())],
+        argsRewriters:
+        [
+            new LocationAwarePlacesArgsRewriter(() =>
+                currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId).GetResolvedLabel()),
+            new FactSearchArgsRewriter(),
+            new ExistenceSearchArgsRewriter()
+        ],
         maxRoundTrips: 6);
 
     var sanitize = new Func<TurnContext, string, string>(

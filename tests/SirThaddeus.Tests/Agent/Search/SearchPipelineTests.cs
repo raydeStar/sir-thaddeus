@@ -879,6 +879,30 @@ public class QueryBuilderFallbackTests
     }
 
     [Fact]
+    public async Task FactFind_DirectQuery_BroadensLatestStableVersionPrompt()
+    {
+        var builder = new QueryBuilder(
+            new FakeLlmClient((_, _) => new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            }),
+            new TestAuditLogger());
+
+        var result = await builder.BuildAsync(
+            SearchMode.WebFactFind,
+            "What is the latest stable version of .NET as of 2025?",
+            entity: null,
+            new SearchSession(),
+            recentHistory: [],
+            ct: CancellationToken.None);
+
+        Assert.Equal("latest stable version of dotnet official documentation release notes", result.Query);
+        Assert.False(result.UsedFallback);
+    }
+
+    [Fact]
     public async Task FactFind_DirectQuery_DoesNotRewriteNonMediaStructuredComparisonPrompt()
     {
         var builder = new QueryBuilder(

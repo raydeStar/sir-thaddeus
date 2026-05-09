@@ -406,7 +406,12 @@ public sealed class LmStudioAssistant : IAssistant
             permissionGate: permissionGate,
             groupClassifier: RuntimeToolGroupClassifier.Instance,
             interceptors: Array.Empty<IToolCallInterceptor>(),
-            argsRewriters: [new LocationAwarePlacesArgsRewriter(() => LocationHint)],
+            argsRewriters:
+            [
+                new LocationAwarePlacesArgsRewriter(() => LocationHint),
+                new FactSearchArgsRewriter(),
+                new ExistenceSearchArgsRewriter()
+            ],
             maxRoundTrips: MaxRoundTrips);
 
         return new ChatPipeline(new ITurnStep[]

@@ -41,7 +41,13 @@ public sealed class ResponseComposerStep : ITurnStep
             text = mediaFallback;
         }
 
-        if (ToolBackedResponseQualityGuards.TryBuildCurrentTimeInLocationFallback(
+        if (ToolBackedResponseQualityGuards.TryBuildReleasedProductExistenceResponse(
+                context.UserText ?? string.Empty,
+                context.ToolCallsMade) is { Length: > 0 } existenceFallback)
+        {
+            text = existenceFallback;
+        }
+        else if (ToolBackedResponseQualityGuards.TryBuildCurrentTimeInLocationFallback(
                 context.UserText ?? string.Empty,
                 context.ToolCallsMade) is { Length: > 0 } currentTimeFallback)
         {

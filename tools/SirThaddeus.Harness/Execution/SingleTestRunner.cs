@@ -89,7 +89,8 @@ internal sealed class SingleTestRunner
             JudgeResult = judgeResult,
             ArtifactPaths = artifacts,
             Steps = steps,
-            ModelName = modelName
+            ModelName = modelName,
+            Timing = headlessResult.Timing
         };
     }
 
@@ -128,6 +129,20 @@ internal sealed record HeadlessExecutionResult
     public required AgentResponse Response { get; init; }
     public required IReadOnlyList<TraceStep> Steps { get; init; }
     public required IReadOnlyList<RecordedToolTurn> ToolTurns { get; init; }
+    public HarnessTiming Timing { get; init; } = HarnessTiming.Empty;
+}
+
+/// <summary>
+/// Per-test timing breakdown surfaced by the harness client so the run
+/// log can show where time is going. Times are wall-clock seconds.
+/// </summary>
+internal sealed record HarnessTiming(
+    double RuntimeWarmupSeconds,
+    double ResetSeconds,
+    double TestWorkSeconds,
+    double TotalSeconds)
+{
+    public static HarnessTiming Empty { get; } = new(0, 0, 0, 0);
 }
 
 internal sealed record SuiteRunContext
