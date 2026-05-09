@@ -8,6 +8,7 @@ using SirThaddeus.Agent.Pipeline.Steps;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.Agent.Validation;
+using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine;
 using Thaddeus.Runtime.Chat.Pipeline;
@@ -34,6 +35,7 @@ public sealed class LmStudioAssistant : IAssistant
     private readonly ToolPermissionGate _gate;
     private readonly IThreadStore _store;
     private readonly ChatTurnPublisher _publisher;
+    private readonly IAuditLogger _audit;
     private readonly ILogger<LmStudioAssistant> _logger;
 
     /// <summary>Delay between streamed deltas. Tests override to zero.</summary>
@@ -247,6 +249,7 @@ public sealed class LmStudioAssistant : IAssistant
         ToolPermissionGate gate,
         IThreadStore store,
         ChatTurnPublisher publisher,
+        IAuditLogger audit,
         ILogger<LmStudioAssistant> logger)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
@@ -254,6 +257,7 @@ public sealed class LmStudioAssistant : IAssistant
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
+        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -285,7 +289,18 @@ public sealed class LmStudioAssistant : IAssistant
         var sink = new ChatTurnPublisherEventSink(
             _publisher, NullLogger<ChatTurnPublisherEventSink>.Instance);
         var gateAdapter = new RuntimePermissionGateAdapter(_gate, threadId, messageId);
-        var pipeline = BuildTurnPipeline(sink, gateAdapter);
+
+        // Wrap the raw MCP client so every tool call writes
+        // MCP_TOOL_CALL_START/END events to the audit log. The CLI harness
+        // and any other auditing consumer reconstruct the tool trace from
+        // those entries — without this wrapper, v2's audit file is empty.
+        var auditedMcp = new AuditedMcpToolClient(
+            _mcp,
+            _audit,
+            gateAdapter,
+            sessionId: messageId);
+
+        var pipeline = BuildTurnPipeline(auditedMcp, sink, gateAdapter);
 
         var initialContext = new TurnContext
         {
@@ -396,13 +411,13 @@ public sealed class LmStudioAssistant : IAssistant
     /// footman, footman before the tool loop, post-process before the
     /// composer.
     /// </summary>
-    private ChatPipeline BuildTurnPipeline(IChatEventSink sink, IToolPermissionGate permissionGate)
+    private ChatPipeline BuildTurnPipeline(IMcpToolClient mcp, IChatEventSink sink, IToolPermissionGate permissionGate)
     {
         var sanitize = new Func<TurnContext, string, string>((_, draft) =>
             AssistantResponseSanitizer.CleanChatReply(draft));
 
         var toolLoop = new ToolLoopStep(
-            _llm, _mcp, sink,
+            _llm, mcp, sink,
             permissionGate: permissionGate,
             groupClassifier: RuntimeToolGroupClassifier.Instance,
             interceptors: Array.Empty<IToolCallInterceptor>(),

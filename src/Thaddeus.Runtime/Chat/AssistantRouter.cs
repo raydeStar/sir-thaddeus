@@ -258,7 +258,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                 var repair = repairCached ??= new RepairLoop(cached, validator);
 
                 return new LmStudioAssistant(
-                    cached, mcp, gate, store, publisher,
+                    cached, mcp, gate, store, publisher, audit,
                     loggerFactory.CreateLogger<LmStudioAssistant>())
                 {
                     Footman = footmanCached,

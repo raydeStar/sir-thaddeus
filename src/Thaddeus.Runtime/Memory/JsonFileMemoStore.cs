@@ -133,6 +133,19 @@ public sealed class JsonFileMemoStore : IMemoStore, IDisposable
         finally { gate.Release(); }
     }
 
+    public async Task<int> WipeAllAsync(CancellationToken ct)
+    {
+        await EnsureInitializedAsync(ct).ConfigureAwait(false);
+        var deleted = 0;
+        foreach (var id in _memos.Keys.ToArray())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (await DeleteAsync(id, ct).ConfigureAwait(false))
+                deleted++;
+        }
+        return deleted;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

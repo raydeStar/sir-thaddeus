@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using SirThaddeus.Contracts;
 using SirThaddeus.RuntimeHost.Harness;
+using Thaddeus.Runtime.Memory;
 using Thaddeus.Runtime.Tools;
 
 namespace Thaddeus.Runtime.Api;
@@ -17,18 +18,19 @@ namespace Thaddeus.Runtime.Api;
 /// production hosts cannot accidentally expose it.
 ///
 /// Memory-store shape differs between v1 (sqlite tables) and v2
-/// (JSON-backed memos), so the v2 version of <c>ClearMemoryData</c> is
-/// currently a no-op — chat history reset and env-var swaps are the
-/// portable pieces. We can plug in a memo-store wipe later if the harness
-/// starts targeting v2 in earnest.
+/// (JSON-backed memos). When <c>ClearMemoryData</c> is set, this
+/// endpoint calls <see cref="IMemoStore.WipeAllAsync"/> so the next
+/// test starts with no memos.
 /// </summary>
 public static class HarnessApi
 {
     public static IEndpointRouteBuilder MapHarnessApi(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/harness/reset", (
+        app.MapPost("/api/harness/reset", async (
             HarnessResetRequest request,
-            ToolPermissionGate gate) =>
+            ToolPermissionGate gate,
+            IMemoStore memos,
+            CancellationToken ct) =>
         {
             if (!HarnessControlPlane.IsHarnessReuseEnabled())
                 return Results.NotFound();
@@ -41,14 +43,14 @@ public static class HarnessApi
             if (request.ClearChatHistory)
                 HarnessControlPlane.ResetHistoryFiles();
 
-            // ClearMemoryData is intentionally not wired here yet — see the
-            // class summary. The harness still receives a 200 with rows=0
-            // so it can drive v1 and v2 with the identical request payload.
+            var memoryRows = 0;
+            if (request.ClearMemoryData)
+                memoryRows = await memos.WipeAllAsync(ct).ConfigureAwait(false);
 
             return Results.Json(
                 new HarnessResetResponse(
                     Ok: true,
-                    MemoryRowsDeleted: 0,
+                    MemoryRowsDeleted: memoryRows,
                     StubVarsCleared: cleared,
                     StubVarsSet: set,
                     AllowedToolsApplied: allowedToolsApplied),

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using SirThaddeus.Agent;
+using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Events;
@@ -79,7 +80,8 @@ public class LmStudioAssistantTests : IDisposable
         var fake = new FakeLlmClient { Reply = reply, Throw = throwOnCall };
         var mcp = new FakeMcpClient();
         var gate = new ToolPermissionGate(new FakeSettingsStore(), bus, NullLogger<ToolPermissionGate>.Instance);
-        var assistant = new LmStudioAssistant(fake, mcp, gate, store, publisher, NullLogger<LmStudioAssistant>.Instance)
+        var audit = new TestAuditLogger();
+        var assistant = new LmStudioAssistant(fake, mcp, gate, store, publisher, audit, NullLogger<LmStudioAssistant>.Instance)
         {
             DeltaDelay = TimeSpan.Zero,
         };

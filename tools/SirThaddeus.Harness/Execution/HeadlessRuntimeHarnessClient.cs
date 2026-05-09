@@ -421,94 +421,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
 
     private static (IReadOnlyList<ToolCallRecord> ToolCalls, IReadOnlyList<RecordedToolTurn> ToolTurns, IReadOnlyList<TraceStep> Steps)
         BuildToolTraceFromAudit(IReadOnlyList<AuditEntryDto> auditEntries)
-    {
-        var starts = new Dictionary<string, (string ToolName, string Arguments, DateTimeOffset Timestamp)>(StringComparer.OrdinalIgnoreCase);
-        var toolCalls = new List<ToolCallRecord>();
-        var toolTurns = new List<RecordedToolTurn>();
-        var steps = new List<TraceStep>();
-        var stepIndex = 0;
-        var toolTurnIndex = 0;
-
-        foreach (var entry in auditEntries.OrderBy(e => e.TimestampUtc))
-        {
-            if (string.Equals(entry.Category, "MCP_TOOL_CALL_START", StringComparison.OrdinalIgnoreCase))
-            {
-                var meta = ParseMetadata(entry.MetadataJson);
-                var requestId = GetString(meta, "request_id");
-                var toolName = GetString(meta, "tool_name_canonical") ?? "unknown";
-                var arguments = GetString(meta, "input_summary") ?? "{}";
-                if (!string.IsNullOrWhiteSpace(requestId))
-                {
-                    starts[requestId] = (toolName, arguments, entry.TimestampUtc);
-                }
-
-                steps.Add(new TraceStep
-                {
-                    StepIndex = ++stepIndex,
-                    StepType = "tool_call",
-                    CallId = requestId,
-                    ToolName = toolName,
-                    Arguments = arguments,
-                    StartedAt = entry.TimestampUtc
-                });
-            }
-            else if (string.Equals(entry.Category, "MCP_TOOL_CALL_END", StringComparison.OrdinalIgnoreCase))
-            {
-                var meta = ParseMetadata(entry.MetadataJson);
-                var requestId = GetString(meta, "request_id");
-                var errorMessage = GetString(meta, "error_message");
-                var outputSummary = GetString(meta, "output_summary") ?? string.Empty;
-                var success = entry.Message.Contains("(ok)", StringComparison.OrdinalIgnoreCase);
-
-                starts.TryGetValue(requestId ?? string.Empty, out var start);
-                var toolName = start.ToolName ?? GetString(meta, "tool_name_canonical") ?? "unknown";
-                var arguments = start.Arguments ?? GetString(meta, "input_summary") ?? "{}";
-                var resultText = success ? outputSummary : (errorMessage ?? outputSummary);
-
-                toolCalls.Add(new ToolCallRecord
-                {
-                    ToolName = toolName,
-                    Arguments = arguments,
-                    Result = resultText,
-                    Success = success
-                });
-
-                toolTurns.Add(new RecordedToolTurn
-                {
-                    Index = toolTurnIndex++,
-                    ToolName = toolName,
-                    ArgumentsJson = arguments,
-                    ResultText = resultText,
-                    Success = success
-                });
-
-                steps.Add(new TraceStep
-                {
-                    StepIndex = ++stepIndex,
-                    StepType = "tool_result",
-                    CallId = requestId,
-                    ToolName = toolName,
-                    Arguments = arguments,
-                    StartedAt = start.Timestamp == default ? entry.TimestampUtc : start.Timestamp,
-                    EndedAt = entry.TimestampUtc,
-                    DurationMs = Math.Max(0, (long)(entry.TimestampUtc - (start.Timestamp == default ? entry.TimestampUtc : start.Timestamp)).TotalMilliseconds),
-                    Result = success
-                        ? ToolResultPayloads.BuildSuccess(resultText)
-                        : ToolResultPayloads.BuildErrorJson("tool_error", resultText, false),
-                    Error = success
-                        ? null
-                        : new TraceError
-                        {
-                            Code = "tool_error",
-                            Message = resultText,
-                            Retriable = false
-                        }
-                });
-            }
-        }
-
-        return (toolCalls, toolTurns, steps);
-    }
+        => AuditTraceBuilder.BuildFromAuditEntries(auditEntries);
 
     private async Task WaitForHealthyAsync(CancellationToken cancellationToken)
     {
@@ -647,40 +560,6 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
         {
             listener.Stop();
         }
-    }
-
-    private static JsonElement? ParseMetadata(string? metadataJson)
-    {
-        if (string.IsNullOrWhiteSpace(metadataJson))
-            return null;
-
-        try
-        {
-            using var doc = JsonDocument.Parse(metadataJson);
-            return doc.RootElement.Clone();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string? GetString(JsonElement? element, string propertyName)
-    {
-        if (element is not JsonElement root || root.ValueKind != JsonValueKind.Object)
-            return null;
-
-        if (!root.TryGetProperty(propertyName, out var prop))
-            return null;
-
-        return prop.ValueKind switch
-        {
-            JsonValueKind.String => prop.GetString(),
-            JsonValueKind.Number => prop.GetRawText(),
-            JsonValueKind.True => "true",
-            JsonValueKind.False => "false",
-            _ => prop.GetRawText()
-        };
     }
 
     private static string GetAuditSignature(AuditEntryDto entry)
