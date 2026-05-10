@@ -1,206 +1,226 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { ChatMessageSource } from '@thaddeus/shared-types';
 import { ArrowUpRight, Clock3, Globe, Sparkles } from 'lucide-react';
+import { openExternalUrl } from '../lib/externalLinks';
 
 interface SourceCardsProps {
   sources: readonly ChatMessageSource[];
 }
 
+// Tuned so a typical web_search reply (5 results) shows everything at once,
+// but bigger result sets fold behind a single click instead of overwhelming
+// the message.
+const COLLAPSED_LIMIT = 6;
+
 export function SourceCards({ sources }: SourceCardsProps) {
+  const [imageFailures, setImageFailures] = useState<Record<string, true>>({});
+  const [expanded, setExpanded] = useState(false);
+
+  const markImageFailed = useCallback((key: string) => {
+    setImageFailures((current) => ({ ...current, [key]: true }));
+  }, []);
+
   if (sources.length === 0) return null;
 
+  const overflow = sources.length > COLLAPSED_LIMIT;
+  const visible = expanded || !overflow ? sources : sources.slice(0, COLLAPSED_LIMIT);
+
   return (
-    <section className="mt-6 space-y-3" data-testid="chat-source-cards">
-      <div className="flex items-center gap-3">
-        <div className="inline-flex items-center gap-2 rounded-full border border-line bg-canvas-raised px-3 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-accent shadow-[0_8px_24px_rgba(28,27,25,0.04)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.28)]">
-          <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+    <section className="mt-5" data-testid="chat-source-cards">
+      <div className="mb-3 flex items-center gap-3">
+        <div className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-accent shadow-[0_8px_22px_rgba(28,27,25,0.04)] dark:shadow-[0_8px_22px_rgba(0,0,0,0.28)]">
+          <Sparkles className="h-3 w-3" strokeWidth={2} />
           <span>Latest reporting</span>
         </div>
         <div className="h-px flex-1 bg-gradient-to-r from-line-strong via-line to-transparent" />
-        <span className="text-[11px] uppercase tracking-[0.08em] text-ink-subtle">
+        <span className="shrink-0 text-[10px] uppercase tracking-[0.08em] text-ink-subtle">
           {sources.length} {sources.length === 1 ? 'source' : 'sources'}
         </span>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
-      {sources.map((source, index) => {
-        const title = source.title?.trim() || fallbackTitle(source.url, source.domain);
-        const domain = source.domain?.trim() || fallbackDomain(source.url);
-        const excerpt = truncate(source.excerpt?.trim() || '', index === 0 ? 240 : 110);
-        const publishedLabel = formatPublishedAt(source.publishedAt);
-        const isFeatured = index === 0 && (sources.length === 1 || sources.length >= 3);
-        const eyebrow = isFeatured ? 'Lead source' : `Source 0${index + 1}`;
-        const footerLabel = isFeatured ? 'Most complete match' : 'External link';
-        const ctaLabel = isFeatured ? 'Read full coverage' : 'Read story';
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+        {visible.map((source, index) => {
+          const title = source.title?.trim() || fallbackTitle(source.url, source.domain);
+          const excerpt = source.excerpt?.trim() || '';
+          const domain = source.domain?.trim() || fallbackDomain(source.url);
+          const publishedLabel = formatPublishedAt(source.publishedAt);
+          const sourceKey = `${source.url}-${index}`;
+          const hasThumbnail = Boolean(source.thumbnail && !imageFailures[sourceKey]);
+          const featured = index === 0 && visible.length >= 3;
+          const compact = index >= 2 && visible.length >= 5;
 
-        const metaChips = (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-accent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/95">
-              {eyebrow}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-full border border-line bg-canvas-raised/80 px-2.5 py-1 text-[11px] font-medium text-ink-muted backdrop-blur-sm">
-              <SourceBadgeIcon source={source} domain={domain} />
-              <span className="max-w-[180px] truncate">{domain}</span>
-            </span>
-            {publishedLabel ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-line/80 bg-canvas-sunken/70 px-2.5 py-1 text-[11px] text-ink-muted">
-                <Clock3 className="h-3 w-3" strokeWidth={1.8} />
-                {publishedLabel}
-              </span>
-            ) : null}
-          </div>
-        );
+          return (
+            <a
+              key={sourceKey}
+              href={source.url}
+              data-source-card="true"
+              onClick={(event) => {
+                event.preventDefault();
+                void openExternalUrl(source.url);
+              }}
+              onAuxClick={(event) => {
+                event.preventDefault();
+                void openExternalUrl(source.url);
+              }}
+              className={[
+                'group/source-card relative flex flex-col overflow-hidden rounded-2xl border border-line/80',
+                featured ? 'md:col-span-2' : '',
+                compact ? 'min-h-[108px]' : '',
+                'bg-canvas-raised/92 text-left shadow-[0_10px_22px_rgba(28,27,25,0.05)] outline-none transition',
+                'hover:-translate-y-0.5 hover:border-line-strong hover:shadow-[0_18px_36px_rgba(28,27,25,0.10)]',
+                'focus-visible:ring-2 focus-visible:ring-accent/55 dark:bg-canvas-raised/75 dark:shadow-[0_12px_28px_rgba(0,0,0,0.28)]',
+              ].join(' ')}
+            >
+              <SourceImage
+                source={source}
+                sourceKey={sourceKey}
+                domain={domain}
+                hasThumbnail={hasThumbnail}
+                featured={featured}
+                compact={compact}
+                index={index}
+                onImageFailed={markImageFailed}
+              />
 
-        const body = (
-          <div className="space-y-2.5">
-            <div className="flex items-start justify-between gap-3">
-              <h3 className={isFeatured
-                ? 'text-[22px] font-semibold leading-[1.15] tracking-[-0.025em] text-ink md:text-[26px]'
-                : 'text-[16px] font-semibold leading-[1.25] tracking-[-0.02em] text-ink'}>
-                {title}
-              </h3>
-              {!isFeatured ? (
-                <span className="mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-canvas-raised text-accent transition group-hover:border-accent group-hover:bg-accent group-hover:text-white">
-                  <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2} />
-                </span>
-              ) : null}
-            </div>
-            {excerpt ? (
-              <p className={isFeatured
-                ? 'max-w-[52ch] text-[14px] leading-6 text-ink-muted md:text-[15px]'
-                : 'text-[13px] leading-[1.45] text-ink-muted'}>
-                {excerpt}
-              </p>
-            ) : null}
-          </div>
-        );
-
-        const footer = (
-          <div className="mt-3 flex items-center justify-between gap-3 border-t border-line/80 pt-3">
-            <div className="text-[11px] uppercase tracking-[0.08em] text-ink-subtle">{footerLabel}</div>
-            <div className="inline-flex items-center gap-1 text-[12px] font-medium text-accent transition group-hover:gap-1.5">
-              <span>{ctaLabel}</span>
-              <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2} />
-            </div>
-          </div>
-        );
-
-        return (
-          <a
-            key={source.url}
-            href={source.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={[
-              'group relative isolate flex h-full flex-col overflow-hidden rounded-[28px] border border-line/80',
-              'bg-[radial-gradient(circle_at_top_left,rgba(217,119,87,0.16),transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(251,250,247,0.98))]',
-              'shadow-[0_18px_44px_rgba(28,27,25,0.08)] transition duration-300 hover:-translate-y-1 hover:border-line-strong',
-              'dark:bg-[radial-gradient(circle_at_top_left,rgba(232,144,105,0.20),transparent_48%),linear-gradient(180deg,rgba(22,22,21,0.98),rgba(14,14,13,0.98))]',
-              'dark:shadow-[0_18px_44px_rgba(0,0,0,0.34)]',
-              isFeatured ? 'md:col-span-2' : '',
-            ].join(' ')}
-          >
-            {isFeatured ? (
-              <div className="flex h-full flex-col md:grid md:grid-cols-[minmax(0,1.12fr)_minmax(260px,0.88fr)]">
-                <div className="order-2 flex flex-col justify-between p-5 md:order-1 md:p-6">
-                  <div className="space-y-3">
-                    {metaChips}
-                    {body}
+              {compact ? (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] p-3 text-white">
+                  <div className="mb-1 flex min-w-0 items-center gap-1.5 text-[10px] font-medium text-white/75">
+                    <span className="truncate">{domain}</span>
+                    {publishedLabel ? (
+                      <>
+                        <span aria-hidden>/</span>
+                        <span className="shrink-0">{publishedLabel}</span>
+                      </>
+                    ) : null}
                   </div>
-                  {footer}
+                  <h3 className="overflow-hidden text-[12.5px] font-semibold leading-[1.25] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                    {title}
+                  </h3>
                 </div>
-                <SourceVisual
-                  source={source}
-                  domain={domain}
-                  eyebrow={eyebrow}
-                  featured
-                />
-              </div>
-            ) : (
-              <div className="flex h-full flex-col">
-                <SourceVisual
-                  source={source}
-                  domain={domain}
-                  eyebrow={eyebrow}
-                  featured={false}
-                />
-                <div className="flex flex-1 flex-col gap-2.5 p-4">
-                  {metaChips}
-                  {body}
+              ) : (
+                <div className={featured ? 'flex flex-1 flex-col gap-2 p-3.5' : 'flex flex-1 flex-col gap-2 p-3'}>
+                  <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-ink-muted">
+                    <SourceBadgeIcon source={source} domain={domain} />
+                    <span className="truncate">{domain}</span>
+                    {publishedLabel ? (
+                      <>
+                        <span className="text-ink-subtle" aria-hidden>/</span>
+                        <span className="inline-flex shrink-0 items-center gap-1 text-ink-subtle">
+                          <Clock3 className="h-3 w-3" strokeWidth={1.8} />
+                          {publishedLabel}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
+                  <h3 className={[
+                    'overflow-hidden font-semibold leading-[1.3] text-ink [display:-webkit-box] [-webkit-box-orient:vertical]',
+                    featured ? 'text-[15px] [-webkit-line-clamp:2]' : 'text-[13px] [-webkit-line-clamp:3]',
+                  ].join(' ')}>
+                    {title}
+                  </h3>
+                  {featured && excerpt ? (
+                    <p className="overflow-hidden text-[12px] leading-[1.45] text-ink-muted [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                      {excerpt}
+                    </p>
+                  ) : null}
                 </div>
-              </div>
-            )}
-          </a>
-        );
-      })}
+              )}
+
+              <span
+                aria-hidden
+                className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border border-line/70 bg-canvas/85 text-accent backdrop-blur transition group-hover/source-card:border-accent group-hover/source-card:bg-accent group-hover/source-card:text-white"
+              >
+                <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2} />
+              </span>
+            </a>
+          );
+        })}
       </div>
+
+      {overflow ? (
+        <div className="mt-3 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            data-testid="chat-source-cards-toggle"
+            className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3 py-1.5 text-[11px] font-medium text-ink-muted transition hover:border-line-strong hover:text-ink"
+          >
+            {expanded ? 'Show fewer' : `Show all ${sources.length} sources`}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
 
-function SourceVisual({
+function SourceImage({
   source,
+  sourceKey,
   domain,
-  eyebrow,
+  hasThumbnail,
   featured,
+  compact,
+  index,
+  onImageFailed,
 }: {
   source: ChatMessageSource;
+  sourceKey: string;
   domain: string;
-  eyebrow: string;
+  hasThumbnail: boolean;
   featured: boolean;
+  compact: boolean;
+  index: number;
+  onImageFailed: (key: string) => void;
 }) {
-  const [imageFailed, setImageFailed] = useState(false);
+  const mediaClass = compact ? 'h-[108px]' : featured ? 'h-[150px]' : 'h-[130px]';
+  const sourceLabel = `Source ${String(index + 1).padStart(2, '0')}`;
 
-  if (source.thumbnail && !imageFailed) {
+  if (hasThumbnail) {
     return (
-      <div
-        className={featured
-          ? 'order-1 overflow-hidden border-b border-line/70 bg-canvas-sunken md:order-2 md:border-b-0 md:border-l md:border-line/70'
-          : 'overflow-hidden border-b border-line/70 bg-canvas-sunken'}
-      >
-        <div className={featured ? 'relative h-full min-h-[220px]' : 'relative aspect-[2/1]'}>
-          <img
-            src={source.thumbnail}
-            alt=""
-            loading="lazy"
-            onError={() => setImageFailed(true)}
-            className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
-          />
-          {featured ? (
-            <>
-              <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
-              <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-4 text-white">
-                <div>
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/80">
-                    {eyebrow}
-                  </div>
-                  <div className="text-[13px] font-medium leading-5 text-white/95">{domain}</div>
-                </div>
-              </div>
-            </>
-          ) : null}
-        </div>
+      <div className={`relative ${mediaClass} w-full overflow-hidden bg-canvas-sunken`}>
+        <img
+          data-testid="source-card-thumbnail"
+          src={source.thumbnail ?? ''}
+          alt=""
+          loading="lazy"
+          onError={() => onImageFailed(sourceKey)}
+          className="h-full w-full object-cover transition duration-500 group-hover/source-card:scale-[1.04]"
+        />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent" />
+        {!compact ? (
+          <span className="absolute bottom-3 left-3 rounded-full border border-white/20 bg-black/45 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/85 backdrop-blur">
+            {sourceLabel}
+          </span>
+        ) : null}
       </div>
     );
   }
 
-  const monogram = (domain.replace(/^www\./, '')[0] || '?').toUpperCase();
-
+  // Fallback: warm radial gradient with the favicon (or a monogram disc) +
+  // domain caption. Aim is for the no-image card to still feel deliberate
+  // -- a designed empty state rather than a placeholder.
+  const cleanDomain = domain.replace(/^www\./, '');
+  const monogram = (cleanDomain[0] || '?').toUpperCase();
   return (
-    <div
-      className={[
-        featured ? 'order-1 min-h-[220px] md:order-2 md:border-l md:border-line/70' : 'aspect-[2/1] border-b border-line/70',
-        'relative overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(217,119,87,0.22),transparent_55%),linear-gradient(135deg,rgba(250,237,228,0.95),rgba(245,243,238,0.98))]',
-        'dark:bg-[radial-gradient(circle_at_top_left,rgba(232,144,105,0.22),transparent_55%),linear-gradient(135deg,rgba(42,28,20,0.95),rgba(14,14,13,0.98))]',
-      ].join(' ')}
-      aria-hidden
-    >
-      <div className="absolute -right-12 -top-10 h-44 w-44 rounded-full bg-accent/10 blur-[2px]" />
-      <div className="absolute -bottom-8 -left-6 h-28 w-28 rounded-full border border-line-strong/30" />
-      <div className="relative flex h-full items-center justify-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-line/80 bg-canvas-raised/90 text-[26px] font-semibold tracking-[-0.04em] text-accent shadow-[0_10px_28px_rgba(28,27,25,0.10)] backdrop-blur-sm">
-          {monogram}
-        </div>
+    <div className={`relative flex ${mediaClass} w-full items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_30%_20%,rgba(217,119,87,0.16),transparent_55%),radial-gradient(circle_at_70%_80%,rgba(118,143,201,0.14),transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.04),rgba(255,255,255,0))] dark:bg-[radial-gradient(circle_at_30%_20%,rgba(232,144,105,0.22),transparent_55%),radial-gradient(circle_at_70%_80%,rgba(132,160,224,0.18),transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0))]`}>
+      <span className="absolute left-3 top-3 rounded-full border border-line/60 bg-canvas/65 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-muted backdrop-blur">
+        {sourceLabel}
+      </span>
+      <div className="flex flex-col items-center gap-2">
+        {source.favicon ? (
+          <img
+            src={source.favicon}
+            alt=""
+            className="h-10 w-10 rounded-xl border border-line bg-canvas-raised object-contain p-1.5 shadow-[0_6px_18px_rgba(28,27,25,0.10)]"
+          />
+        ) : (
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-canvas-raised text-[16px] font-semibold text-accent shadow-[0_6px_18px_rgba(28,27,25,0.10)]">
+            {monogram}
+          </span>
+        )}
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-subtle">
+          {cleanDomain}
+        </span>
       </div>
     </div>
   );
@@ -240,11 +260,6 @@ function fallbackDomain(url: string) {
   } catch {
     return url;
   }
-}
-
-function truncate(text: string, maxChars: number) {
-  if (!text || text.length <= maxChars) return text;
-  return `${text.slice(0, maxChars - 1).trimEnd()}...`;
 }
 
 function formatPublishedAt(value?: string | null) {

@@ -84,7 +84,7 @@ public static class IntentFeatureExtractor
             "what's in the file", "whats in the file",
             "file contents",   "show me the file",
             "directory listing", "folder contents",
-            "list directory",  "ls ",
+            "list directory",
             "what's in my folder", "whats in my folder",
             "what is in my folder",
             "what's in this folder", "whats in this folder",
@@ -106,7 +106,13 @@ public static class IntentFeatureExtractor
             "what files are in"
         ];
 
-        return ContainsLoosePhrase(lower, patterns);
+        if (ContainsLoosePhrase(lower, patterns))
+            return true;
+
+        var normalized = NormalizeLoosePhraseInput(lower);
+        return normalized.Equals("ls", StringComparison.Ordinal) ||
+               normalized.StartsWith("ls ", StringComparison.Ordinal) ||
+               normalized.Contains(" ls ", StringComparison.Ordinal);
     }
 
     public static bool LooksLikeSystemCommand(string lower)
@@ -704,6 +710,8 @@ public static class IntentFeatureExtractor
             "search the web",  "search online",    "look it up",
             "look this up",    "find information",  "find info on",
             "search about",
+            "more info on",    "more information on",
+            "more detail on",  "more details on",
 
             // Recommendation / product signals -- these imply the user
             // needs current real-world data, not a canned opinion.
@@ -743,6 +751,14 @@ public static class IntentFeatureExtractor
         var hasTopic =
             lower.Contains("news", StringComparison.Ordinal) ||
             lower.Contains("headline", StringComparison.Ordinal) ||
+            lower.Contains("war", StringComparison.Ordinal) ||
+            lower.Contains("conflict", StringComparison.Ordinal) ||
+            lower.Contains("ceasefire", StringComparison.Ordinal) ||
+            lower.Contains("missile", StringComparison.Ordinal) ||
+            lower.Contains("airstrike", StringComparison.Ordinal) ||
+            lower.Contains("invasion", StringComparison.Ordinal) ||
+            lower.Contains("protest", StringComparison.Ordinal) ||
+            lower.Contains("election", StringComparison.Ordinal) ||
             lower.Contains("price", StringComparison.Ordinal) ||
             lower.Contains("stock", StringComparison.Ordinal) ||
             lower.Contains("market", StringComparison.Ordinal) ||
@@ -765,6 +781,15 @@ public static class IntentFeatureExtractor
             lower.Contains("movie", StringComparison.Ordinal) ||
             lower.Contains("film", StringComparison.Ordinal) ||
             lower.Contains("live action", StringComparison.Ordinal) ||
+            lower.Contains("message", StringComparison.Ordinal) ||
+            lower.Contains("speech", StringComparison.Ordinal) ||
+            lower.Contains("statement", StringComparison.Ordinal) ||
+            lower.Contains("putin", StringComparison.Ordinal) ||
+            lower.Contains("zelensky", StringComparison.Ordinal) ||
+            lower.Contains("netanyahu", StringComparison.Ordinal) ||
+            lower.Contains("khamenei", StringComparison.Ordinal) ||
+            lower.Contains("trump", StringComparison.Ordinal) ||
+            lower.Contains("biden", StringComparison.Ordinal) ||
             lower.Contains("review", StringComparison.Ordinal) ||
             lower.Contains("rating", StringComparison.Ordinal) ||
             lower.Contains("supplement", StringComparison.Ordinal) ||
@@ -913,11 +938,39 @@ public static class IntentFeatureExtractor
         ];
 
         var hasNewsSignal = ContainsAny(lower, newsSignals);
-        if (!hasNewsSignal)
-            return false;
+
+        ReadOnlySpan<string> currentEventSignals =
+        [
+            "war",
+            "conflict",
+            "ceasefire",
+            "missile",
+            "airstrike",
+            "invasion",
+            "protest",
+            "election",
+            "message",
+            "speech",
+            "statement",
+            "putin",
+            "zelensky",
+            "netanyahu",
+            "khamenei",
+            "trump",
+            "biden",
+            "earthquake",
+            "hurricane",
+            "wildfire",
+            "summit",
+            "trial",
+            "crisis"
+        ];
 
         if (ContainsAny(lower, listSignals) || ContainsAny(lower, timeSignals))
-            return true;
+            return hasNewsSignal || ContainsAny(lower, currentEventSignals);
+
+        if (!hasNewsSignal)
+            return false;
 
         return lower.Contains("news on ", StringComparison.Ordinal) ||
                lower.Contains("news about ", StringComparison.Ordinal) ||
@@ -1572,6 +1625,9 @@ public static class IntentFeatureExtractor
 
         return lower.Contains("updates", StringComparison.Ordinal) ||
                lower.Contains("update", StringComparison.Ordinal) ||
+               lower.Contains("details", StringComparison.Ordinal) ||
+               lower.Contains("detail", StringComparison.Ordinal) ||
+               lower.Contains("latest details", StringComparison.Ordinal) ||
                lower.Contains("developments", StringComparison.Ordinal) ||
                lower.Contains("changes", StringComparison.Ordinal) ||
                lower.Contains("releases", StringComparison.Ordinal) ||

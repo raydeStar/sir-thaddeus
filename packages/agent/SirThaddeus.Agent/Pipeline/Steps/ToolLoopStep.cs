@@ -317,7 +317,7 @@ public sealed class ToolLoopStep : ITurnStep
         // because the cap message is already final and not model-generated.
         var capResponse = new AgentResponse
         {
-            Text = "(Tool-call loop hit its round-trip cap without a final answer. Try rephrasing or simplifying the request.)",
+            Text = "I got stuck while checking this and couldn't finish the answer cleanly. Please try again; for current information, I'll verify it online before answering.",
             Success = true,
             ToolCallsMade = toolCallsMade,
             LlmRoundTrips = _maxRoundTrips,

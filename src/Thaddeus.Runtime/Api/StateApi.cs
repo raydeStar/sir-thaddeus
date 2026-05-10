@@ -101,6 +101,38 @@ public static class StateApi
         })
             .WithName("StopAll");
 
+        app.MapPost("/api/runtime/open-external-url", IResult (OpenExternalUrlRequest? req) =>
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Url))
+            {
+                return Results.BadRequest(new { error = "Missing URL." });
+            }
+
+            if (!Uri.TryCreate(req.Url, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                return Results.BadRequest(new { error = "Only http and https URLs can be opened externally." });
+            }
+
+            try
+            {
+                using var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = uri.AbsoluteUri,
+                    UseShellExecute = true,
+                });
+                return Results.Json(new { status = "opened" });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(
+                    title: "Unable to open URL",
+                    detail: ex.Message,
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+        })
+            .WithName("OpenExternalUrl");
+
         // Phase 1 debug endpoint — exposed in test mode only. Lets Playwright force
         // the state machine through transitions without hooking real STT/LLM.
         app.MapPost("/api/_debug/state", async (TriggerRequest req, RuntimeStateMachine machine, Hosting.RuntimeOptions opts) =>
@@ -148,6 +180,10 @@ public static class StateApi
     /// <param name="Trigger">Trigger name (case-insensitive, matches <see cref="StateTrigger"/>).</param>
     /// <param name="VoiceMode">Whether to evaluate transitions in voice mode.</param>
     public sealed record TriggerRequest(string Trigger, bool VoiceMode = false);
+
+    /// <summary>Request body for opening a web URL in the user's default browser.</summary>
+    /// <param name="Url">Absolute http/https URL to open.</param>
+    public sealed record OpenExternalUrlRequest(string Url);
 }
 
 /// <summary>Source-generated JSON context for <see cref="RuntimeStateEvent"/>.</summary>
@@ -157,6 +193,7 @@ public static class StateApi
     UseStringEnumConverter = true)]
 [JsonSerializable(typeof(RuntimeStateEvent))]
 [JsonSerializable(typeof(RuntimeStopAllResult))]
+[JsonSerializable(typeof(StateApi.OpenExternalUrlRequest))]
 public partial class StateSnapshotJsonContext : JsonSerializerContext
 {
 }

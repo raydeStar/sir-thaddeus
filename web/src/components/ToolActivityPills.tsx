@@ -39,7 +39,7 @@ const runningLabels: Record<string, string> = {
   Web: 'Searching the web',
   MemoryRead: 'Looking up memory',
   MemoryWrite: 'Updating memory',
-  Safe: 'Running a local tool',
+  Safe: 'Checking local context',
 };
 
 const doneLabels: Record<string, string> = {
@@ -49,7 +49,7 @@ const doneLabels: Record<string, string> = {
   Web: 'Searched the web',
   MemoryRead: 'Read memory',
   MemoryWrite: 'Updated memory',
-  Safe: 'Ran local tool',
+  Safe: 'Checked local context',
 };
 
 /**

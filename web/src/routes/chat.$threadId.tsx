@@ -56,7 +56,35 @@ function ChatThreadRoute() {
   }, []);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    const container = scrollRef.current;
+    if (!container) return;
+
+    // Smart auto-scroll: prefer to bottom-pin so the newest text sits at
+    // the bottom of the viewport, but if the latest assistant message
+    // has grown tall enough that bottom-pinning would push its top
+    // off-screen, anchor the top of the message at the top of the
+    // viewport instead. The reader stays oriented at the *beginning*
+    // of long responses rather than chasing the tail.
+    const target = locateLatestMessageEl(container);
+    if (!target) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      return;
+    }
+
+    const TOP_PADDING = 24;
+    const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const targetTopInScrollCoords =
+      targetRect.top - containerRect.top + container.scrollTop;
+    const visibleTopAfterBottomPin = targetTopInScrollCoords - maxScroll;
+
+    const nextScrollTop =
+      visibleTopAfterBottomPin >= TOP_PADDING
+        ? maxScroll
+        : Math.max(0, Math.min(targetTopInScrollCoords - TOP_PADDING, maxScroll));
+
+    container.scrollTo({ top: nextScrollTop, behavior: 'smooth' });
   }, [thread?.messages.length, activeTurn?.text]);
 
   useEffect(() => () => {
@@ -655,6 +683,21 @@ function MessageRow({
       ) : null}
     </div>
   );
+}
+
+function locateLatestMessageEl(container: HTMLElement): HTMLElement | null {
+  // While the assistant is streaming, the streaming row is what the reader
+  // is following — anchor scroll math to it so we react to its growing
+  // height in real time.
+  const streaming = container.querySelector<HTMLElement>('[data-streaming="true"]');
+  if (streaming) return streaming;
+
+  // Otherwise pin to the latest assistant message. Fall through to the
+  // very last message of any role if there are no assistant rows yet.
+  const assistantRows = container.querySelectorAll<HTMLElement>('[data-role="assistant"]');
+  if (assistantRows.length > 0) return assistantRows[assistantRows.length - 1] ?? null;
+  const anyRows = container.querySelectorAll<HTMLElement>('[data-role]');
+  return anyRows.length > 0 ? anyRows[anyRows.length - 1] ?? null : null;
 }
 
 async function copyToClipboard(text: string): Promise<void> {

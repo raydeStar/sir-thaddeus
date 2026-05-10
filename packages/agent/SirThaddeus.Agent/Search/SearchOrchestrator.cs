@@ -1525,8 +1525,8 @@ public sealed partial class SearchOrchestrator
                 url = s.Url,
                 domain = s.Domain,
                 excerpt = s.Snippet,
-                favicon = "",
-                thumbnail = "",
+                favicon = s.Favicon,
+                thumbnail = s.Thumbnail,
                 publishedAt = s.PublishedAt?.ToString("o")
             }),
             new JsonSerializerOptions { WriteIndented = false });
@@ -3007,6 +3007,8 @@ public sealed partial class SearchOrchestrator
                     : item.TryGetProperty("snippet", out var sn)
                         ? sn.GetString()
                         : "";
+                var favicon = item.TryGetProperty("favicon", out var fav) ? fav.GetString() : "";
+                var thumbnail = item.TryGetProperty("thumbnail", out var thumb) ? thumb.GetString() : "";
                 DateTimeOffset? publishedAt = null;
                 if (item.TryGetProperty("publishedAt", out var p) &&
                     p.ValueKind == JsonValueKind.String &&
@@ -3025,6 +3027,8 @@ public sealed partial class SearchOrchestrator
                     Title    = title ?? "",
                     Domain   = domain ?? "",
                     Snippet  = snippet ?? "",
+                    Favicon  = favicon ?? "",
+                    Thumbnail = thumbnail ?? "",
                     PublishedAt = publishedAt
                 });
             }

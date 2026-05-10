@@ -238,7 +238,8 @@ public class ToolLoopStepTests
     public async Task Hits_round_trip_cap_with_deterministic_message()
     {
         // LLM keeps asking for tools forever. After MaxRoundTrips we bail
-        // with a fixed message so the UI doesn't spin.
+        // with a plain-language recovery message so the UI doesn't spin
+        // or leak internal loop terminology to the user.
         var llm = new FakeLlm(
             LlmReply.Tool("web_search", "{\"q\":\"a\"}"),
             LlmReply.Tool("web_search", "{\"q\":\"b\"}"),
@@ -250,7 +251,9 @@ public class ToolLoopStepTests
         var result = await step.ExecuteAsync(NewContext(), CancellationToken.None);
 
         var term = Assert.IsType<StepResult.Terminate>(result);
-        Assert.Contains("round-trip cap", term.Response.Text);
+        Assert.Contains("got stuck", term.Response.Text);
+        Assert.DoesNotContain("round-trip cap", term.Response.Text);
+        Assert.DoesNotContain("Tool-call loop", term.Response.Text);
         Assert.Equal(2, term.Response.LlmRoundTrips);
     }
 

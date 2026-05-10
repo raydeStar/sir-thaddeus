@@ -40,6 +40,10 @@ public static class ToolGroupClassifier
         // Safe group: pure local reads with no side effects.
         if (n.StartsWith("time_") || n.StartsWith("timezone_") ||
             n.StartsWith("meta_") || n == "tools_list" || n == "ping" ||
+            n == "tool_ping" || n == "tool_list_capabilities" ||
+            n == "capabilities.describe" || n == "capabilities_describe" ||
+            n == "policy.get_state" || n == "policy_get_state" ||
+            n == "health.check" || n == "health_check" ||
             n.StartsWith("propose_"))
             return ToolGroup.Safe;
 

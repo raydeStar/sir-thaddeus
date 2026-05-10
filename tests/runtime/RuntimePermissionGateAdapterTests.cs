@@ -40,6 +40,16 @@ public class RuntimePermissionGateAdapterTests
         Assert.Equal(AgentAuditMode.SessionGrant, result.AuditMode);
     }
 
+    [Theory]
+    [InlineData("tool_list_capabilities")]
+    [InlineData("capabilities.describe")]
+    [InlineData("policy.get_state")]
+    [InlineData("health.check")]
+    public void ToolGroupClassifier_MetaTools_AreSafe(string toolName)
+    {
+        Assert.Equal(ToolGroup.Safe, ToolGroupClassifier.Classify(toolName));
+    }
+
     [Fact]
     public async Task CheckAsync_returns_Deny_when_policy_is_off()
     {

@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { isExternalUrl, openExternalUrl } from '../lib/externalLinks';
 
 interface MarkdownProps {
   children: string;
@@ -20,12 +21,22 @@ export const Markdown = memo(function Markdown({ children }: MarkdownProps) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          // External links get target+rel so accidental clicks don't replace the app.
-          a: ({ node: _node, ...props }) => (
+          // External links go through the runtime so Photino hands them to the OS.
+          a: ({ node: _node, href, ...props }) => (
             <a
               {...props}
-              target="_blank"
+              href={href}
               rel="noopener noreferrer"
+              onClick={(event) => {
+                if (!isExternalUrl(href)) return;
+                event.preventDefault();
+                void openExternalUrl(href);
+              }}
+              onAuxClick={(event) => {
+                if (!isExternalUrl(href)) return;
+                event.preventDefault();
+                void openExternalUrl(href);
+              }}
             />
           ),
         }}

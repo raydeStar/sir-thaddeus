@@ -94,7 +94,12 @@ test.describe('chat smoke', () => {
     await expect(cards).toHaveCount(2);
     await expect(page.getByRole('link', { name: /Shipping insurers reassess Strait of Hormuz risk/i })).toBeVisible();
     await expect(page.getByTestId('chat-source-cards')).toContainText('example.com');
-    await expect(page.getByTestId('chat-source-cards')).toContainText('Markets are reacting to new transit risk assessments');
+    // The editorial source cards lead with image + title + domain + date.
+    // Featured cards may also show a short excerpt.
+    await expect(page.getByTestId('chat-source-cards')).toContainText('example.org');
+    await expect(page.getByTestId('chat-source-cards')).toContainText(
+      'Regional navies increase monitoring near key shipping lanes',
+    );
     await expect(page.getByTestId('chat-latest-response-actions')).toBeVisible();
     await expect(page.getByTestId('chat-speak-response')).toBeVisible();
     await expect(page.getByTestId('chat-copy-latest-response')).toBeVisible();

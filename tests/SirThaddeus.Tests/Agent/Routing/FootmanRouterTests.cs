@@ -697,6 +697,15 @@ public class FootmanDeterministicRouteTests
     }
 
     [Fact]
+    public void Latest_current_event_details_route_to_SearchNews()
+    {
+        var features = RoutingFeatures.Extract("bring me up some latest details on the iran war");
+        var d = FastLlmFootmanRouter.TryDeterministicRoute(features, "req");
+        Assert.NotNull(d);
+        Assert.Equal(AgentState.SearchNews, d!.NextState);
+    }
+
+    [Fact]
     public void Local_business_alone_routes_to_SearchDeepDive()
     {
         var features = new RoutingFeatures { LooksLikeLocalBusiness = true };
