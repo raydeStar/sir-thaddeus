@@ -90,7 +90,7 @@ Builds in Debug, runs all tests, and writes a TRX report to
 ## Run a focused subset
 
 ```powershell
-.\dev\test.ps1 -Filter "FullyQualifiedName~SirThaddeus.Tests.AgentOrchestratorTests"
+.\dev\test.ps1 -Filter "FullyQualifiedName~PipelineBacked"
 ```
 
 Any valid `dotnet test --filter` expression works here.

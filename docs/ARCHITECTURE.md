@@ -19,7 +19,7 @@ This overview reflects the current code in [src/Thaddeus.Runtime/](../src/Thadde
 flowchart LR
   User[User]
   Shell[Thaddeus.Shell]
-  Browser[Workspace UI<br/>React + TanStack Router]
+  Browser[Workspace UI<br/>React + local router shim]
   Runtime[Thaddeus.Runtime<br/>Loopback REST + WS host]
   Assistant[AssistantRouter<br/>LmStudioAssistant]
   Llm[OpenAI-compatible LLM<br/>LM Studio / custom endpoint]

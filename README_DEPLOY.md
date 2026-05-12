@@ -44,9 +44,9 @@ Outputs:
 
 - publish directories: `.\artifacts\publish\<project>\win-x64\`
 - staged package directory: `.\artifacts\stage\win-x64\`
-- zipped package: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0.zip`
-- zip checksum: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0.zip.sha256.txt`
-- package contents checksum manifest: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-contents.sha256.txt`
+- zipped package: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-full.zip`
+- zip checksum: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-full.zip.sha256.txt`
+- package contents checksum manifest: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-full-contents.sha256.txt`
 
 ### Voice backend assets
 
@@ -132,14 +132,16 @@ git push origin v0.1.0
 
 Expected release assets:
 
-- `sir-thaddeus-win-x64-v0.1.0.zip`
-- `sir-thaddeus-win-x64-v0.1.0.zip.sha256.txt`
+- `sir-thaddeus-win-x64-v0.1.0-full.zip`
+- `sir-thaddeus-win-x64-v0.1.0-full.zip.sha256.txt`
+- `sir-thaddeus-win-x64-v0.1.0-lite.zip`
+- `sir-thaddeus-win-x64-v0.1.0-lite.zip.sha256.txt`
 
-Every tagged release now builds three packages in parallel:
+Every tagged release now builds full and lite packages for each platform:
 
-- `sir-thaddeus-win-x64-<ver>.zip` — Windows (hybrid runtime, voice, MCP, SearXNG)
-- `sir-thaddeus-linux-x64-<ver>.tar.gz` — Linux (hybrid runtime, MCP, optional VoiceHost)
-- `sir-thaddeus-osx-arm64-<ver>.tar.gz` — macOS Apple Silicon (same; double-click `launch.command`)
+- `sir-thaddeus-win-x64-<ver>-full.zip` and `sir-thaddeus-win-x64-<ver>-lite.zip`
+- `sir-thaddeus-linux-x64-<ver>-full.tar.gz` and `sir-thaddeus-linux-x64-<ver>-lite.tar.gz`
+- `sir-thaddeus-osx-arm64-<ver>-full.tar.gz` and `sir-thaddeus-osx-arm64-<ver>-lite.tar.gz`
 
 Rolling releases now expose the same split by platform:
 

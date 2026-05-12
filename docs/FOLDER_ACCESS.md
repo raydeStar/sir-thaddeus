@@ -50,9 +50,8 @@ An earlier design proposed a parallel **KnowledgeStore** feature for
 "assistant-writable markdown files in an arbitrary folder you pick." It
 was built but never user-facing — `enabled: false` by default, no UI,
 config in a separate `settings.json` the web app didn't manage. The
-audit in [`DESIGN_NOTES_2026-05.md`](DESIGN_NOTES_2026-05.md) showed it
-covered the same use cases the wiki already did, so it was deleted
-rather than unified.
+cleanup review concluded it covered the same use cases the wiki already
+did, so it was deleted rather than unified.
 
 The retirement removed:
 

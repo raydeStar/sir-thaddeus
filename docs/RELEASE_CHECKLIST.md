@@ -14,7 +14,7 @@ Use this checklist before declaring Sir Thaddeus v1 ready. Mark skipped checks w
 - [ ] Run `dotnet build SirThaddeus.sln -c Release --no-restore`.
 - [ ] Run `Push-Location web; npm run typecheck; npm run lint; Pop-Location`.
 - [ ] Run `pwsh dev/test.ps1 -Configuration Release -SkipScreenObserveHarness`.
-      Expected today: **2,457 passed, 0 failed, 0 skipped**.
+      Expected: **0 failed**; the exact pass count changes as tests are added or retired.
 - [ ] *(optional)* If `artifacts/harness-suites/screen-observe/` is populated, drop `-SkipScreenObserveHarness` and re-run. The suite fixtures are not checked in — see [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 - [ ] *(optional)* `pwsh dev/preflight.ps1` for the heavier bootstrap path.
 
