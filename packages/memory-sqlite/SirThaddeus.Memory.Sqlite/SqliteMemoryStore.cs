@@ -442,8 +442,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             ? """
               SELECT memory_id, profile_id, subject, predicate, object,
                      confidence, weight, sensitivity, source_turn_id, source_hash,
-                     dedupe_key, origin, created_at, updated_at, source_ref,
-                     embedding, embedding_model, embedding_dims
+                     dedupe_key, origin, created_at, updated_at, source_ref
               FROM   memory_facts
               WHERE  is_deleted = 0
                 AND  (subject LIKE @f OR predicate LIKE @f OR object LIKE @f)
@@ -453,8 +452,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             : """
               SELECT memory_id, profile_id, subject, predicate, object,
                      confidence, weight, sensitivity, source_turn_id, source_hash,
-                     dedupe_key, origin, created_at, updated_at, source_ref,
-                     embedding, embedding_model, embedding_dims
+                     dedupe_key, origin, created_at, updated_at, source_ref
               FROM   memory_facts
               WHERE  is_deleted = 0
               ORDER  BY updated_at DESC
@@ -469,7 +467,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         var items = new List<MemoryFact>();
         using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
-            items.Add(ReadFact(reader));
+            items.Add(ReadFactBrowse(reader));
 
         return (items, total);
     }
@@ -502,8 +500,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             ? """
               SELECT event_id, profile_id, type, title, summary, when_iso,
                      confidence, weight, sensitivity, source_turn_id, source_hash,
-                                         dedupe_key, origin, created_at, updated_at, source_ref,
-                                         embedding, embedding_model, embedding_dims
+                     dedupe_key, origin, created_at, updated_at, source_ref
               FROM   memory_events
               WHERE  is_deleted = 0
                 AND  (type LIKE @f OR title LIKE @f OR COALESCE(summary,'') LIKE @f)
@@ -513,8 +510,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
             : """
               SELECT event_id, profile_id, type, title, summary, when_iso,
                      confidence, weight, sensitivity, source_turn_id, source_hash,
-                                         dedupe_key, origin, created_at, updated_at, source_ref,
-                                         embedding, embedding_model, embedding_dims
+                     dedupe_key, origin, created_at, updated_at, source_ref
               FROM   memory_events
               WHERE  is_deleted = 0
               ORDER  BY when_iso DESC
@@ -529,7 +525,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         var items = new List<MemoryEvent>();
         using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
-            items.Add(ReadEvent(reader));
+            items.Add(ReadEventBrowse(reader));
 
         return (items, total);
     }
@@ -854,7 +850,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
               SELECT nugget_id, text, tags, weight, pin_level,
                      sensitivity, source_turn_id, source_hash, dedupe_key, origin,
                      use_count, last_used_at, created_at, updated_at,
-                     embedding, embedding_model, embedding_dims, chunk_citation
+                     chunk_citation
               FROM   memory_nuggets
               WHERE  is_deleted = 0
                 AND  (text LIKE @f OR COALESCE(tags,'') LIKE @f)
@@ -865,7 +861,7 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
               SELECT nugget_id, text, tags, weight, pin_level,
                      sensitivity, source_turn_id, source_hash, dedupe_key, origin,
                      use_count, last_used_at, created_at, updated_at,
-                     embedding, embedding_model, embedding_dims, chunk_citation
+                     chunk_citation
               FROM   memory_nuggets
               WHERE  is_deleted = 0
               ORDER  BY created_at DESC
@@ -879,9 +875,80 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         var items = new List<MemoryNugget>();
         using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
-            items.Add(ReadNugget(reader));
+            items.Add(ReadNuggetBrowse(reader));
 
         return (items, total);
+    }
+
+    /// <inheritdoc />
+    public async Task<MemoryNugget?> FindNuggetByIdAsync(
+        string nuggetId, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT nugget_id, text, tags, weight, pin_level,
+                   sensitivity, source_turn_id, source_hash, dedupe_key, origin,
+                   use_count, last_used_at, created_at, updated_at,
+                   chunk_citation
+            FROM   memory_nuggets
+            WHERE  is_deleted = 0 AND nugget_id = @id
+            LIMIT  1
+            """;
+        cmd.Parameters.AddWithValue("@id", nuggetId);
+
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadNuggetBrowse(reader) : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<MemoryNugget>> ListPinnedNuggetsAsync(
+        int maxResults, CancellationToken ct = default)
+    {
+        if (maxResults < 1) return Array.Empty<MemoryNugget>();
+
+        var conn = await GetConnectionAsync(ct);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT nugget_id, text, tags, weight, pin_level,
+                   sensitivity, source_turn_id, source_hash, dedupe_key, origin,
+                   use_count, last_used_at, created_at, updated_at,
+                   chunk_citation
+            FROM   memory_nuggets
+            WHERE  is_deleted = 0 AND pin_level >= 1
+            ORDER  BY pin_level DESC, use_count DESC, updated_at DESC
+            LIMIT  @take
+            """;
+        cmd.Parameters.AddWithValue("@take", maxResults);
+
+        var items = new List<MemoryNugget>();
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            items.Add(ReadNuggetBrowse(reader));
+        return items;
+    }
+
+    /// <inheritdoc />
+    public async Task<MemoryNugget?> SetNuggetPinLevelAsync(
+        string nuggetId, int pinLevel, CancellationToken ct = default)
+    {
+        var normalizedPin = Math.Clamp(pinLevel, 0, 2);
+        var conn = await GetConnectionAsync(ct);
+        using var update = conn.CreateCommand();
+        update.CommandText = """
+            UPDATE memory_nuggets
+            SET    pin_level = @pin,
+                   updated_at = @updated
+            WHERE  is_deleted = 0 AND nugget_id = @id
+            """;
+        update.Parameters.AddWithValue("@pin", normalizedPin);
+        update.Parameters.AddWithValue("@updated", DateTimeOffset.UtcNow.ToString("o"));
+        update.Parameters.AddWithValue("@id", nuggetId);
+
+        var changed = await update.ExecuteNonQueryAsync(ct);
+        return changed == 0
+            ? null
+            : await FindNuggetByIdAsync(nuggetId, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -991,6 +1058,26 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         EmbeddingDims = r.IsDBNull(17) ? null : r.GetInt32(17)
     };
 
+    private static MemoryFact ReadFactBrowse(SqliteDataReader r) => new()
+    {
+        MemoryId = r.GetString(0),
+        ProfileId = r.IsDBNull(1) ? null : r.GetString(1),
+        Subject = r.GetString(2),
+        Predicate = r.GetString(3),
+        Object = r.GetString(4),
+        Confidence = r.GetDouble(5),
+        Weight = r.GetDouble(6),
+        Sensitivity = ParseSensitivity(r.GetString(7)),
+        SourceTurnId = r.IsDBNull(8) ? null : r.GetString(8),
+        SourceHash = r.IsDBNull(9) ? null : r.GetString(9),
+        DedupeKey = r.IsDBNull(10) ? null : r.GetString(10),
+        Origin = r.IsDBNull(11) ? null : r.GetString(11),
+        CreatedAt = ParseTimestamp(r.GetString(12)),
+        UpdatedAt = ParseTimestamp(r.GetString(13)),
+        SourceRef = r.IsDBNull(14) ? null : r.GetString(14),
+        Embedding = null
+    };
+
     /// <summary>
     /// Reads a <see cref="MemoryEvent"/> from the standard 16-column
     /// SELECT for memory_events.
@@ -1016,6 +1103,27 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         Embedding = r.IsDBNull(16) ? null : ParseEmbedding((byte[])r[16]),
         EmbeddingModel = r.IsDBNull(17) ? null : r.GetString(17),
         EmbeddingDims = r.IsDBNull(18) ? null : r.GetInt32(18)
+    };
+
+    private static MemoryEvent ReadEventBrowse(SqliteDataReader r) => new()
+    {
+        EventId = r.GetString(0),
+        ProfileId = r.IsDBNull(1) ? null : r.GetString(1),
+        Type = r.GetString(2),
+        Title = r.GetString(3),
+        Summary = r.IsDBNull(4) ? null : r.GetString(4),
+        WhenIso = r.IsDBNull(5) ? null : ParseTimestamp(r.GetString(5)),
+        Confidence = r.GetDouble(6),
+        Weight = r.GetDouble(7),
+        Sensitivity = ParseSensitivity(r.GetString(8)),
+        SourceTurnId = r.IsDBNull(9) ? null : r.GetString(9),
+        SourceHash = r.IsDBNull(10) ? null : r.GetString(10),
+        DedupeKey = r.IsDBNull(11) ? null : r.GetString(11),
+        Origin = r.IsDBNull(12) ? null : r.GetString(12),
+        CreatedAt = ParseTimestamp(r.GetString(13)),
+        UpdatedAt = ParseTimestamp(r.GetString(14)),
+        SourceRef = r.IsDBNull(15) ? null : r.GetString(15),
+        Embedding = null
     };
 
     /// <summary>
@@ -1065,6 +1173,26 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         EmbeddingModel = r.IsDBNull(15) ? null : r.GetString(15),
         EmbeddingDims = r.IsDBNull(16) ? null : r.GetInt32(16),
         ChunkCitation = r.IsDBNull(17) ? null : r.GetString(17)
+    };
+
+    private static MemoryNugget ReadNuggetBrowse(SqliteDataReader r) => new()
+    {
+        NuggetId = r.GetString(0),
+        Text = r.GetString(1),
+        Tags = r.IsDBNull(2) ? null : r.GetString(2),
+        Weight = r.GetDouble(3),
+        PinLevel = r.GetInt32(4),
+        Sensitivity = r.GetString(5),
+        SourceTurnId = r.IsDBNull(6) ? null : r.GetString(6),
+        SourceHash = r.IsDBNull(7) ? null : r.GetString(7),
+        DedupeKey = r.IsDBNull(8) ? null : r.GetString(8),
+        Origin = r.IsDBNull(9) ? null : r.GetString(9),
+        UseCount = r.GetInt32(10),
+        LastUsedAt = r.IsDBNull(11) ? null : ParseTimestamp(r.GetString(11)),
+        CreatedAt = ParseTimestamp(r.GetString(12)),
+        UpdatedAt = ParseTimestamp(r.GetString(13)),
+        Embedding = null,
+        ChunkCitation = r.IsDBNull(14) ? null : r.GetString(14)
     };
 
     /// <summary>

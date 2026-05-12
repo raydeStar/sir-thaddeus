@@ -785,7 +785,7 @@ public class ToolLoopExecutorTests
                             Function = new FunctionCallDetails
                             {
                                 Name = "web_search",
-                                Arguments = "{\"query\":\"recent .NET Aspire updates\"}"
+                                Arguments = "{\"query\":\"recent Orion Mesh updates\"}"
                             }
                         }
                     ]
@@ -798,7 +798,7 @@ public class ToolLoopExecutorTests
                 3 => new LlmResponse
                 {
                     IsComplete = true,
-                    Content = "Overview: .NET Aspire keeps improving the app-model and dashboard story. Differences: some sources emphasize orchestration and deployment while others focus on developer experience. Practical takeaway: for a startup team, adopt Aspire when you want opinionated local orchestration without jumping straight to a full platform rewrite."
+                    Content = "Overview: Orion Mesh keeps improving the app-model and dashboard story. Differences: some sources emphasize orchestration and deployment while others focus on developer experience. Practical takeaway: for a startup team, adopt Orion Mesh when you want opinionated local orchestration without jumping straight to a full platform rewrite."
                 },
                 _ => throw new InvalidOperationException("Unexpected extra LLM call")
             };
@@ -814,7 +814,7 @@ public class ToolLoopExecutorTests
             History =
             [
                 ChatMessage.System("test"),
-                ChatMessage.User("Search for recent updates and developments in .NET Aspire from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.")
+                ChatMessage.User("Search for recent updates and developments in Orion Mesh from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.")
             ],
             Tools = [MakeToolDefinition("web_search")],
             ToolCallsMade = [],

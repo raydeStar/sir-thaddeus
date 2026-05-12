@@ -124,9 +124,43 @@ public static class Program
                     sp.GetRequiredService<ILogger<JsonFileThreadStore>>());
             });
             builder.Services.AddSingleton<ChatTurnPublisher>();
+            builder.Services.AddSingleton(sp =>
+            {
+                var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
+                var turnsDir = builder.Configuration.GetValue<string>("Chat:TurnsDirectory")
+                    ?? Path.Combine(lockDir, "turns");
+                return new TurnTraceWriter(
+                    sp.GetRequiredService<IEventBus>(),
+                    sp.GetRequiredService<ILogger<TurnTraceWriter>>(),
+                    turnsDir);
+            });
             builder.Services.AddSingleton<StubAssistant>();
             builder.Services.AddSingleton<IAssistant, AssistantRouter>();
             builder.Services.AddSingleton<IActivityLog>(_ => new InMemoryActivityLog(capacity: 500));
+            // The SQLite-backed semantic memory store. Previously this was
+            // instantiated ad-hoc by the MCP server and the headless host —
+            // the desktop runtime had no DI registration, so /api/memory
+            // had nothing to talk to. Wire it once here; reuse the same env
+            // var the MCP child reads so all three surfaces hit the same DB.
+            // Manual-trigger reflection pass over the semantic memory.
+            // Dedupes facts whose normalized triple matches. No automatic
+            // scheduling in v1 — invoked from the audit UI button.
+            builder.Services.AddSingleton<Thaddeus.Runtime.Memory.MemoryReflectionService>();
+            builder.Services.AddSingleton<SirThaddeus.Memory.IMemoryStore>(sp =>
+            {
+                var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
+                var dbPath = Environment.GetEnvironmentVariable("ST_MEMORY_DB_PATH");
+                if (string.IsNullOrWhiteSpace(dbPath))
+                    dbPath = Path.Combine(lockDir, "memory.sqlite");
+                var store = new SirThaddeus.Memory.Sqlite.SqliteMemoryStore(dbPath);
+                // Block briefly so the first API request doesn't race the
+                // schema-init and 500. EnsureSchemaAsync is idempotent and
+                // cheap (a handful of CREATE-IF-NOT-EXISTS statements);
+                // running it synchronously on the DI factory keeps the
+                // contract simple — every store handed out is ready to use.
+                store.EnsureSchemaAsync().GetAwaiter().GetResult();
+                return store;
+            });
             builder.Services.AddSingleton<ISettingsStore>(sp =>
             {
                 var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
@@ -204,9 +238,18 @@ public static class Program
             // Gate that wraps every MCP call with the user's permission policy.
             builder.Services.AddSingleton<ToolPermissionGate>();
 
+            // One-shot, idempotent migrator that copies any legacy memos
+            // (JSON files in the legacy memo directory) into the user's wiki. Runs
+            // once at startup, writes a sentinel, and never touches the
+            // source files. See MemosToWikiMigrator for the safety
+            // contract. The sentinel keeps it harmless for installs that
+            // have already migrated.
+            builder.Services.AddHostedService<Thaddeus.Runtime.Memory.MemosToWikiMigrator>();
+
             builder.Services.AddHostedService<ActivityEventBridge>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<TurnTraceWriter>());
             builder.Services.AddHostedService<IpcServer>();
             builder.Services.AddHostedService<ParentProcessWatcher>();
 
@@ -276,8 +319,11 @@ public static class Program
             app.MapRuntimeApi();
             app.MapChatApi();
             app.MapActivityApi();
+            app.MapTurnsApi();
+            app.MapRuntimeLogsApi();
+            app.MapFilesApi();
             app.MapSettingsApi();
-            app.MapMemoryApi();
+            app.MapMemoryAuditApi();
             app.MapRoutinesApi();
             app.MapWikiApi();
             app.MapAudioApi();

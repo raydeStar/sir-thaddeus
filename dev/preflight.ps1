@@ -13,8 +13,7 @@
 # ═══════════════════════════════════════════════════════════════
 
 param(
-    [switch]$SkipBootstrap,
-    [switch]$IncludeKnowledgeStoreHarness
+    [switch]$SkipBootstrap
 )
 
 Set-StrictMode -Version Latest
@@ -37,5 +36,5 @@ if (-not $SkipBootstrap) {
 }
 
 Write-Section "Release Test Suite"
-& "$PSScriptRoot\test_all.ps1" -IncludeKnowledgeStoreHarness:$IncludeKnowledgeStoreHarness
+& "$PSScriptRoot\test_all.ps1"
 exit $LASTEXITCODE

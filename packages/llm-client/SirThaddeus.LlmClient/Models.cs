@@ -204,12 +204,12 @@ public sealed record LlmClientOptions
     /// <summary>
     /// Model identifier to use.
     /// </summary>
-    public string Model { get; init; } = "local-model";
+    public string Model { get; init; } = "auto";
 
     /// <summary>
     /// Maximum tokens in the response.
     /// </summary>
-    public int MaxTokens { get; init; } = 2048;
+    public int MaxTokens { get; init; } = 4096;
 
     /// <summary>
     /// Approximate context window size used for context-fill percentage.

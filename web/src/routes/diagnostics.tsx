@@ -105,6 +105,9 @@ function DiagnosticsRoute() {
           {data.logsRoot ? (
             <Row label="Logs" value={data.logsRoot} testId="diagnostics-logs" />
           ) : null}
+          {data.turnsRoot ? (
+            <Row label="Turn traces" value={data.turnsRoot} testId="diagnostics-turns" />
+          ) : null}
         </dl>
       )}
     </PageScaffold>

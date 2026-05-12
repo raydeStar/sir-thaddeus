@@ -23,6 +23,18 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('@tiptap')) return 'tiptap-vendor';
+          if (id.includes('prosemirror')) return 'prosemirror-vendor';
+          if (id.includes('marked') || id.includes('turndown') || id.includes('remark')) return 'markdown-vendor';
+          if (id.includes('lucide-react')) return 'icons-vendor';
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     port: 5173,

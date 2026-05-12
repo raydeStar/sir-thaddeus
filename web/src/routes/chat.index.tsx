@@ -22,7 +22,11 @@ function ChatListRoute() {
 
   const onNew = async () => {
     const t = await newThread();
-    void navigate({ to: '/chat/$threadId', params: { threadId: t.id } });
+    void navigate({
+      to: '/chat/$threadId',
+      params: { threadId: t.id },
+      search: { focusMessageId: undefined },
+    });
   };
 
   return (
@@ -89,6 +93,7 @@ function ChatListRoute() {
               <Link
                 to="/chat/$threadId"
                 params={{ threadId: t.id }}
+                search={{ focusMessageId: undefined }}
                 className="block py-4 transition-colors hover:text-accent"
                 data-testid={`chat-thread-${t.id}`}
               >

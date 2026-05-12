@@ -47,9 +47,6 @@ public sealed partial record AppSettings
     [JsonPropertyName("dialogue")]
     public DialogueSettings Dialogue { get; init; } = new();
 
-    [JsonPropertyName("knowledgeStore")]
-    public KnowledgeStoreSettings KnowledgeStore { get; init; } = new();
-
     [JsonPropertyName("location")]
     public LocationSettings Location { get; init; } = new();
 
@@ -1141,73 +1138,6 @@ public sealed record LocationSettings
     }
 }
 
-/// <summary>
-/// Settings for the local knowledge store (wiki) system.
-/// Roots are user-approved folders that Sir Thaddeus can access for
-/// durable memory storage.
-/// </summary>
-public sealed record KnowledgeStoreSettings
-{
-    /// <summary>
-    /// Whether the knowledge store feature is enabled.
-    /// </summary>
-    [JsonPropertyName("enabled")]
-    public bool Enabled { get; init; } = false;
-
-    /// <summary>
-    /// Registered workspace roots (knowledge + reference).
-    /// </summary>
-    [JsonPropertyName("roots")]
-    public IReadOnlyList<KnowledgeStoreRootConfig> Roots { get; init; } = [];
-
-    /// <summary>
-    /// Maximum files per folder (not counting subfolders or _archive/).
-    /// </summary>
-    [JsonPropertyName("maxFilesPerFolder")]
-    public int MaxFilesPerFolder { get; init; } = 200;
-
-    /// <summary>
-    /// Maximum subfolder nesting depth from a root.
-    /// </summary>
-    [JsonPropertyName("maxFolderDepth")]
-    public int MaxFolderDepth { get; init; } = 3;
-
-    /// <summary>
-    /// Maximum total size of a single root in bytes (default 50 MB).
-    /// </summary>
-    [JsonPropertyName("maxRootSizeBytes")]
-    public long MaxRootSizeBytes { get; init; } = 50 * 1024 * 1024;
-
-    /// <summary>
-    /// Maximum size per individual file in bytes (default 512 KB).
-    /// </summary>
-    [JsonPropertyName("maxFileSizeBytes")]
-    public long MaxFileSizeBytes { get; init; } = 512 * 1024;
-}
-
-/// <summary>
-/// Configuration for a single workspace root in the knowledge store.
-/// </summary>
-public sealed record KnowledgeStoreRootConfig
-{
-    [JsonPropertyName("id")]
-    public string Id { get; init; } = "";
-
-    [JsonPropertyName("displayName")]
-    public string DisplayName { get; init; } = "";
-
-    [JsonPropertyName("absolutePath")]
-    public string AbsolutePath { get; init; } = "";
-
-    /// <summary>
-    /// "KnowledgeReadWrite" or "ReferenceReadOnly".
-    /// </summary>
-    [JsonPropertyName("accessLevel")]
-    public string AccessLevel { get; init; } = "KnowledgeReadWrite";
-
-    [JsonPropertyName("allowIndexing")]
-    public bool AllowIndexing { get; init; } = true;
-
-    [JsonPropertyName("confirmWrites")]
-    public bool ConfirmWrites { get; init; } = true;
-}
+// The former parallel markdown knowledge settings were removed. The wiki
+// (IWikiStore) is the canonical user-visible, assistant-shared knowledge
+// store. See docs/FOLDER_ACCESS.md for the rationale.

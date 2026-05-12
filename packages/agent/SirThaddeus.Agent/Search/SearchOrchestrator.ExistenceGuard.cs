@@ -446,8 +446,12 @@ public sealed partial class SearchOrchestrator
                     ($"{s.Title} {s.Snippet}")
                     .Contains(priorSeasonLabel, StringComparison.OrdinalIgnoreCase));
                 var hasCancelSignal = evidence.Any(s =>
-                    ($"{s.Title} {s.Snippet}")
-                    .Contains("cancel", StringComparison.OrdinalIgnoreCase));
+                {
+                    var text = $"{s.Title} {s.Snippet}";
+                    return text.Contains("cancel", StringComparison.OrdinalIgnoreCase) ||
+                           text.Contains("ended", StringComparison.OrdinalIgnoreCase) ||
+                           text.Contains("never renewed", StringComparison.OrdinalIgnoreCase);
+                });
 
                 if (hasPriorSeason && hasCancelSignal)
                     score += 10;

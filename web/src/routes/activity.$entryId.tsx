@@ -74,6 +74,7 @@ function ActivityEntryRoute() {
                 <Link
                   to="/chat/$threadId"
                   params={{ threadId: entry.threadId }}
+                  search={{ focusMessageId: undefined }}
                   className="text-ink hover:text-accent"
                   data-testid="activity-entry-thread-link"
                 >

@@ -156,10 +156,32 @@ public interface IMemoryStore
 
     /// <summary>
     /// Lists all non-deleted nuggets with optional keyword filter.
-    /// For the UI browser.
+    /// For the UI browser. Implementations should not hydrate embedding
+    /// vectors for browse rows.
     /// </summary>
     Task<(IReadOnlyList<MemoryNugget> Items, int TotalCount)> ListNuggetsAsync(
         string? filter, int skip, int take, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves a single non-deleted nugget by nugget_id without hydrating
+    /// embedding vectors. Returns null if the nugget does not exist.
+    /// </summary>
+    Task<MemoryNugget?> FindNuggetByIdAsync(
+        string nuggetId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lists pinned/core nuggets ordered by pin level, use count, then
+    /// updated_at. Used for unconditional core-memory injection.
+    /// </summary>
+    Task<IReadOnlyList<MemoryNugget>> ListPinnedNuggetsAsync(
+        int maxResults, CancellationToken ct = default);
+
+    /// <summary>
+    /// Updates only a nugget's pin level. Returns the updated nugget, or null
+    /// if the nugget does not exist.
+    /// </summary>
+    Task<MemoryNugget?> SetNuggetPinLevelAsync(
+        string nuggetId, int pinLevel, CancellationToken ct = default);
 
     /// <summary>Upserts a nugget. Idempotent (INSERT OR REPLACE).</summary>
     Task StoreNuggetAsync(MemoryNugget nugget, CancellationToken ct = default);

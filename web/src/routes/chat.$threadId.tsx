@@ -6,6 +6,7 @@ import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
 import { ToolActivityPills } from '../components/ToolActivityPills';
 import { FootmanDecisionChip } from '../components/FootmanDecisionChip';
+import { MemoryRecallChip } from '../components/MemoryRecallChip';
 import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
 import { subscribeVoicePttEvents, synthesizeSpeech, transcribeSpeech, warmVoiceHost } from '../lib/voiceApi';
 import { stopAllProcesses } from '../lib/runtimeActions';
@@ -16,11 +17,15 @@ import type { ChatMessageSource } from '@thaddeus/shared-types';
 const MIN_VOICE_HOLD_MS = 350;
 
 export const Route = createFileRoute('/chat/$threadId')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    focusMessageId: typeof search.focusMessageId === 'string' ? search.focusMessageId : undefined,
+  }),
   component: ChatThreadRoute,
 });
 
 function ChatThreadRoute() {
   const { threadId } = Route.useParams();
+  const { focusMessageId } = Route.useSearch();
   const thread = useChatStore((s) => s.activeThread);
   const activeTurn = useChatStore((s) => s.activeTurn);
   const sending = useChatStore((s) => s.sending);
@@ -33,6 +38,7 @@ function ChatThreadRoute() {
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [speechState, setSpeechState] = useState<{ messageId: string; status: 'loading' | 'playing' } | null>(null);
   const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing' | 'sending'>('idle');
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
@@ -379,6 +385,25 @@ function ChatThreadRoute() {
   const empty = messages.length === 0 && !activeTurn;
 
   useEffect(() => {
+    if (!focusMessageId) return;
+
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const target = container.querySelector<HTMLElement>(`[data-testid="chat-message-${focusMessageId}"]`);
+    if (!target) return;
+
+    setHighlightedMessageId(focusMessageId);
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const timeout = window.setTimeout(() => {
+      setHighlightedMessageId((current) => (current === focusMessageId ? null : current));
+    }, 2600);
+
+    return () => window.clearTimeout(timeout);
+  }, [focusMessageId, messages.length, activeTurn?.messageId]);
+
+  useEffect(() => {
     if (!pendingVoiceResponseRef.current || activeTurn) return;
     const latest = messages[messages.length - 1];
     if (String(latest?.role || '').toLowerCase() !== 'assistant' || !latest?.text?.trim()) return;
@@ -440,6 +465,7 @@ function ChatThreadRoute() {
                     retryDisabled={sending || Boolean(activeTurn)}
                     speechStatus={speechState?.messageId === m.id ? speechState.status : null}
                     onSpeak={() => void onSpeakMessage(m.id, m.text)}
+                    highlighted={m.id === highlightedMessageId}
                     testId={`chat-message-${m.id}`}
                   />
                 );
@@ -549,6 +575,7 @@ interface MessageRowProps {
   retryDisabled?: boolean;
   speechStatus?: 'loading' | 'playing' | null;
   onSpeak?: () => void;
+  highlighted?: boolean;
   testId: string;
 }
 
@@ -563,11 +590,15 @@ function MessageRow({
   retryDisabled,
   speechStatus,
   onSpeak,
+  highlighted,
   testId,
 }: MessageRowProps) {
   const normalized = String(role || '').toLowerCase();
   const isUser = normalized === 'user';
   const [copied, setCopied] = useState(false);
+  const highlightClass = highlighted
+    ? 'rounded-3xl ring-1 ring-accent/30 bg-accent-soft/40 px-3 py-2 transition-colors'
+    : undefined;
 
   useEffect(() => {
     if (!copied) return;
@@ -590,10 +621,12 @@ function MessageRow({
         data-testid={testId}
         data-role={role}
         data-streaming={streaming ? 'true' : undefined}
-        className="flex justify-end"
+        className={highlightClass}
       >
-        <div className="max-w-[82%] whitespace-pre-wrap rounded-3xl rounded-tr-lg bg-canvas-sunken px-4 py-2.5 text-[15px] leading-6 text-ink">
-          {text}
+        <div className="flex justify-end">
+          <div className="max-w-[82%] whitespace-pre-wrap rounded-3xl rounded-tr-lg bg-canvas-sunken px-4 py-2.5 text-[15px] leading-6 text-ink">
+            {text}
+          </div>
         </div>
       </div>
     );
@@ -609,8 +642,10 @@ function MessageRow({
       data-testid={testId}
       data-role={role}
       data-streaming={streaming ? 'true' : undefined}
+      className={highlightClass}
     >
       {messageId ? <FootmanDecisionChip messageId={messageId} /> : null}
+      {messageId ? <MemoryRecallChip messageId={messageId} /> : null}
       {messageId ? <ToolActivityPills messageId={messageId} /> : null}
       {showWorking ? (
         <div

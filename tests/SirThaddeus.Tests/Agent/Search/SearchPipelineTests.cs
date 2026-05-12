@@ -892,13 +892,13 @@ public class QueryBuilderFallbackTests
 
         var result = await builder.BuildAsync(
             SearchMode.WebFactFind,
-            "What is the latest stable version of .NET as of 2025?",
+            "What is the latest stable version of QuantaScript as of 2025?",
             entity: null,
             new SearchSession(),
             recentHistory: [],
             ct: CancellationToken.None);
 
-        Assert.Equal("latest stable version of dotnet official documentation release notes", result.Query);
+        Assert.Equal("latest stable version of QuantaScript official documentation release notes", result.Query);
         Assert.False(result.UsedFallback);
     }
 
@@ -916,13 +916,13 @@ public class QueryBuilderFallbackTests
 
         var entity = new EntityResolver.ResolvedEntity
         {
-            CanonicalName = ".NET Aspire",
+            CanonicalName = "Orion Mesh",
             Type = "Technology"
         };
 
         var result = await builder.BuildAsync(
             SearchMode.WebFactFind,
-            "Search for recent updates and developments in .NET Aspire from the last year. " +
+            "Search for recent updates and developments in Orion Mesh from the last year. " +
             "Synthesize information from multiple sources, compare what overlaps and what differs. " +
             "Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
             entity,
@@ -930,7 +930,7 @@ public class QueryBuilderFallbackTests
             recentHistory: [],
             ct: CancellationToken.None);
 
-        Assert.Contains(".NET Aspire", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Orion Mesh", result.Query, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("update", result.Query, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("original adaptation", result.Query, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("live action", result.Query, StringComparison.OrdinalIgnoreCase);

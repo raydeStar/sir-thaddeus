@@ -8,7 +8,7 @@ public class IntentFeatureExtractorTests
     [Fact]
     public void LooksLikeFactLookup_SeasonEpisodePlotQuery_ReturnsTrue()
     {
-        var lower = "what would be the plot of episode 1 of season 3 of stargate universe about?"
+        var lower = "what would be the plot of episode 2 of season 7 of meridian drift about?"
             .ToLowerInvariant();
 
         var result = IntentFeatureExtractor.LooksLikeFactLookup(lower);

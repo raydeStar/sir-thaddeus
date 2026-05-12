@@ -8,7 +8,7 @@ public class QueryBundleBuilderTests
 
     [Theory]
     [InlineData(
-        "What is the latest stable version of .NET as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.",
+        "What is the latest stable version of QuantaScript as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.",
         "latest stable version")]
     [InlineData(
         "Who is the current CEO of OpenAI as of today",

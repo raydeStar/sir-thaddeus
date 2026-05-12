@@ -62,7 +62,11 @@ function HomeRoute() {
     setLocalError(null);
     try {
       const t = await newThread();
-      void navigate({ to: '/chat/$threadId', params: { threadId: t.id } });
+      void navigate({
+        to: '/chat/$threadId',
+        params: { threadId: t.id },
+        search: { focusMessageId: undefined },
+      });
       await useChatStore.getState().openThread(t.id);
       await send(text, wikiContext);
       setDraft('');
@@ -276,6 +280,7 @@ function HomeRoute() {
                 <Link
                   to="/chat/$threadId"
                   params={{ threadId: t.id }}
+                  search={{ focusMessageId: undefined }}
                   data-testid={`home-recent-${t.id}`}
                   className="group/recent flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink transition-colors hover:bg-canvas-raised"
                 >

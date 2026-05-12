@@ -23,9 +23,7 @@ param(
     #   "Category=Unit"
     [string]$Filter = '',
 
-    [switch]$SkipScreenObserveHarness,
-
-    [switch]$IncludeKnowledgeStoreHarness
+    [switch]$SkipScreenObserveHarness
 )
 
 Set-StrictMode -Version Latest
@@ -72,7 +70,6 @@ if ($isCi -and -not $Restore) {
 }
 if ($Filter) { Write-Host "  Filter        : $Filter" }
 Write-Host "  Screen Harness: $(if ($SkipScreenObserveHarness) { 'skipped' } elseif ($Filter) { 'skipped (filtered run)' } else { 'enabled' })"
-Write-Host "  Knowledge Store Harness: $(if ($IncludeKnowledgeStoreHarness) { if ($Filter) { 'requested but skipped (filtered run)' } elseif ($isCi) { 'requested but skipped (CI)' } else { 'enabled' } } else { 'disabled (opt-in)' })"
 Write-Host "  Results       : $TestArtifacts\$trxName"
 
 # ── Policy Guard: no device geolocation APIs ─────────────────
@@ -145,22 +142,10 @@ if (-not $Filter -and -not $SkipScreenObserveHarness) {
     }
 }
 
-$knowledgeStoreHarnessExit = 0
-if ($IncludeKnowledgeStoreHarness -and -not $Filter -and -not $isCi) {
-    Write-Section "Knowledge Store Harness"
-
-    & "$PSScriptRoot\run-knowledge-store-harness.ps1"
-    $knowledgeStoreHarnessExit = $LASTEXITCODE
-
-    if ($knowledgeStoreHarnessExit -ne 0) {
-        Write-Host "  FAIL  Knowledge-store harness failed." -ForegroundColor Red
-    }
-}
-
 # ── Summary ───────────────────────────────────────────────────
 Write-Section "Summary"
 
-if ($testExit -eq 0 -and $harnessExit -eq 0 -and $knowledgeStoreHarnessExit -eq 0) {
+if ($testExit -eq 0 -and $harnessExit -eq 0) {
     Write-Host "  OK  All tests passed." -ForegroundColor Green
     Write-Host "  TRX : $TestArtifacts\$trxName"
     exit 0
@@ -172,9 +157,6 @@ if ($testExit -ne 0) {
 else {
     Write-Host "  FAIL  Screen-observe harness failed." -ForegroundColor Red
 }
-if ($knowledgeStoreHarnessExit -ne 0) {
-    Write-Host "  FAIL  Knowledge-store harness failed." -ForegroundColor Red
-}
 Write-Host "  TRX : $TestArtifacts\$trxName"
 Write-Host ""
 Write-Host "  Tip: run with -Filter to focus, e.g."
@@ -182,13 +164,7 @@ Write-Host "    .\dev\test.ps1 -Filter 'FullyQualifiedName~MyProject.Tests.MyCla
 if (-not $SkipScreenObserveHarness -and -not $Filter) {
     Write-Host "  Screen harness: .\dev\harness.ps1 --suites-root .\artifacts\harness-suites --suite screen-observe --max-iters 1 --judge none"
 }
-if ($IncludeKnowledgeStoreHarness -and -not $Filter -and -not $isCi) {
-    Write-Host "  Knowledge-store harness: .\dev\run-knowledge-store-harness.ps1"
-}
 if ($testExit -ne 0) {
     exit $testExit
 }
-if ($harnessExit -ne 0) {
-    exit $harnessExit
-}
-exit $knowledgeStoreHarnessExit
+exit $harnessExit

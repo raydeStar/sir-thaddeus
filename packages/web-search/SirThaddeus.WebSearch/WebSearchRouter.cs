@@ -158,7 +158,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         // BEFORE GoogleNews — the latter's RSS endpoint returns current
         // headlines regardless of query for anything its "generic news"
         // heuristic claims, which silently poisons non-news searches
-        // (e.g. "latest .NET version" returned Middle East war headlines).
+        // with unrelated current headlines.
         var ddgFallback = await _ddg.SearchAsync(query, options, ct);
         ddgFallback = AttachSearchDiagnostic(ddgFallback, _ddg.Name, "fallback", diagnostics);
         if (ddgFallback.Results.Count > 0)

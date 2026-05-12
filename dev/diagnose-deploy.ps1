@@ -32,18 +32,14 @@ function Resolve-UiExecutable([string]$Root) {
 }
 
 function Resolve-VoiceRoot([string]$Root) {
-    foreach ($relative in @("voice", "bin\voice")) {
-        $candidate = Join-Path $Root $relative
-        if (Test-Path $candidate) { return $candidate }
-    }
+    $candidate = Join-Path $Root "voice"
+    if (Test-Path $candidate) { return $candidate }
     return $null
 }
 
 function Resolve-SearchRoot([string]$Root) {
-    foreach ($relative in @("search", "bin\search")) {
-        $candidate = Join-Path $Root $relative
-        if (Test-Path $candidate) { return $candidate }
-    }
+    $candidate = Join-Path $Root "search"
+    if (Test-Path $candidate) { return $candidate }
     return $null
 }
 
@@ -54,9 +50,7 @@ $checks = @(
     @{ Path = "SirThaddeus.VoiceHost.exe";      Label = "VoiceHost exe"; Optional = $false },
     @{ Path = "SirThaddeus.McpServer.exe";      Label = "McpServer exe"; Optional = $false },
     @{ Path = "voice";                          Label = "voice/ directory (new layout)"; Optional = $true },
-    @{ Path = "bin\voice";                      Label = "bin/voice/ directory (legacy layout)"; Optional = $true },
     @{ Path = "search";                         Label = "search/ directory (new layout)"; Optional = $true },
-    @{ Path = "bin\search";                     Label = "bin/search/ directory (legacy layout)"; Optional = $true },
     @{ Path = "bin\Fixtures";                   Label = "Fixtures directory"; Optional = $true },
     @{ Path = "assets\manifest.json";           Label = "Asset manifest (self-heal)"; Optional = $false },
     @{ Path = "README_FIRST_RUN.md";            Label = "README first run"; Optional = $false }
@@ -123,7 +117,7 @@ if ($voiceRoot) {
         Write-Info "  Wheel count: $wheelCount"
     }
 } else {
-    Write-Err "Voice directory not found (expected voice/ or bin/voice/)"
+    Write-Err "Voice directory not found (expected voice/)"
 }
 
 $searchRoot = Resolve-SearchRoot $DeployDir
@@ -148,7 +142,7 @@ if ($searchRoot) {
         }
     }
 } else {
-    Write-Warn "Search directory not found (expected search/ or bin/search/)"
+    Write-Warn "Search directory not found (expected search/)"
 }
 
 # ── 2. Settings file ────────────────────────────────────────────────

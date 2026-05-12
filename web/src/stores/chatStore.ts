@@ -13,6 +13,7 @@ import { ChatTurnEventTypes } from '@thaddeus/shared-types';
 import * as api from '../lib/chatApi';
 import type { WikiChatContextInput } from '../lib/chatApi';
 import { buildRuntimeWebSocketUrl, readRuntimeMetadata } from '../lib/runtime';
+import { useMemoryRecallStore } from './memoryRecallStore';
 
 /**
  * Single-threaded (one active conversation at a time) chat store. Reads thread
@@ -95,6 +96,10 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     try {
       const thread = await api.getThread(id);
       set({ activeThread: thread, loading: false });
+      const assistantMessageIds = thread.messages
+        .filter((m) => m.role === 'assistant')
+        .map((m) => m.id);
+      void useMemoryRecallStore.getState().hydrateFromTraces(assistantMessageIds);
       ensureSocket((evt) => get().ingestEvent(evt));
     } catch (e) {
       set({ error: (e as Error).message, loading: false });

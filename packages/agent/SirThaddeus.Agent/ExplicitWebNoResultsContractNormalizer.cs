@@ -20,12 +20,12 @@ public static class ExplicitWebNoResultsContractNormalizer
             return null;
 
         var lower = userMessage.Trim().ToLowerInvariant();
-        var isExplicitLookupRequest = string.Equals(
+        var hasExplicitWebLookup = string.Equals(
             IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower),
             Intents.LookupSearch,
             StringComparison.OrdinalIgnoreCase);
-        var isLatestStableVersionRequest = LooksLikeLatestStableVersionRequest(lower);
-        if (!isExplicitLookupRequest && !isLatestStableVersionRequest)
+        var requiresLiveVersionLookup = LooksLikeLatestVersionLookup(lower);
+        if (!hasExplicitWebLookup && !requiresLiveVersionLookup)
         {
             return null;
         }
@@ -105,9 +105,13 @@ public static class ExplicitWebNoResultsContractNormalizer
         return UnavailableMessage;
     }
 
-    private static bool LooksLikeLatestStableVersionRequest(string lowerUserMessage)
-        => lowerUserMessage.Contains("latest stable version", StringComparison.Ordinal);
-
+    private static bool LooksLikeLatestVersionLookup(string lowerUserMessage)
+    {
+        return lowerUserMessage.Contains("latest", StringComparison.Ordinal) &&
+               lowerUserMessage.Contains("version", StringComparison.Ordinal) &&
+               (lowerUserMessage.Contains("stable", StringComparison.Ordinal) ||
+                lowerUserMessage.Contains("current", StringComparison.Ordinal));
+    }
     private static bool IsRelevantWebTool(string toolName)
     {
         return toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||

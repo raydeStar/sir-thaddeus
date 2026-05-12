@@ -94,16 +94,16 @@ public sealed class ToolBackedResponseQualityGuardsTests
         {
             ThreadId = "thread",
             MessageId = "message",
-            UserText = "What is the latest stable version of .NET as of 2025?"
+            UserText = "What is the latest stable version of QuantaScript as of 2025?"
         };
 
         var rewritten = rewriter.Rewrite(
             context,
             ToolNames.WebSearch,
-            "{\"query\":\"latest stable version of .NET 2025\",\"recency\":\"week\"}");
+            "{\"query\":\"latest stable version of QuantaScript 2025\",\"recency\":\"week\"}");
 
         using var document = JsonDocument.Parse(rewritten);
-        Assert.Equal("latest stable version of dotnet official documentation release notes", document.RootElement.GetProperty("query").GetString());
+        Assert.Equal("latest stable version of QuantaScript official documentation release notes", document.RootElement.GetProperty("query").GetString());
         Assert.Equal("any", document.RootElement.GetProperty("recency").GetString());
     }
 
@@ -556,66 +556,48 @@ public sealed class ToolBackedResponseQualityGuardsTests
     {
         var response = ToolBackedResponseQualityGuards.Apply(
             "Cancelled",
-            "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?",
+            "What would be the plot of Episode 2 of Season 7 of Meridian Drift about?",
             [
                 new ToolCallRecord
                 {
                     ToolName = "web_search",
-                    Arguments = "{\"query\":\"Stargate Universe Season 3 Episode 1 plot\"}",
+                    Arguments = "{\"query\":\"Meridian Drift Season 7 Episode 2 plot\"}",
                     Result = "[search: 2 result(s) returned]",
                     Success = true
                 }
             ]);
 
-        Assert.Contains("Stargate Universe", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("cancelled after Season 2", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("no real episode plot", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Meridian Drift", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("official Season 7 Episode 2", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("should not invent a plot", response, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void Apply_WhenMediaInstallmentAnswerSummarizesReboot_ReplacesWithNonexistenceAnswer()
     {
-        const string weakResponse = "I dont have information regarding the specific plot details for Episode 1 of Season 3 of Stargate Universe. The search results only confirm a new Stargate TV series ordered by Amazon MGM Studios for Prime Video.";
+        const string weakResponse = "I dont have information regarding the specific plot details for Episode 2 of Season 7 of Meridian Drift. The search results only confirm a new Meridian Drift reboot ordered by a streaming service.";
 
         var response = ToolBackedResponseQualityGuards.Apply(
             weakResponse,
-            "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?",
+            "What would be the plot of Episode 2 of Season 7 of Meridian Drift about?",
             [
                 new ToolCallRecord
                 {
                     ToolName = "web_search",
-                    Arguments = "{\"query\":\"Stargate Universe Season 3 Episode 1 plot\"}",
+                    Arguments = "{\"query\":\"Meridian Drift Season 7 Episode 2 plot\"}",
                     Result = "[search: 4 result(s) returned]",
                     Success = true
                 }
             ]);
 
-        Assert.Contains("Stargate Universe", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("cancelled after Season 2", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("no real episode plot", response, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Amazon MGM", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Meridian Drift", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("official Season 7 Episode 2", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("should not invent a plot", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("streaming service", response, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public void Apply_WhenKnowledgeStoreListRootsLeaksToolCall_ReplacesWithRootSummary()
-    {
-        var response = ToolBackedResponseQualityGuards.Apply(
-            "<|tool_call>call:knowledge_store_list_roots{}<tool_call|>",
-            "Call knowledge_store_list_roots and report the configured root id and display name.",
-            [
-                new ToolCallRecord
-                {
-                    ToolName = "knowledge_store_list_roots",
-                    Arguments = "{}",
-                    Result = "{\"ok\":true,\"enabled\":true,\"roots\":[{\"id\":\"harness\",\"display_name\":\"Harness Knowledge Store\",\"absolute_path\":\"C:\\\\Temp\\\\ks\"}]}",
-                    Success = true
-                }
-            ]);
-
-        Assert.Contains("root id is harness", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("display name is Harness Knowledge Store", response, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("tool_call", response, StringComparison.OrdinalIgnoreCase);
-    }
+    // Parallel knowledge-listing fallback test removed after the wiki became
+    // the only assistant-shared knowledge surface; see DESIGN_NOTES_2026-05.md.
 
     [Fact]
     public void Apply_WhenHoursLookupOffersAnotherSearch_ReturnsConservativeHoursFallback()
@@ -643,31 +625,27 @@ public sealed class ToolBackedResponseQualityGuardsTests
     }
 
     [Fact]
-    public void Apply_WhenStrictDotNetLatestVersionAnswerIsNoisy_DoesNotSynthesizeHardCodedAnswer()
+    public void Apply_WhenStrictLatestVersionAnswerIsNoisy_DoesNotSynthesizeHardCodedAnswer()
     {
         const string weakResponse = """
-            Answer: I do not have a definitive answer for the latest stable version of .NET as of 2025 based on the search results provided.
-            Commentary: The recent search query returned an unrelated article regarding UGC NET applications, indicating that no specific information about .NET versions was found in the immediate results.
+            Answer: I do not have a definitive answer for the latest stable version of QuantaScript as of 2025 based on the search results provided.
+            Commentary: The recent search query returned an unrelated article, indicating that no specific version information was found in the immediate results.
             """;
 
         var response = ToolBackedResponseQualityGuards.Apply(
             weakResponse,
-            "What is the latest stable version of .NET as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.",
+            "What is the latest stable version of QuantaScript as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.",
             [
                 new ToolCallRecord
                 {
                     ToolName = ToolNames.WebSearch,
-                    Arguments = "{\"query\":\"latest stable version of .NET 2025\"}",
+                    Arguments = "{\"query\":\"latest stable version of QuantaScript 2025\"}",
                     Result = "[search: 1 result(s) returned]",
                     Success = true
                 }
             ]);
 
-        // The guard must not invent a clean ".NET X" two-line answer when the underlying
-        // response had no real evidence — that would be hard-coding an answer the agent
-        // cannot actually verify.
-        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"\.NET\s+\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase), response);
-        Assert.DoesNotContain("dotnet.microsoft.com", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"\bQuantaScript\s+\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase), response);
     }
 
     [Fact]
@@ -809,19 +787,19 @@ public sealed class ToolBackedResponseQualityGuardsTests
 
         var response = ToolBackedResponseQualityGuards.Apply(
             weakResponse,
-            "Search for recent updates and developments in .NET Aspire from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
+            "Search for recent updates and developments in Orion Mesh from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
             [
                 new ToolCallRecord
                 {
                     ToolName = ToolNames.WebSearch,
-                    Arguments = "{\"query\":\"recent updates and developments in .NET Aspire last year\"}",
+                    Arguments = "{\"query\":\"recent updates and developments in Orion Mesh last year\"}",
                     Result = "[search: 0 result(s) returned]",
                     Success = true
                 },
                 new ToolCallRecord
                 {
                     ToolName = ToolNames.WebSearch,
-                    Arguments = "{\"query\":\".NET Aspire recent updates developments 2024 2025 microsoft official\"}",
+                    Arguments = "{\"query\":\"Orion Mesh recent updates developments 2024 2025 official\"}",
                     Result = "[search: 0 result(s) returned]",
                     Success = true
                 }
@@ -841,17 +819,17 @@ public sealed class ToolBackedResponseQualityGuardsTests
 
         var response = ToolBackedResponseQualityGuards.Apply(
             weakResponse,
-            "Search for recent updates and developments in .NET Aspire from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
+            "Search for recent updates and developments in Orion Mesh from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
             [
                 new ToolCallRecord
                 {
                     ToolName = ToolNames.WebSearch,
-                    Arguments = "{\"query\":\".NET Aspire recent updates and developments last year\"}",
+                    Arguments = "{\"query\":\"Orion Mesh recent updates and developments last year\"}",
                     Result = """
                         [search: 1 result(s) returned]
 
                         <!-- SOURCES_JSON -->
-                        {"sources":[{"url":"https://example.com/aspire-release","title":".NET Aspire 13.2 Released with Expanded CLI, TypeScript AppHost Preview, and Dashboard Improvements","domain":"example.com","snippet":"The release expands CLI functionality, previews TypeScript AppHost support, and improves the dashboard."}]}
+                        {"sources":[{"url":"https://example.com/orion-mesh-release","title":"Orion Mesh 13.2 Released with Expanded CLI, TypeScript Host Preview, and Dashboard Improvements","domain":"example.com","snippet":"The release expands CLI functionality, previews TypeScript host support, and improves the dashboard."}]}
                         """,
                     Success = true
                 }
@@ -870,7 +848,7 @@ public sealed class ToolBackedResponseQualityGuardsTests
     public void Apply_WhenStructuredSearchEchoesPageChrome_RebuildsCleanSourceFocus()
     {
         const string chromeLeakingResponse = """
-            Overview: .NET Aspire has continued to evolve over the last year.
+            Overview: Orion Mesh has continued to evolve over the last year.
 
             Common Points:
             - Recent sources overlap on developer tooling.
@@ -883,17 +861,17 @@ public sealed class ToolBackedResponseQualityGuardsTests
 
         var response = ToolBackedResponseQualityGuards.Apply(
             chromeLeakingResponse,
-            "Search for recent updates and developments in .NET Aspire from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
+            "Search for recent updates and developments in Orion Mesh from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
             [
                 new ToolCallRecord
                 {
                     ToolName = ToolNames.WebSearch,
-                    Arguments = "{\"query\":\".NET Aspire recent updates and developments last year\"}",
+                    Arguments = "{\"query\":\"Orion Mesh recent updates and developments last year\"}",
                     Result = """
                         [search: 2 result(s) returned]
 
                         <!-- SOURCES_JSON -->
-                        {"sources":[{"url":"https://example.com/aspire-13-3","title":"What's New in Aspire 13.3 | Aspire Blog","domain":"example.com","snippet":"What's New in Aspire 13.3 | Aspire Blog Skip to main content Aspire 13.3 has arrived! Get the latest release that brings Kubernetes support, agent-assisted Aspirification, and more. Get Aspire 13.3 Maddy Montaquila Principal Product Manager Aspire."},{"url":"https://example.com/aspire-13-2","title":"Aspire 13.2 release notes","domain":"example.com","snippet":"A list of new features, updates, and breaking changes in Aspire 13.2."}]}
+                        {"sources":[{"url":"https://example.com/orion-mesh-13-3","title":"What's New in Orion Mesh 13.3 | Orion Blog","domain":"example.com","snippet":"What's New in Orion Mesh 13.3 | Orion Blog Skip to main content Orion Mesh 13.3 has arrived! Get the latest release that brings Kubernetes support, agent-assisted mesh planning, and more. Get Orion Mesh 13.3 Product Manager Orion."},{"url":"https://example.com/orion-mesh-13-2","title":"Orion Mesh 13.2 release notes","domain":"example.com","snippet":"A list of new features, updates, and breaking changes in Orion Mesh 13.2."}]}
                         """,
                     Success = true
                 }
@@ -947,7 +925,7 @@ public sealed class ToolBackedResponseQualityGuardsTests
     public void Apply_WhenFactAnswerAddsSirThaddeusNote_StripsOrnamentalTail()
     {
         const string responseWithNote = """
-            Answer: The latest stable version is .NET 10.0.7.
+            Answer: The latest stable version is QuantaScript 10.0.7.
 
             Commentary: Official version listings are the best source for this kind of changing fact.
 
@@ -957,23 +935,23 @@ public sealed class ToolBackedResponseQualityGuardsTests
 
         var response = ToolBackedResponseQualityGuards.Apply(
             responseWithNote,
-            "What is the latest stable version of .NET?",
+            "What is the latest stable version of QuantaScript?",
             [
                 new ToolCallRecord
                 {
                     ToolName = ToolNames.WebSearch,
-                    Arguments = "{\"query\":\"latest stable version of .NET\"}",
+                    Arguments = "{\"query\":\"latest stable version of QuantaScript\"}",
                     Result = """
                         [search: 1 result(s) returned]
 
                         <!-- SOURCES_JSON -->
-                        {"sources":[{"url":"https://example.com/dotnet-versions","title":".NET versions","domain":"example.com","snippet":".NET 10.0.7 is listed as active LTS."}]}
+                        {"sources":[{"url":"https://example.com/quantascript-versions","title":"QuantaScript versions","domain":"example.com","snippet":"QuantaScript 10.0.7 is listed as active LTS."}]}
                         """,
                     Success = true
                 }
             ]);
 
-        Assert.Contains("Answer: The latest stable version is .NET 10.0.7.", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Answer: The latest stable version is QuantaScript 10.0.7.", response, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Sir Thaddeus", response, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("healthy dose of skepticism", response, StringComparison.OrdinalIgnoreCase);
     }

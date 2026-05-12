@@ -183,19 +183,7 @@ public static class PolicyGate
                 "file_read",
                 "file_list",
                 "FileRead",
-                "FileList",
-                "knowledge_store_list_roots",
-                "knowledge_store_read_file",
-                "knowledge_store_list_files",
-                "knowledge_store_create_file",
-                "knowledge_store_append_to_file",
-                "knowledge_store_journal_log_entry",
-                "KnowledgeStoreListRoots",
-                "KnowledgeStoreReadFile",
-                "KnowledgeStoreListFiles",
-                "KnowledgeStoreCreateFile",
-                "KnowledgeStoreAppendToFile",
-                "KnowledgeStoreJournalLogEntry"
+                "FileList"
             ],
             ForbiddenTools =
             [

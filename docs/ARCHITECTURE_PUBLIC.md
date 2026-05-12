@@ -33,7 +33,7 @@ For v1, the shell is Windows-first. Tray, global shortcuts, push-to-talk, compac
 
 Key entry points:
 
-- REST endpoints in [Api/](../src/Thaddeus.Runtime/Api/) — `ChatApi`, `MemoryApi`, `RoutinesApi`, `SettingsApi`, `ActivityApi`, `StateApi`, `PermissionsApi`, `AudioApi`, `WikiApi`, `VoiceApi`.
+- REST endpoints in [Api/](../src/Thaddeus.Runtime/Api/) — `ChatApi`, `MemoryAuditApi`, `RoutinesApi`, `SettingsApi`, `ActivityApi`, `StateApi`, `PermissionsApi`, `AudioApi`, `WikiApi`, `VoiceApi`.
 - WebSocket broadcaster (`/ws`) for state and event-bus messages.
 - State machine in [State/RuntimeStateMachine.cs](../src/Thaddeus.Runtime/State/RuntimeStateMachine.cs).
 
@@ -85,20 +85,20 @@ This is central to the product: Sir Thaddeus is intended to make tool access vis
 
 ## Local Storage
 
-The runtime uses local stores for threads, memos, routines, settings, audit logs, runtime logs, activity, and wiki data. Storage is part of the trust model: the app is designed around local persistence and local review surfaces rather than cloud sync.
+The runtime uses local stores for threads, semantic memory, legacy memo migration, routines, settings, audit logs, runtime logs, activity, and wiki data. Storage is part of the trust model: the app is designed around local persistence and local review surfaces rather than cloud sync.
 
 | Path | Contents |
 |---|---|
 | `runtime.lock` | per-launch lock + bearer token + port. |
 | `runtime-settings.json` | settings document (LLM, voice, audio, privacy, files, limits, permission policy). |
 | `threads/*.json` | one file per chat thread. |
-| `memos/*.json` | one file per memo. |
+| `memos/*.json` | legacy memo files consumed by the one-shot wiki migrator. |
 | `routines/*.json` | routines + run-history files. |
 | `wiki/<root>/...` | wiki pages as Markdown + revisions + a metadata index. |
 | `logs/thaddeus-runtime-*.log` | Serilog daily rolling. |
 | `logs/audit.jsonl` | append-only tool / permission audit. |
 
-All stores are interface-fronted (`IThreadStore`, `IMemoStore`, `IRoutineStore`, `ISettingsStore`) so a future remote-store backend could slot in without changing call sites — but v1 is local-files-only.
+Stores are interface-fronted (`IThreadStore`, `IMemoryStore`, `IMemoStore` for migration, `IRoutineStore`, `ISettingsStore`) so a future remote-store backend could slot in without changing call sites — but v1 is local-files-only.
 
 Important review surfaces include chat history, tool activity, the activity feed, diagnostics, audit logs, and wiki revisions.
 

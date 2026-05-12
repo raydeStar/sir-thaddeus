@@ -62,22 +62,6 @@ function Warn([string]$Check) {
     $script:warnings += $Check
 }
 
-function Resolve-PackagePath([string]$Primary, [string]$Legacy = "") {
-    $primaryPath = Join-Path $testDir $Primary
-    if (Test-Path $primaryPath) {
-        return $primaryPath
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($Legacy)) {
-        $legacyPath = Join-Path $testDir $Legacy
-        if (Test-Path $legacyPath) {
-            return $legacyPath
-        }
-    }
-
-    return $null
-}
-
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
 # -- Resolve test directory ------------------------------------------------
@@ -207,7 +191,7 @@ foreach ($file in $requiredFiles) {
     }
 }
 
-# Package must contain managed payload DLLs in either modern (root) or legacy (bin/) layout
+# Package must contain managed payload DLLs.
 $rootDllCount = @(Get-ChildItem -Path $testDir -Filter "*.dll" -File -Recurse).Count
 $binDir = Join-Path $testDir "bin"
 $binDllCount = if (Test-Path $binDir) {
@@ -229,28 +213,28 @@ else {
 # that only work after runtime downloads.
 $voiceAssetsRequired = -not $AllowRuntimeAssetDownload
 $voiceAssets = @(
-    @{ Path = "voice/piper/piper.exe";                                  LegacyPath = "bin/voice/piper/piper.exe";                                  Required = $voiceAssetsRequired; Label = "Piper TTS binary" },
-    @{ Path = "voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; LegacyPath = "bin/voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; Required = $voiceAssetsRequired; Label = "Default Piper voice model" },
-    @{ Path = "voice/stt-models/base/model.bin";                        LegacyPath = "bin/voice/stt-models/base/model.bin";                        Required = $voiceAssetsRequired; Label = "Whisper STT model" }
+    @{ Path = "voice/piper/piper.exe"; Label = "Piper TTS binary"; Required = $voiceAssetsRequired },
+    @{ Path = "voice/piper-voices/en_US-john-medium/en_US-john-medium.onnx"; Label = "Default Piper voice model"; Required = $voiceAssetsRequired },
+    @{ Path = "voice/stt-models/base/model.bin"; Label = "Whisper STT model"; Required = $voiceAssetsRequired }
 )
 
 foreach ($asset in $voiceAssets) {
-    $path = Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath
-    if ($path) {
+    $path = Join-Path $testDir $asset.Path
+    if (Test-Path $path) {
         Pass "$($asset.Label) present"
+        continue
+    }
+
+    if ($voiceAssetsRequired) {
+        Fail "$($asset.Label) not bundled"
     }
     else {
-        if ($voiceAssetsRequired) {
-            Fail "$($asset.Label) not bundled"
-        }
-        else {
-            Warn "$($asset.Label) not bundled (will download at runtime)"
-        }
+        Warn "$($asset.Label) not bundled (will download at runtime)"
     }
 }
 
-$packagedUvExe = Resolve-PackagePath -Primary "voice/bin/uv.exe" -Legacy "bin/voice/bin/uv.exe"
-if ($packagedUvExe) {
+$packagedUvExe = Join-Path $testDir "voice/bin/uv.exe"
+if (Test-Path $packagedUvExe) {
     Pass "Bundled uv.exe present"
 }
 else {
@@ -262,8 +246,8 @@ else {
     }
 }
 
-$packagedPythonExe = Resolve-PackagePath -Primary "voice/runtime/python/python.exe" -Legacy "bin/voice/runtime/python/python.exe"
-if ($packagedPythonExe) {
+$packagedPythonExe = Join-Path $testDir "voice/runtime/python/python.exe"
+if (Test-Path $packagedPythonExe) {
     Pass "Bundled Python runtime present"
 }
 else {
@@ -275,8 +259,8 @@ else {
     }
 }
 
-$packagedRequirementsFile = Resolve-PackagePath -Primary "voice/requirements.txt" -Legacy "bin/voice/requirements.txt"
-if ($packagedRequirementsFile) {
+$packagedRequirementsFile = Join-Path $testDir "voice/requirements.txt"
+if (Test-Path $packagedRequirementsFile) {
     Pass "Voice requirements.txt present"
 }
 else {
@@ -288,8 +272,8 @@ else {
     }
 }
 
-$packagedWheelDir = Resolve-PackagePath -Primary "voice/deps/wheels" -Legacy "bin/voice/deps/wheels"
-$packagedWheelCount = if ($packagedWheelDir) {
+$packagedWheelDir = Join-Path $testDir "voice/deps/wheels"
+$packagedWheelCount = if (Test-Path $packagedWheelDir) {
     @(Get-ChildItem -Path $packagedWheelDir -Filter "*.whl" -File -ErrorAction SilentlyContinue).Count
 }
 else {
@@ -327,15 +311,15 @@ else {
 }
 
 $searchPayloadChecks = @(
-    @{ Path = "search/start-searxng.ps1"; LegacyPath = "bin/search/start-searxng.ps1"; Label = "SearXNG bootstrap script" },
-    @{ Path = "search/runtime/python/python.exe"; LegacyPath = "bin/search/runtime/python/python.exe"; Label = "SearXNG Python runtime" },
-    @{ Path = "search/source/searxng-upstream/searx/webapp.py"; LegacyPath = "bin/search/source/searxng-upstream/searx/webapp.py"; Label = "SearXNG source payload" },
-    @{ Path = "search/deps/site-packages/flask/__init__.py"; LegacyPath = "bin/search/deps/site-packages/flask/__init__.py"; Label = "SearXNG Python dependencies" }
+    @{ Path = "search/start-searxng.ps1"; Label = "SearXNG bootstrap script" },
+    @{ Path = "search/runtime/python/python.exe"; Label = "SearXNG Python runtime" },
+    @{ Path = "search/source/searxng-upstream/searx/webapp.py"; Label = "SearXNG source payload" },
+    @{ Path = "search/deps/site-packages/flask/__init__.py"; Label = "SearXNG Python dependencies" }
 )
 
 $detectedSearchPayload = 0
 foreach ($asset in $searchPayloadChecks) {
-    if (Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath) {
+    if (Test-Path (Join-Path $testDir $asset.Path)) {
         $detectedSearchPayload++
     }
 }
@@ -345,8 +329,8 @@ if ($detectedSearchPayload -eq 0) {
 }
 else {
     foreach ($asset in $searchPayloadChecks) {
-        $path = Resolve-PackagePath -Primary $asset.Path -Legacy $asset.LegacyPath
-        if ($path) {
+        $path = Join-Path $testDir $asset.Path
+        if (Test-Path $path) {
             Pass "$($asset.Label) present"
         }
         else {

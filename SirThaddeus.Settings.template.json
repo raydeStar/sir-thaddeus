@@ -2,11 +2,11 @@
   "productProfileId": "baseline",
   "llm": {
     "baseUrl": "http://localhost:1234",
-    "model": "local-model",
+    "model": "replace-with-loaded-model-id",
     "gatekeeperBaseUrl": "",
     "gatekeeperModelId": "qwen3.5-2b",
     "reusePrimaryModelForGatekeeperOnSharedEndpoint": true,
-    "maxTokens": 2048,
+    "maxTokens": 4096,
     "contextWindowTokens": 16384,
     "temperature": 0.7,
     "maxRepairAttempts": 1
@@ -61,14 +61,6 @@
   },
   "clipboard": {
     "enabled": true
-  },
-  "knowledgeStore": {
-    "enabled": false,
-    "roots": [],
-    "maxFilesPerFolder": 200,
-    "maxFolderDepth": 3,
-    "maxRootSizeBytes": 52428800,
-    "maxFileSizeBytes": 524288
   },
   "activePersonalityId": "helpful_default"
 }

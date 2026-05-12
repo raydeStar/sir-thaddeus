@@ -46,12 +46,6 @@ public static class ToolBackedResponseQualityGuards
         if (TryBuildCurrentTimeInLocationFallback(latestUserMessage, toolCallsMade) is { Length: > 0 } currentTime)
             return currentTime;
 
-        if (LooksLikeRawToolCallLeak(text) &&
-            TryBuildKnowledgeStoreListRootsResponse(latestUserMessage, toolCallsMade) is { Length: > 0 } rootsResponse)
-        {
-            return rootsResponse;
-        }
-
         if (LooksLikeProductRecommendationDeflection(text, latestUserMessage, toolCallsMade))
             return BuildConservativeProductRecommendationFallback(latestUserMessage, toolCallsMade);
 
@@ -186,63 +180,15 @@ public static class ToolBackedResponseQualityGuards
             lowerText.Contains("not a real episode", StringComparison.Ordinal) ||
             lowerText.Contains("was cancelled", StringComparison.Ordinal) ||
             lowerText.Contains("was canceled", StringComparison.Ordinal) ||
-            lowerText.Contains("cancelled after season 2", StringComparison.Ordinal) ||
-            lowerText.Contains("canceled after season 2", StringComparison.Ordinal);
+            Regex.IsMatch(lowerText, @"\bcancell?ed after season \d+\b", RegexOptions.CultureInvariant);
         if (hasNonexistenceConclusion)
             return false;
 
-        return lowerText.Contains("new stargate", StringComparison.Ordinal) ||
-               lowerText.Contains("amazon mgm", StringComparison.Ordinal) ||
-               lowerText.Contains("prime video", StringComparison.Ordinal) ||
-               lowerText.Contains("martin gero", StringComparison.Ordinal) ||
-               lowerText.Contains("reboot", StringComparison.Ordinal) ||
+        return lowerText.Contains("reboot", StringComparison.Ordinal) ||
                lowerText.Contains("relaunch", StringComparison.Ordinal) ||
                lowerText.Contains("i dont have information", StringComparison.Ordinal) ||
                lowerText.Contains("i don't have information", StringComparison.Ordinal) ||
                lowerText.Contains("no specific plot details", StringComparison.Ordinal);
-    }
-
-    private static string? TryBuildKnowledgeStoreListRootsResponse(
-        string latestUserMessage,
-        IReadOnlyList<ToolCallRecord> toolCallsMade)
-    {
-        var listRootsCall = toolCallsMade.LastOrDefault(call =>
-            call.Success &&
-            call.ToolName.Equals("knowledge_store_list_roots", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(call.Result));
-        if (listRootsCall is null)
-            return null;
-
-        var lowerMessage = latestUserMessage.ToLowerInvariant();
-        if (!lowerMessage.Contains("knowledge_store_list_roots", StringComparison.Ordinal) &&
-            !lowerMessage.Contains("configured root", StringComparison.Ordinal) &&
-            !lowerMessage.Contains("knowledge store", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(listRootsCall.Result!);
-            if (!document.RootElement.TryGetProperty("roots", out var roots) ||
-                roots.ValueKind != JsonValueKind.Array ||
-                roots.GetArrayLength() == 0)
-            {
-                return null;
-            }
-
-            var root = roots[0];
-            var id = root.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
-            var displayName = root.TryGetProperty("display_name", out var displayElement) ? displayElement.GetString() : null;
-            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(displayName))
-                return null;
-
-            return $"The configured knowledge store root id is {id}, and its display name is {displayName}.";
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
     }
 
     private static bool LooksLikeStructuredSearchNoResultDeflection(
@@ -1416,10 +1362,15 @@ public static class ToolBackedResponseQualityGuards
 
     private static string InferResearchSubject(string latestUserMessage, IReadOnlyList<SourceItem> sources)
     {
-        if (latestUserMessage.Contains(".NET Aspire", StringComparison.OrdinalIgnoreCase) ||
-            latestUserMessage.Contains("NET Aspire", StringComparison.OrdinalIgnoreCase))
+        var subjectMatch = Regex.Match(
+            latestUserMessage ?? string.Empty,
+            @"\b(?:updates?|developments?|details)\s+(?:in|on|about)\s+(?<subject>.+?)(?:\s+from\b|\s+over\b|\s+in\s+the\b|[?.!]|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (subjectMatch.Success)
         {
-            return ".NET Aspire";
+            var subject = Regex.Replace(subjectMatch.Groups["subject"].Value, @"\s+", " ").Trim(' ', ',', ';', ':', '-', '.', '?', '!');
+            if (!string.IsNullOrWhiteSpace(subject))
+                return subject;
         }
 
         var title = sources.FirstOrDefault(source => !string.IsNullOrWhiteSpace(source.Title))?.Title;

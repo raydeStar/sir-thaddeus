@@ -177,9 +177,7 @@ public static class IntentFeatureExtractor
 
         if (ContainsAny(lower,
             [
-                "file_read", "file read", "file_list", "file list", "file_write", "file write", "document_read", "document read",
-                "knowledge_store", "knowledge store", "knowledge_store_create_file", "knowledge_store_append_to_file",
-                "knowledge_store_read_file", "knowledge_store_list_files", "knowledge_store_journal_log_entry", "knowledge_store_list_roots"
+                "file_read", "file read", "file_list", "file list", "file_write", "file write", "document_read", "document read"
             ]))
         {
             return Intents.FileTask;
@@ -1166,10 +1164,7 @@ public static class IntentFeatureExtractor
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
-        if (lower.Contains("knowledge_store", StringComparison.Ordinal) ||
-            lower.Contains("knowledge store", StringComparison.Ordinal) ||
-            lower.Contains("journal_log_entry", StringComparison.Ordinal) ||
-            lower.Contains("read_file", StringComparison.Ordinal) ||
+        if (lower.Contains("read_file", StringComparison.Ordinal) ||
             lower.Contains("file_list", StringComparison.Ordinal) ||
             lower.Contains("file_read", StringComparison.Ordinal) ||
             lower.Contains("tool call", StringComparison.Ordinal) ||
@@ -1646,20 +1641,17 @@ public static class IntentFeatureExtractor
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
-        var hasSeasonToken = lower.Contains("season ", StringComparison.Ordinal) ||
-                             lower.Contains("s1", StringComparison.Ordinal) ||
-                             lower.Contains("s2", StringComparison.Ordinal) ||
-                             lower.Contains("s3", StringComparison.Ordinal) ||
-                             lower.Contains("s4", StringComparison.Ordinal) ||
-                             lower.Contains("s5", StringComparison.Ordinal);
+        var hasSeasonToken =
+            System.Text.RegularExpressions.Regex.IsMatch(
+                lower,
+                @"\b(?:season\s+\d+|s\d+)\b",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-        var hasEpisodeToken = lower.Contains("episode ", StringComparison.Ordinal) ||
-                              lower.Contains("ep ", StringComparison.Ordinal) ||
-                              lower.Contains("e1", StringComparison.Ordinal) ||
-                              lower.Contains("e2", StringComparison.Ordinal) ||
-                              lower.Contains("e3", StringComparison.Ordinal) ||
-                              lower.Contains("e4", StringComparison.Ordinal) ||
-                              lower.Contains("e5", StringComparison.Ordinal);
+        var hasEpisodeToken =
+            System.Text.RegularExpressions.Regex.IsMatch(
+                lower,
+                @"\b(?:episode\s+\d+|ep\s+\d+|e\d+)\b",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
         if (!hasSeasonToken || !hasEpisodeToken)
             return false;

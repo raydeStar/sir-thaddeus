@@ -40,7 +40,7 @@ public sealed class OpenAiEmbeddingClient : IEmbeddingClient, IDisposable
     public OpenAiEmbeddingClient(
         string baseUrl, string model, HttpClient? httpClient = null)
     {
-        _model = model ?? "local-model";
+        _model = (model ?? string.Empty).Trim();
         _ownsClient = httpClient is null;
         _http = httpClient ?? new HttpClient();
         _http.BaseAddress ??= new Uri(baseUrl.TrimEnd('/'));
@@ -52,6 +52,9 @@ public sealed class OpenAiEmbeddingClient : IEmbeddingClient, IDisposable
         string text, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        if (string.IsNullOrWhiteSpace(_model))
             return null;
 
         // If we've failed repeatedly, skip until the cooldown expires.

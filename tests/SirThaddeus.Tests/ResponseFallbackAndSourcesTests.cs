@@ -158,13 +158,13 @@ public class SearchOfflineFallbackTests
     public void TryBuildMediaInstallmentFallback_ForMissingSeasonEpisode_ReturnsNonInventedPlotFallback()
     {
         var response = SearchOrchestrator.TryBuildMediaInstallmentFallback(
-            "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?");
+            "What would be the plot of Episode 2 of Season 7 of Meridian Drift about?");
 
         Assert.NotNull(response);
-        Assert.Contains("Season 3 Episode 1", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Stargate Universe", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("does not have an official", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("no real episode plot", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Season 7 Episode 2", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Meridian Drift", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not verify an official", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("should not invent a plot", response, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("couldn't generate a clean summary", response, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -388,7 +388,7 @@ public class SearchOfflineFallbackTests
                 return new LlmResponse
                 {
                     IsComplete = true,
-                    Content = """{"name":".NET","type":"framework","hint":"Microsoft developer platform"}""",
+                    Content = """{"name":"QuantaScript","type":"framework","hint":"Synthetic developer platform"}""",
                     FinishReason = "stop"
                 };
             }
@@ -398,7 +398,7 @@ public class SearchOfflineFallbackTests
                 return new LlmResponse
                 {
                     IsComplete = true,
-                    Content = """{"query":"the latest stable version of .NET as of 2025","recency":"any"}""",
+                    Content = """{"query":"the latest stable version of QuantaScript as of 2025","recency":"any"}""",
                     FinishReason = "stop"
                 };
             }
@@ -422,7 +422,7 @@ public class SearchOfflineFallbackTests
             new StubAuditLogger(),
             "You are a concise assistant.");
 
-        const string userMessage = "What is the latest stable version of .NET as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.";
+        const string userMessage = "What is the latest stable version of QuantaScript as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.";
         var response = await orchestrator.ExecuteAsync(
             userMessage: userMessage,
             memoryPackText: "",
@@ -524,7 +524,7 @@ public class SearchOfflineFallbackTests
                 return new LlmResponse
                 {
                     IsComplete = true,
-                    Content = """{"name":".NET Aspire","type":"technology","hint":"Microsoft orchestration framework"}""",
+                    Content = """{"name":"Orion Mesh","type":"technology","hint":"Synthetic orchestration framework"}""",
                     FinishReason = "stop"
                 };
             }
@@ -534,7 +534,7 @@ public class SearchOfflineFallbackTests
                 return new LlmResponse
                 {
                     IsComplete = true,
-                    Content = """{"query":".NET Aspire updates","recency":"any"}""",
+                    Content = """{"query":"Orion Mesh updates","recency":"any"}""",
                     FinishReason = "stop"
                 };
             }
@@ -552,19 +552,19 @@ public class SearchOfflineFallbackTests
             return new LlmResponse
             {
                 IsComplete = true,
-                Content = "Overview: .NET Aspire continues to expand its orchestration and developer-experience tooling. Common Points: multiple sources describe ongoing investment in app composition and local development workflows. Differences: some coverage emphasizes CLI and dashboard changes while other sources focus on integrations and deployment improvements. Practical Takeaway: teams evaluating Aspire should expect a broader platform story, but the exact emphasis depends on which subsystem they care about most.",
+                Content = "Overview: Orion Mesh continues to expand its orchestration and developer-experience tooling. Common Points: multiple sources describe ongoing investment in app composition and local development workflows. Differences: some coverage emphasizes CLI and dashboard changes while other sources focus on integrations and deployment improvements. Practical Takeaway: teams evaluating Orion Mesh should expect a broader platform story, but the exact emphasis depends on which subsystem they care about most.",
                 FinishReason = "stop"
             };
         });
 
         var webSearchPayload =
-            "1. \".NET Aspire 9.5 Released\" — example.com\n" +
+            "1. \"Orion Mesh 9.5 Released\" — example.com\n" +
             "   Covers CLI updates, dashboard changes, and expanded integrations.\n\n" +
-            "2. \"What's new in .NET Aspire\" — microsoft.com\n" +
+            "2. \"What's new in Orion Mesh\" — example.org\n" +
             "   Highlights orchestration improvements and developer-experience updates.\n\n" +
             "<!-- SOURCES_JSON -->\n" +
-            "[{\"url\":\"https://example.com/aspire-95\",\"title\":\".NET Aspire 9.5 Released\",\"domain\":\"example.com\",\"excerpt\":\"Covers CLI updates, dashboard changes, and expanded integrations.\"}," +
-            "{\"url\":\"https://microsoft.com/dotnet/aspire/whats-new\",\"title\":\"What's new in .NET Aspire\",\"domain\":\"microsoft.com\",\"excerpt\":\"Highlights orchestration improvements and developer-experience updates.\"}]";
+            "[{\"url\":\"https://example.com/orion-mesh-95\",\"title\":\"Orion Mesh 9.5 Released\",\"domain\":\"example.com\",\"excerpt\":\"Covers CLI updates, dashboard changes, and expanded integrations.\"}," +
+            "{\"url\":\"https://example.org/orion-mesh/whats-new\",\"title\":\"What's new in Orion Mesh\",\"domain\":\"example.org\",\"excerpt\":\"Highlights orchestration improvements and developer-experience updates.\"}]";
 
         var mcp = new RecordingStubMcpClient((toolName, _, _) =>
             toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase)
@@ -577,7 +577,7 @@ public class SearchOfflineFallbackTests
             new StubAuditLogger(),
             "You are a concise assistant.");
 
-        const string userMessage = "Search for recent updates and developments in .NET Aspire from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.";
+        const string userMessage = "Search for recent updates and developments in Orion Mesh from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.";
         var response = await orchestrator.ExecuteAsync(
             userMessage: userMessage,
             memoryPackText: "",
@@ -597,7 +597,7 @@ public class SearchOfflineFallbackTests
     [Fact]
     public async Task OfflineWebReasoningResponder_WhenStrictTwoLineLatestVersionPromptHasNoLiveData_DoesNotInventAnswer()
     {
-        const string userMessage = "Use web_search to find the latest stable version of .NET as of 2025. Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.";
+        const string userMessage = "Use web_search to find the latest stable version of QuantaScript as of 2025. Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.";
 
         var response = await OfflineWebReasoningResponder.BuildAsync(
             new StubLlmClient("This should not be used when deterministic fallback is forced."),
@@ -609,12 +609,11 @@ public class SearchOfflineFallbackTests
             failureReason: "tool_unavailable",
             cancellationToken: CancellationToken.None);
 
-        // Live data is unavailable, so the offline responder must NOT synthesize a clean
-        // "Answer: .NET X" two-line response — that would be a hard-coded answer pretending
-        // to know the current version. It should surface the outage instead.
+        // Live data is unavailable, so the offline responder must not synthesize
+        // a clean two-line current-version answer without evidence.
         Assert.True(response.Success);
         Assert.Contains("unavailable", response.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"\.NET\s+\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase), response.Text);
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"\bQuantaScript\s+\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase), response.Text);
     }
 
     [Fact]
@@ -899,7 +898,7 @@ public class SearchOfflineFallbackTests
                 return new LlmResponse
                 {
                     IsComplete = true,
-                    Content = """{"name":"Stargate Universe","type":"series","hint":"Sci-fi television series"}""",
+                    Content = """{"name":"Meridian Drift","type":"series","hint":"Synthetic sci-fi series"}""",
                     FinishReason = "stop"
                 };
             }
@@ -909,7 +908,7 @@ public class SearchOfflineFallbackTests
                 return new LlmResponse
                 {
                     IsComplete = true,
-                    Content = """{"query":"plot of episode 1 s3 stargate universe","recency":"any"}""",
+                    Content = """{"query":"plot of episode 2 s7 meridian drift","recency":"any"}""",
                     FinishReason = "stop"
                 };
             }
@@ -923,16 +922,16 @@ public class SearchOfflineFallbackTests
         });
 
         const string genericSearchResult =
-            "1. \"Stargate Universe discussion thread\" — reddit.com\n" +
+            "1. \"Meridian Drift discussion thread\" — forum.example\n" +
             "   Fans discuss the series in general terms.\n\n" +
             "<!-- SOURCES_JSON -->\n" +
-            "[{\"url\":\"https://www.reddit.com/r/Stargate/comments/abc123/stargate_universe/\",\"title\":\"Stargate Universe discussion thread\",\"domain\":\"reddit.com\",\"excerpt\":\"Fans discuss the series in general terms.\"}]";
+            "[{\"url\":\"https://forum.example/meridian-drift/general\",\"title\":\"Meridian Drift discussion thread\",\"domain\":\"forum.example\",\"excerpt\":\"Fans discuss the series in general terms.\"}]";
 
         const string cancellationEvidenceResult =
-            "1. \"Stargate Universe cancelled after two seasons\" — wikipedia.org\n" +
-            "   The series ended after season 2 and was never renewed for season 3.\n\n" +
+            "1. \"Meridian Drift ended after six seasons\" — reference.example\n" +
+            "   The series ended after season 6 and was never renewed for season 7.\n\n" +
             "<!-- SOURCES_JSON -->\n" +
-            "[{\"url\":\"https://en.wikipedia.org/wiki/Stargate_Universe\",\"title\":\"Stargate Universe cancelled after two seasons\",\"domain\":\"wikipedia.org\",\"excerpt\":\"The series ended after season 2 and was never renewed for season 3.\"}]";
+            "[{\"url\":\"https://reference.example/meridian-drift\",\"title\":\"Meridian Drift ended after six seasons\",\"domain\":\"reference.example\",\"excerpt\":\"The series ended after season 6 and was never renewed for season 7.\"}]";
 
         var mcp = new RecordingStubMcpClient((toolName, argumentsJson, _) =>
         {
@@ -942,7 +941,7 @@ public class SearchOfflineFallbackTests
             if (!toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase))
                 return "{}";
 
-            if (argumentsJson.Contains("season 3 cancelled", StringComparison.OrdinalIgnoreCase) ||
+            if (argumentsJson.Contains("season 7 cancelled", StringComparison.OrdinalIgnoreCase) ||
                 argumentsJson.Contains("number of seasons", StringComparison.OrdinalIgnoreCase) ||
                 argumentsJson.Contains("episode list", StringComparison.OrdinalIgnoreCase))
             {
@@ -959,7 +958,7 @@ public class SearchOfflineFallbackTests
             audit,
             "You are a concise assistant.");
 
-        const string userMessage = "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?";
+        const string userMessage = "What would be the plot of Episode 2 of Season 7 of Meridian Drift about?";
         var response = await orchestrator.ExecuteAsync(
             userMessage: userMessage,
             memoryPackText: "",
@@ -969,13 +968,13 @@ public class SearchOfflineFallbackTests
             ct: CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.Contains("Stargate Universe", response.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Season 3 Episode 1", response.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("no real episode plot", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Meridian Drift", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Season 7 Episode 2", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("should not invent a plot", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("surviving survivor", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(mcp.Calls, call =>
             call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) &&
-            call.ArgumentsJson.Contains("season 3 cancelled", StringComparison.OrdinalIgnoreCase));
+            call.ArgumentsJson.Contains("season 7 cancelled", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(audit.Events, auditEvent =>
             auditEvent.Action == "EXISTENCE_GUARD_TRIGGERED" &&
             auditEvent.Result == "does_not_exist");
@@ -1139,15 +1138,15 @@ public class BareResponseEnrichmentTests
     }
 
     [Fact]
-    public void SanitizeFinalResponse_StargatePrompt_WithOffTopicSourceList_UsesNonexistentEpisodeFallback()
+    public void SanitizeFinalResponse_MediaInstallmentPrompt_WithOffTopicSourceList_UsesNonexistentEpisodeFallback()
     {
         var result = _processor.SanitizeFinalResponse(
             "Here's the strongest evidence I found in the live results:\n- A franchise retrospective focuses on cast reunions and merchandise rather than any unreleased episode plot.",
             new List<ToolCallRecord>(),
-            "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?");
+            "What would be the plot of Episode 2 of Season 7 of Meridian Drift about?");
 
-        Assert.Contains("Stargate Universe", result, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Season 3 Episode 1", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Meridian Drift", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Season 7 Episode 2", result, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cast reunions", result, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("merchandise", result, StringComparison.OrdinalIgnoreCase);
     }

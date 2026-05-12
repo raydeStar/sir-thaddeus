@@ -227,6 +227,11 @@ internal static partial class OfflineWebReasoningResponder
         var greeting = string.IsNullOrEmpty(name) ? "" : $"{name}, ";
         var shouldMentionOutage = RequiresLiveWebVerification(userMessage);
 
+        if (LooksLikeLatestVersionQuestion(userMessage, out var subject, out var yearHint))
+        {
+            return BuildLatestVersionFallback(userMessage, greeting, subject, yearHint);
+        }
+
         if (LooksLikeMediaInstallmentPlotRequest(userMessage, out var installmentLabel))
         {
             return $"{greeting}I could not verify that {installmentLabel} has an official released episode to summarize from the available evidence, so I should not invent a plot. If you want, I can summarize the actual ending or cancellation status instead.";
@@ -303,6 +308,66 @@ internal static partial class OfflineWebReasoningResponder
                     Intents.LookupSearch,
                     StringComparison.OrdinalIgnoreCase);
             }
+
+    private static bool LooksLikeLatestVersionQuestion(string userMessage, out string subject, out string yearHint)
+    {
+        subject = "";
+        yearHint = "";
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        var lower = userMessage.ToLowerInvariant();
+        if (!lower.Contains("latest", StringComparison.Ordinal) ||
+            !lower.Contains("version", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var yearMatch = System.Text.RegularExpressions.Regex.Match(userMessage, @"\b(20\d{2})\b");
+        if (yearMatch.Success)
+            yearHint = yearMatch.Groups[1].Value;
+
+        subject = ExtractLatestVersionSubject(userMessage) ?? "that software";
+        return true;
+    }
+
+    private static string? ExtractLatestVersionSubject(string userMessage)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            userMessage,
+            @"\blatest\s+(?:stable\s+)?version\s+(?:of|for)\s+(?<subject>.+?)(?:[?.!]|$)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        if (!match.Success)
+            return null;
+
+        var subjectText = match.Groups["subject"].Value.Trim();
+        subjectText = System.Text.RegularExpressions.Regex.Replace(
+            subjectText,
+            @"\s+(?:as\s+of|in|for)\s+20\d{2}\b.*$",
+            "",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant).Trim();
+
+        if (subjectText.Length == 0 || subjectText.Length > 80)
+            return null;
+
+        return subjectText;
+    }
+
+    private static string BuildLatestVersionFallback(string userMessage, string greeting, string subject, string yearHint)
+    {
+        var strictTwoLine = RequiresStrictOutputFormat(userMessage);
+        var normalizedSubject = string.IsNullOrWhiteSpace(subject) ? "that software" : subject;
+        var yearClause = string.IsNullOrWhiteSpace(yearHint) ? "" : $" as of {yearHint}";
+
+        if (strictTwoLine)
+        {
+            return $"Answer: Live lookup is unavailable, so I cannot verify the latest stable version of {normalizedSubject}{yearClause}.\n" +
+                   "Commentary: Check the official release page before pinning a version.";
+        }
+
+        return $"{greeting}The latest stable version of {normalizedSubject} is time-sensitive{yearClause}. " +
+               "I cannot verify the current release from live evidence in this turn, so use the official release page as the source of truth before pinning.";
+    }
 
     private static bool LooksLikeComparisonQuestion(string userMessage, out string subject)
     {

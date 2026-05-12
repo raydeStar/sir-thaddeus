@@ -577,7 +577,7 @@ public sealed partial class SearchOrchestrator
             {
                 Actor = "search",
                 Action = "NO_RESULTS_EXPLICIT_WEB_FALLBACK",
-                Result = "deterministic_contract_fallback_pre_known_latest",
+                Result = "deterministic_contract_fallback",
                 Details = new Dictionary<string, object>
                 {
                     ["userMessage"] = GetLatestUserMessage(history) ?? userMessage ?? string.Empty
@@ -600,6 +600,27 @@ public sealed partial class SearchOrchestrator
             ct);
         if (existenceGuarded is not null)
             return existenceGuarded;
+
+        if (toolCallsMade.Any(call => !call.Success && IsBudgetOrCancellationToolFailure(call.Result)) &&
+            await TryBuildMediaInstallmentOfflineReasoningResponseAsync(
+                userMessage ?? string.Empty,
+                toolCallsMade,
+                ct) is { } mediaInstallmentResponse)
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "search",
+                Action = "MEDIA_INSTALLMENT_BUDGET_CANCEL_FALLBACK",
+                Result = "offline_reasoning",
+                Details = new Dictionary<string, object>
+                {
+                    ["user_message"] = Truncate(userMessage ?? string.Empty, 120),
+                    ["source_count"] = sources.Count
+                }
+            });
+
+            return mediaInstallmentResponse;
+        }
 
         var isMarketQuoteRequest =
             MarketQuoteHeuristics.IsMarketQuoteRequest(userMessage ?? "") ||

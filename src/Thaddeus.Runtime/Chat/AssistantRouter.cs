@@ -49,9 +49,10 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         IThreadStore store,
         ChatTurnPublisher publisher,
         IAuditLogger audit,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        SirThaddeus.Memory.IMemoryStore? memoryStore = null)
         : this(settings, stub,
-              CreateDefaultFactory(mcp, gate, store, publisher, audit, loggerFactory),
+              CreateDefaultFactory(mcp, gate, store, publisher, audit, loggerFactory, memoryStore),
               loggerFactory.CreateLogger<AssistantRouter>())
     {
     }
@@ -112,7 +113,8 @@ public sealed class AssistantRouter : IAssistant, IDisposable
 
     private static Func<SettingsDocument, IAssistant> CreateDefaultFactory(
         IMcpToolClient mcp, ToolPermissionGate gate, IThreadStore store, ChatTurnPublisher publisher,
-        IAuditLogger audit, ILoggerFactory loggerFactory)
+        IAuditLogger audit, ILoggerFactory loggerFactory,
+        SirThaddeus.Memory.IMemoryStore? memoryStore)
     {
         var cacheLock = new object();
         LmStudioClient? cached = null;
@@ -266,6 +268,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     PreferredUnits = string.IsNullOrWhiteSpace(loc?.PreferredUnits) ? null : loc!.PreferredUnits,
                     PersonalityRuntime = personalityRuntime,
                     MemoryContextProvider = memoryProvider,
+                    MemoryStore = memoryStore,
                     SearchFallbackExecutor = searchFallback,
                     GuardrailsPipeline = guardrails,
                     CompletionValidator = validator,

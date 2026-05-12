@@ -105,4 +105,22 @@ public sealed class ChatTurnPublisher
             correlationId: messageId,
             ct);
 
+    public Task PublishMemoryRecalledAsync(
+        string threadId,
+        string messageId,
+        int factsCount,
+        int eventsCount,
+        int chunksCount,
+        int nuggetsCount,
+        string preview,
+        long durationMs,
+        CancellationToken ct = default) =>
+        _bus.PublishAsync(
+            ChatTurnEvents.MemoryRecalled,
+            new ChatMemoryRecalled(
+                threadId, messageId, factsCount, eventsCount,
+                chunksCount, nuggetsCount, preview, durationMs, DateTimeOffset.UtcNow),
+            correlationId: messageId,
+            ct);
+
 }

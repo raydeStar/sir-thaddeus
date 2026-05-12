@@ -66,4 +66,36 @@ public sealed class WorkflowConfidenceEvaluatorTests
         Assert.True(snapshot.Score >= 0.65);
         Assert.Contains(snapshot.Band, new[] { "Medium", "High" });
     }
+
+    [Fact]
+    public void BareCancelledAnswer_WithStrongToolEvidence_RemainsVeryLowConfidence()
+    {
+        var evaluator = new ConfidenceEvaluator();
+        var state = new TaskRunState
+        {
+            Envelope = new TaskEnvelope
+            {
+                UserRequest = "What would be the plot of Episode 2 of Season 7 of Meridian Drift about?",
+                Complexity = TaskComplexity.MultiStepResearch
+            },
+            DraftAnswer = "Cancelled"
+        };
+
+        state.Evidence.Add(new EvidenceRecord
+        {
+            SourceType = "retry",
+            Title = "web_search",
+            Summary = "Returned relevant release/cancellation evidence.",
+            TrustScore = 0.85,
+            RelevanceScore = 0.80,
+            SupportsCandidateAnswer = true,
+            ContradictsCandidateAnswer = false
+        });
+
+        var snapshot = evaluator.Evaluate(state);
+
+        Assert.True(snapshot.Score <= 0.20, $"Expected failure placeholder answers to stay capped low, but score was {snapshot.Score:0.000}.");
+        Assert.Equal("VeryLow", snapshot.Band);
+        Assert.True(snapshot.ShouldRetry);
+    }
 }

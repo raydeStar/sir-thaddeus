@@ -96,8 +96,8 @@ the live UI.
 
 | Requirement | Where | Notes |
 |---|---|---|
-| .NET 8 SDK | `global.json` | Run `./dev/bootstrap.ps1` once |
-| LM Studio running | `http://localhost:1234` | Or wherever `settings.json` points `llm.baseUrl` |
+| .NET 10 SDK | `global.json` | Run `./dev/bootstrap.ps1` once |
+| LM Studio running | `http://localhost:1234` or `/v1` | Or wherever `settings.json` points `llm.baseUrl` |
 | Google Places API key | `settings.json` → `deepDive.placesApiKey` | Required for the Places provider path; without it, the pipeline falls back to web search |
 | `settings.json` location | `%LOCALAPPDATA%/SirThaddeus/settings.json` | The harness and desktop runtime both read from this file |
 
@@ -112,7 +112,7 @@ router -> runtime -> MCP tools -> providers -> response scoring.
 {
   "llm": {
     "baseUrl": "http://localhost:1234",
-    "model": "local-model"
+    "model": "replace-with-loaded-model-id"
   },
   "webSearch": {
     "mode": "auto",
@@ -125,7 +125,7 @@ router -> runtime -> MCP tools -> providers -> response scoring.
     "maxResults": 5
   },
   "deepDive": {
-    "placesApiKey": "AIza...",
+    "placesApiKey": "<YOUR_GOOGLE_PLACES_API_KEY>",
     "placesTimeoutMs": 8000,
     "maxToolCalls": 8,
     "maxSources": 5,
@@ -136,6 +136,7 @@ router -> runtime -> MCP tools -> providers -> response scoring.
 ```
 
 Notes:
+- Replace `llm.model` with the exact model ID shown by your local provider. The v2 headless harness maps a blank legacy model to runtime `modelId: "auto"`, but the legacy runtime-host path expects a real model ID.
 - `auto` prefers local SearxNG first, then the hosted Search API when `searchApiKey` is configured, then Google News for news-style queries.
 - If you have no local SearxNG running, configure `webSearch.searchApiKey` so auto mode has a general-purpose fallback.
 - If `deepDive.placesApiKey` is missing, place lookups degrade to web fallback and often return lower confidence.

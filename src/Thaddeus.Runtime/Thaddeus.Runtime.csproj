@@ -23,6 +23,13 @@
     <ProjectReference Include="..\..\packages\runtime-host\SirThaddeus.RuntimeHost\SirThaddeus.RuntimeHost.csproj" />
     <ProjectReference Include="..\..\packages\audit-log\SirThaddeus.AuditLog\SirThaddeus.AuditLog.csproj" />
     <ProjectReference Include="..\..\packages\wiki\SirThaddeus.Wiki\SirThaddeus.Wiki.csproj" />
+    <!-- Direct reference to the SQLite memory backend so the runtime can
+         register IMemoryStore in DI and expose /api/memory/* audit
+         endpoints. Previously only the MCP server and headless host
+         instantiated SqliteMemoryStore inline; the desktop runtime had
+         no first-class memory surface. -->
+    <ProjectReference Include="..\..\packages\memory\SirThaddeus.Memory\SirThaddeus.Memory.csproj" />
+    <ProjectReference Include="..\..\packages\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
   </ItemGroup>
 
   <ItemGroup>

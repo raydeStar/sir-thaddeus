@@ -46,6 +46,7 @@ public static class ActivityApi
             RuntimeOptions options,
             RuntimeStateMachine machine,
             IThreadStore threads,
+            TurnTraceWriter turnTraces,
             VoiceRuntimeStatusService voiceStatus,
             CancellationToken ct) =>
         {
@@ -55,6 +56,7 @@ public static class ActivityApi
             var thrCount = string.IsNullOrEmpty(rootDir) ? -1 : CountFiles(rootDir);
             var lockDir = Path.GetDirectoryName(options.LockFilePath);
             var logsRoot = string.IsNullOrEmpty(lockDir) ? "" : Path.Combine(lockDir, "logs");
+            var turnsRoot = turnTraces.Root;
 
             var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
             var voice = await voiceStatus.GetStatusAsync(ensureHost: false, ct).ConfigureAwait(false);
@@ -65,6 +67,7 @@ public static class ActivityApi
                 ThreadCount: thrCount,
                 ThreadStoreRoot: rootDir,
                 LogsRoot: logsRoot,
+                TurnsRoot: turnsRoot,
                 VoiceAvailable: voice.InputAvailable,
                 Voice: voice,
                 Pid: options.Pid,
@@ -100,6 +103,7 @@ public sealed record DiagnosticsResponse(
     int ThreadCount,
     string ThreadStoreRoot,
     string LogsRoot,
+    string TurnsRoot,
     bool VoiceAvailable,
     VoiceRuntimeStatus Voice,
     int Pid,

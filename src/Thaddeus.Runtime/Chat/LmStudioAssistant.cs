@@ -87,6 +87,15 @@ public sealed class LmStudioAssistant : IAssistant
     public IMemoryContextProvider? MemoryContextProvider { get; init; }
 
     /// <summary>
+    /// Optional direct handle to the semantic memory store, used by
+    /// <c>CoreMemoryStep</c> to inject a small always-in-prompt block
+    /// (user profile + top user-pinned nuggets) on every turn.
+    /// Independent from <see cref="MemoryContextProvider"/>, which handles
+    /// situation-specific dynamic retrieval. Null = no core memory tier.
+    /// </summary>
+    public SirThaddeus.Memory.IMemoryStore? MemoryStore { get; init; }
+
+    /// <summary>
     /// Optional fire-and-forget memory extractor for
     /// <c>AutoMemoryExtractStep</c>. Captures user + assistant chunks
     /// and runs structured fact extraction in the background.
@@ -461,7 +470,27 @@ public sealed class LmStudioAssistant : IAssistant
             // TurnContext.IsNewUser from the provider's onboarding
             // signal so the next step can fire on cold starts. No-op
             // when MemoryContextProvider is null.
-            new MemoryContextStep(MemoryContextProvider),
+            new MemoryContextStep(
+                MemoryContextProvider,
+                onRecalled: async (n, ct) =>
+                {
+                    await _publisher.PublishMemoryRecalledAsync(
+                        n.ThreadId,
+                        n.MessageId,
+                        n.FactsCount,
+                        n.EventsCount,
+                        n.ChunksCount,
+                        n.NuggetsCount,
+                        n.Preview,
+                        n.DurationMs,
+                        ct).ConfigureAwait(false);
+                }),
+
+            // Core memory: always-in-prompt [CORE MEMORY] block carrying
+            // the user's display name + top user-pinned nuggets. Reads
+            // IMemoryStore directly — no MCP roundtrip, no LLM call.
+            // No-op when MemoryStore is null or no items qualify.
+            new CoreMemoryStep(MemoryStore),
 
             // Onboarding injection: appends the cold-introduction
             // suffix when the memory provider signals no profile facts

@@ -69,11 +69,9 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         HarnessTestCase? test)
     {
         var dataDirectory = Path.Combine(sandboxRoot, "data");
-        var knowledgeDirectory = Path.Combine(sandboxRoot, "knowledge-store");
         var profilesDirectory = Path.Combine(sandboxRoot, "profiles");
 
         Directory.CreateDirectory(dataDirectory);
-        Directory.CreateDirectory(knowledgeDirectory);
         Directory.CreateDirectory(profilesDirectory);
 
         CopyDirectory(
@@ -99,10 +97,6 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
                 PlaceMemoryPath = Path.Combine(dataDirectory, "weather-places.json")
             },
             PersonalityProfilesDir = profilesDirectory,
-            KnowledgeStore = baseSettings.KnowledgeStore with
-            {
-                Roots = CreateSandboxRoots(baseSettings.KnowledgeStore.Roots, knowledgeDirectory)
-            }
         };
 
         CopyIfExists(
@@ -192,30 +186,6 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
             var envKey = $"ST_STUB_{toolName.ToUpperInvariant().Replace("-", "_")}";
             environment[envKey] = failure;
         }
-    }
-
-    private static IReadOnlyList<KnowledgeStoreRootConfig> CreateSandboxRoots(
-        IReadOnlyList<KnowledgeStoreRootConfig> roots,
-        string knowledgeDirectory)
-    {
-        if (roots.Count == 0)
-            return roots;
-
-        var sandboxedRoots = new List<KnowledgeStoreRootConfig>(roots.Count);
-        foreach (var root in roots)
-        {
-            if (string.Equals(root.AccessLevel, "KnowledgeReadWrite", StringComparison.OrdinalIgnoreCase))
-            {
-                var isolatedPath = Path.Combine(knowledgeDirectory, SanitizePathSegment(root.Id));
-                Directory.CreateDirectory(isolatedPath);
-                sandboxedRoots.Add(root with { AbsolutePath = isolatedPath, ConfirmWrites = false });
-                continue;
-            }
-
-            sandboxedRoots.Add(root with { AbsolutePath = Path.GetFullPath(root.AbsolutePath) });
-        }
-
-        return sandboxedRoots;
     }
 
     private static string SanitizePathSegment(string value)

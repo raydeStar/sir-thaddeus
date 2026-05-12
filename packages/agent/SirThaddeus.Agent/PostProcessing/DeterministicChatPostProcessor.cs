@@ -672,10 +672,10 @@ public sealed class DeterministicChatPostProcessor
         answerText = Regex.Replace(answerText, @"^Answer\s*[:.]?\s*", "", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         commentaryText = Regex.Replace(commentaryText, @"^Commentary\s*[:.]?\s*", "", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        answerText = NormalizeDotNetSpacing(answerText);
-        commentaryText = NormalizeDotNetSpacing(commentaryText);
-        answerText = RestoreLeadingDotNet(answerText, lowerPrompt);
-        commentaryText = RestoreLeadingDotNet(commentaryText, lowerPrompt);
+        answerText = NormalizeDottedTokenSpacing(answerText, latestUserMessage);
+        commentaryText = NormalizeDottedTokenSpacing(commentaryText, latestUserMessage);
+        answerText = RestoreLeadingDottedToken(answerText, latestUserMessage);
+        commentaryText = RestoreLeadingDottedToken(commentaryText, latestUserMessage);
 
         if (string.IsNullOrWhiteSpace(commentaryText))
             commentaryText = "Kept concise per your format request.";
@@ -683,35 +683,58 @@ public sealed class DeterministicChatPostProcessor
         return $"Answer: {answerText.Trim()}\nCommentary: {commentaryText.Trim()}";
     }
 
-    private static string NormalizeDotNetSpacing(string text)
+    private static string NormalizeDottedTokenSpacing(string text, string prompt)
     {
         if (string.IsNullOrWhiteSpace(text))
             return text;
 
-        var normalized = Regex.Replace(
-            text,
-            @"(?<=[A-Za-z0-9)])\.NET",
-            " .NET",
-            RegexOptions.CultureInvariant);
+        var normalized = text;
+        foreach (var token in ExtractDottedPromptTokens(prompt))
+        {
+            normalized = Regex.Replace(
+                normalized,
+                $@"(?<=[A-Za-z0-9)]){Regex.Escape(token)}",
+                " " + token,
+                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        }
 
         normalized = Regex.Replace(normalized, @"\s{2,}", " ");
         return normalized.Trim();
     }
 
-    private static string RestoreLeadingDotNet(string text, string lowerPrompt)
+    private static string RestoreLeadingDottedToken(string text, string prompt)
     {
-        if (string.IsNullOrWhiteSpace(text) ||
-            !lowerPrompt.Contains(".net", StringComparison.Ordinal) &&
-            !lowerPrompt.Contains("dotnet", StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(text))
         {
             return text;
         }
 
-        return Regex.Replace(
-            text,
-            @"^(?i:net)(?=\s|$)",
-            ".NET",
-            RegexOptions.CultureInvariant);
+        var normalized = text;
+        foreach (var token in ExtractDottedPromptTokens(prompt))
+        {
+            var bareToken = token[1..];
+            if (bareToken.Length == 0)
+                continue;
+
+            normalized = Regex.Replace(
+                normalized,
+                $@"^(?i:{Regex.Escape(bareToken)})(?=\s|$)",
+                token,
+                RegexOptions.CultureInvariant);
+        }
+
+        return normalized;
+    }
+
+    private static IReadOnlyList<string> ExtractDottedPromptTokens(string prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+            return [];
+
+        return Regex.Matches(prompt, @"(?<![A-Za-z0-9_])\.[A-Za-z][A-Za-z0-9]*(?![A-Za-z0-9_])", RegexOptions.CultureInvariant)
+            .Select(match => match.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static bool LooksLikeCapitalOfFranceQuestion(string userMessage)

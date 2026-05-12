@@ -43,10 +43,11 @@ public sealed class FactSearchArgsRewriter : IToolArgsRewriter
     private static string FormatSearchSubject(string subject)
     {
         var normalized = subject.Trim();
-        if (normalized.Equals(".NET", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Equals("NET", StringComparison.OrdinalIgnoreCase))
+        if (normalized.Length > 1 &&
+            normalized[0] == '.' &&
+            normalized[1..].All(char.IsLetterOrDigit))
         {
-            return "dotnet";
+            return "dot" + normalized[1..].ToLowerInvariant();
         }
 
         if (Regex.IsMatch(normalized, @"[^A-Za-z0-9 +#-]", RegexOptions.CultureInvariant))
