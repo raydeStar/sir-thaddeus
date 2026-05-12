@@ -2,7 +2,7 @@ import './styles/globals.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
-import { routeTree } from './routeTree.gen';
+import { routeTree } from './routeTree';
 import { applyTheme, readThemePreference } from './lib/theme';
 
 // Apply theme before React mounts so the first paint matches the user's
@@ -10,12 +10,6 @@ import { applyTheme, readThemePreference } from './lib/theme';
 applyTheme(readThemePreference());
 
 const router = createRouter({ routeTree });
-
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router;
-  }
-}
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('Missing #root element');
