@@ -105,7 +105,7 @@ public class AuditedMcpToolClientTests
         Assert.Equal("Denied before exposure", result.DenialReason);
         Assert.Empty(inner.Calls);
 
-        var preflight = Assert.Single(audit.Events.Where(e => e.Action == "MCP_TOOL_PERMISSION_PREFLIGHT"));
+        var preflight = Assert.Single(audit.Events, e => e.Action == "MCP_TOOL_PERMISSION_PREFLIGHT");
         Assert.Equal("file_read", preflight.Target);
         Assert.Equal("blocked", preflight.Result);
     }

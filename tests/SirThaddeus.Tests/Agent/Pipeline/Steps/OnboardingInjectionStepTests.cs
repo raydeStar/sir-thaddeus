@@ -34,7 +34,7 @@ public class OnboardingInjectionStepTests
         var result = await step.ExecuteAsync(ctx, CancellationToken.None);
 
         var cont = Assert.IsType<StepResult.Continue>(result);
-        var system = Assert.Single(cont.Next.LlmMessages.Where(m => m.Role == "system"));
+        var system = Assert.Single(cont.Next.LlmMessages, m => m.Role == "system");
         Assert.StartsWith("You are Sir Thaddeus.", system.Content);
         Assert.Contains("[ONBOARDING]", system.Content);
         Assert.Contains("memory_store_facts", system.Content);
@@ -50,7 +50,7 @@ public class OnboardingInjectionStepTests
         var result = await step.ExecuteAsync(ctx, CancellationToken.None);
 
         var cont = Assert.IsType<StepResult.Continue>(result);
-        var system = Assert.Single(cont.Next.LlmMessages.Where(m => m.Role == "system"));
+        var system = Assert.Single(cont.Next.LlmMessages, m => m.Role == "system");
         Assert.Contains("[ONBOARDING]", system.Content);
         // Cold-specific instruction ("Introduce yourself warmly") is NOT
         // part of the follow-up suffix — verifies we picked the right one.

@@ -75,7 +75,7 @@ public sealed class ShellSessionControllerTests
             NullLogger<ShellSessionController>.Instance);
 
         await sut.InitializeAsync(startMinimized: false, CancellationToken.None);
-        var open = Assert.Single(tray.Menu!.Items.Where(x => x.Id == ShellSessionController.OpenWorkspaceMenuId));
+        var open = Assert.Single(tray.Menu!.Items, x => x.Id == ShellSessionController.OpenWorkspaceMenuId);
 
         await open.Invoke();
 
@@ -100,7 +100,7 @@ public sealed class ShellSessionControllerTests
             NullLogger<ShellSessionController>.Instance);
 
         await sut.InitializeAsync(startMinimized: false, CancellationToken.None);
-        var stopAll = Assert.Single(tray.Menu!.Items.Where(x => x.Id == ShellSessionController.StopAllMenuId));
+        var stopAll = Assert.Single(tray.Menu!.Items, x => x.Id == ShellSessionController.StopAllMenuId);
 
         await stopAll.Invoke();
 

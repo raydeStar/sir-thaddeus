@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -33,12 +33,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Serilog" Version="4.2.0" />
-    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
-    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
-    <PackageReference Include="NUlid" Version="1.7.2" />
+    <PackageReference Include="Serilog" Version="4.3.1" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="NUlid" Version="1.7.3" />
     <!-- Cron parser used by the automation scheduler. Handles DST + IANA timezones. -->
-    <PackageReference Include="Cronos" Version="0.11.0" />
+    <PackageReference Include="Cronos" Version="0.13.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -93,9 +93,9 @@
     <Exec Command="$(NpmCommand) run build"
           WorkingDirectory="$(WebSourceDir)"
           Condition="'$(SkipNpmBuild)' != 'true'" />
-    <Warning Text="[hybrid-shell] web/dist/index.html missing and SkipNpmBuild=true — runtime will serve a stale or empty bundle."
+    <Warning Text="[hybrid-shell] web/dist/index.html missing and SkipNpmBuild=true â€” runtime will serve a stale or empty bundle."
              Condition="!Exists('$(WebDistDir)\index.html')" />
-    <Warning Text="[hybrid-shell] web inputs changed but SkipNpmBuild=true — runtime may serve a stale bundle from web/dist."
+    <Warning Text="[hybrid-shell] web inputs changed but SkipNpmBuild=true â€” runtime may serve a stale bundle from web/dist."
              Condition="Exists('$(WebDistDir)\index.html') And '$(SkipNpmBuild)' == 'true'" />
   </Target>
 

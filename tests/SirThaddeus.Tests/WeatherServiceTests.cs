@@ -32,8 +32,8 @@ public class WeatherServiceTests
         Assert.NotEmpty(second.Results);
         Assert.False(first.Cache.Hit);
         Assert.True(second.Cache.Hit);
-        Assert.Single(handler.RequestedUrls.Where(u =>
-            u.Contains("photon.komoot.io/api", StringComparison.OrdinalIgnoreCase)));
+        Assert.Single(handler.RequestedUrls, u =>
+            u.Contains("photon.komoot.io/api", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -206,8 +206,8 @@ public class WeatherServiceTests
 
         Assert.False(first.Cache.Hit);
         Assert.True(second.Cache.Hit);
-        Assert.Single(handler.RequestedUrls.Where(u =>
-            u.Contains("api.open-meteo.com", StringComparison.OrdinalIgnoreCase)));
+        Assert.Single(handler.RequestedUrls, u =>
+            u.Contains("api.open-meteo.com", StringComparison.OrdinalIgnoreCase));
     }
 
     private static HttpResponseMessage JsonResponse(string json, HttpStatusCode status = HttpStatusCode.OK)

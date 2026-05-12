@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\..\packages\agent\SirThaddeus.Agent\SirThaddeus.Agent.csproj" />
@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="YamlDotNet" Version="16.3.0" />
+    <PackageReference Include="YamlDotNet" Version="17.1.0" />
   </ItemGroup>
 
   <PropertyGroup>

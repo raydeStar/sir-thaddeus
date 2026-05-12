@@ -54,7 +54,7 @@ DocumentReader/
 ```
 
 **NuGet dependencies:**
-- `UglyToad.PdfPig` (≥ 0.1.8) — PDF text extraction, Apache 2.0
+- `PdfPig` (>= 0.1.14) — PDF text extraction, Apache 2.0
 - `DocumentFormat.OpenXml` (≥ 3.0.0) — DOCX/XLSX/PPTX, MIT
 
 **Integration points:**

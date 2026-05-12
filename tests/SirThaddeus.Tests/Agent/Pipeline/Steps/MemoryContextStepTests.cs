@@ -55,7 +55,7 @@ public class MemoryContextStepTests
         var result = await step.ExecuteAsync(ctx, CancellationToken.None);
 
         var cont = Assert.IsType<StepResult.Continue>(result);
-        var system = Assert.Single(cont.Next.LlmMessages.Where(m => m.Role == "system"));
+        var system = Assert.Single(cont.Next.LlmMessages, m => m.Role == "system");
         Assert.StartsWith("You are Sir Thaddeus.", system.Content);
         Assert.Contains("REMEMBERED CONTEXT", system.Content);
         Assert.Contains("Olympia, WA", system.Content);

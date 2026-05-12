@@ -33,8 +33,8 @@ public class PublicApiProvidersTests
         Assert.Equal("nws", first.Source);
         Assert.False(first.Cache.Hit);
         Assert.True(second.Cache.Hit);
-        Assert.Single(handler.Requests.Where(r =>
-            r.Url.Contains("api.weather.gov/points", StringComparison.OrdinalIgnoreCase)));
+        Assert.Single(handler.Requests, r =>
+            r.Url.Contains("api.weather.gov/points", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -103,8 +103,8 @@ public class PublicApiProvidersTests
         Assert.Contains(first.Holidays, h => h.Name.Contains("New Year's Day", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(first.Holidays, h => h.Name.Contains("Oregon Day", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(first.Holidays, h => h.Name.Contains("California Day", StringComparison.OrdinalIgnoreCase));
-        Assert.Single(handler.Requests.Where(r =>
-            r.Url.Contains("/PublicHolidays/2026/US", StringComparison.OrdinalIgnoreCase)));
+        Assert.Single(handler.Requests, r =>
+            r.Url.Contains("/PublicHolidays/2026/US", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
