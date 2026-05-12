@@ -150,12 +150,6 @@ GitHub also shows automatic `Source code (zip)` / `Source code (tar.gz)` snapsho
 
 Use the `skip_macos=true` promotion input for emergency hotfixes to avoid macOS CI minute cost.
 
-## Optional code signing
-
-For organizations that require Authenticode-signed binaries, follow:
-
-- `project-notes/code-signing.md`
-
 ## 5) Post-deploy checks
 
 After rollout on a clean machine/profile:
