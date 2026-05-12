@@ -61,7 +61,7 @@ New-Item -ItemType Directory -Force -Path $TestArtifacts | Out-Null
 
 # Unique TRX per run (keeps last few runs visible for debugging)
 $stamp  = Get-Date -Format "yyyyMMdd-HHmmss"
-$trxName = "test-$stamp.trx"
+$trxName = "test-$stamp"
 
 Write-Host "  Configuration : $Configuration"
 Write-Host "  Restore       : $effectiveRestore"
@@ -104,7 +104,7 @@ $testArgs = @(
     '-c', $Configuration,
     '--nologo',
     '--no-build',
-    '--logger', "trx;LogFileName=$trxName",
+    '--logger', "trx;LogFilePrefix=$trxName",
     '--results-directory', $TestArtifacts
 )
 

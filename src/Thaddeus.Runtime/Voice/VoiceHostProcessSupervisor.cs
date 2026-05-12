@@ -77,10 +77,20 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
         _http.Dispose();
         _startLock.Dispose();
 
+        StopProcess();
+    }
+
+    public bool StopHost()
+    {
+        return StopProcess();
+    }
+
+    private bool StopProcess()
+    {
         var process = _process;
         _process = null;
         if (process is null)
-            return;
+            return false;
 
         try
         {
@@ -88,6 +98,7 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
             {
                 process.Kill(entireProcessTree: true);
                 process.WaitForExit(2_000);
+                return true;
             }
         }
         catch (Exception ex)
@@ -98,6 +109,8 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
         {
             process.Dispose();
         }
+
+        return false;
     }
 
     private async Task<VoiceHostEnsureResult> WaitForHealthAsync(

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using SirThaddeus.AuditLog;
 using Thaddeus.Runtime.State;
 using Thaddeus.Runtime.Tools;
@@ -8,14 +7,8 @@ namespace Thaddeus.Runtime.Hosting;
 
 public sealed class RuntimeStopAllService
 {
-    private static readonly string[] KnownSidecarProcessNames =
-    [
-        "SirThaddeus.McpServer",
-        "SirThaddeus.VoiceHost",
-        "SirThaddeus.Searxng",
-    ];
-
     private readonly VoiceModeController _voice;
+    private readonly VoiceHostProcessSupervisor _voiceHost;
     private readonly McpClientHost _mcp;
     private readonly RuntimeStateMachine _stateMachine;
     private readonly IAuditLogger _audit;
@@ -23,12 +16,14 @@ public sealed class RuntimeStopAllService
 
     public RuntimeStopAllService(
         VoiceModeController voice,
+        VoiceHostProcessSupervisor voiceHost,
         McpClientHost mcp,
         RuntimeStateMachine stateMachine,
         IAuditLogger audit,
         ILogger<RuntimeStopAllService> logger)
     {
         _voice = voice ?? throw new ArgumentNullException(nameof(voice));
+        _voiceHost = voiceHost ?? throw new ArgumentNullException(nameof(voiceHost));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
@@ -53,6 +48,19 @@ public sealed class RuntimeStopAllService
 
         try
         {
+            if (_voiceHost.StopHost())
+            {
+                stopped.Add("VoiceHost");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "runtime.stop_all.voicehost_failed");
+            errors.Add($"VoiceHost: {ex.Message}");
+        }
+
+        try
+        {
             if (await _mcp.StopChildAsync(cancellationToken).ConfigureAwait(false))
             {
                 stopped.Add("MCP server");
@@ -62,11 +70,6 @@ public sealed class RuntimeStopAllService
         {
             _logger.LogWarning(ex, "runtime.stop_all.mcp_failed");
             errors.Add($"MCP server: {ex.Message}");
-        }
-
-        foreach (var processName in KnownSidecarProcessNames)
-        {
-            StopKnownSidecarProcesses(processName, stopped, errors);
         }
 
         var result = new RuntimeStopAllResult(
@@ -90,47 +93,6 @@ public sealed class RuntimeStopAllService
         });
 
         return result;
-    }
-
-    private void StopKnownSidecarProcesses(string processName, List<string> stopped, List<string> errors)
-    {
-        Process[] processes;
-        try
-        {
-            processes = Process.GetProcessesByName(processName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "runtime.stop_all.enumerate_failed process={ProcessName}", processName);
-            errors.Add($"{processName}: could not enumerate processes");
-            return;
-        }
-
-        foreach (var process in processes)
-        {
-            using (process)
-            {
-                if (process.Id == Environment.ProcessId)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill(entireProcessTree: true);
-                        process.WaitForExit(750);
-                        stopped.Add($"{processName}#{process.Id}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "runtime.stop_all.kill_failed process={ProcessName} pid={Pid}", processName, process.Id);
-                    errors.Add($"{processName}#{process.Id}: {ex.Message}");
-                }
-            }
-        }
     }
 }
 
