@@ -60,6 +60,43 @@ public sealed class RuntimeMcpEnvironmentBuilderTests
         Assert.True(Directory.Exists(tempRoot));
     }
 
+    [Fact]
+    public void ResolveMemoryDbPathFromEnvironment_DefaultsToSharedLocalAppDataPath()
+    {
+        using var envScope = new EnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ST_MEMORY_DB_PATH"] = null
+        });
+
+        var path = RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPathFromEnvironment();
+
+        Assert.Equal(RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPath("auto"), path);
+        Assert.EndsWith(Path.Combine("SirThaddeus", "memory.db"), path, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResolveMemoryDbPathFromEnvironment_ResolvesAutoAndCustomValues()
+    {
+        using (new EnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ST_MEMORY_DB_PATH"] = "auto"
+        }))
+        {
+            Assert.Equal(
+                RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPath("auto"),
+                RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPathFromEnvironment());
+        }
+
+        var customPath = Path.Combine(Path.GetTempPath(), "sir-thaddeus-custom-memory.db");
+        using (new EnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ST_MEMORY_DB_PATH"] = customPath
+        }))
+        {
+            Assert.Equal(customPath, RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPathFromEnvironment());
+        }
+    }
+
     private sealed class EnvironmentVariableScope : IDisposable
     {
         private readonly Dictionary<string, string?> _priorValues = new(StringComparer.OrdinalIgnoreCase);

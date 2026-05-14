@@ -149,6 +149,12 @@ public static class RuntimeMcpEnvironmentBuilder
         return Path.Combine(localAppData, "SirThaddeus", "memory.db");
     }
 
+    public static string ResolveMemoryDbPathFromEnvironment()
+    {
+        var dbPath = Environment.GetEnvironmentVariable("ST_MEMORY_DB_PATH");
+        return ResolveMemoryDbPath(string.IsNullOrWhiteSpace(dbPath) ? "auto" : dbPath.Trim());
+    }
+
     public static string ResolveWeatherPlaceMemoryPath(string weatherPlaceMemoryPath)
     {
         if (!string.Equals(weatherPlaceMemoryPath, "auto", StringComparison.OrdinalIgnoreCase))

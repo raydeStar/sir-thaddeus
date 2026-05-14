@@ -85,10 +85,11 @@ providers when the machine has connectivity.
 
 ### Required ZIP contents
 
+- `Launch Sir Thaddeus.cmd` (friendly Windows launcher)
 - `Thaddeus.Runtime.exe` (primary app executable)
 - `SirThaddeus.McpServer.exe` (MCP sidecar process)
 - `SirThaddeus.VoiceHost.exe` (voice sidecar process)
-- required runtime DLLs and support files from publish output
+- `wwwroot/` plus bundled support directories such as `voice/`, `search/`, and `assets/`
 - `README_FIRST_RUN.md` (first-run instructions)
 
 ### Recommended ZIP contents
@@ -144,8 +145,6 @@ Expected release assets:
 
 - `sir-thaddeus-win-x64-v0.1.0-full.zip`
 - `sir-thaddeus-win-x64-v0.1.0-full.zip.sha256.txt`
-- `sir-thaddeus-win-x64-v0.1.0-lite.zip`
-- `sir-thaddeus-win-x64-v0.1.0-lite.zip.sha256.txt`
 
 Every tagged release now builds full and lite packages for each platform:
 
@@ -155,8 +154,10 @@ Every tagged release now builds full and lite packages for each platform:
 
 Rolling releases now expose the same split by platform:
 
-- `latest-dev` tracks the newest `dev` push and includes Windows/Linux/macOS artifacts
-- `latest` tracks the newest `master` push and includes Windows/Linux/macOS artifacts
+- `latest-dev` tracks the newest `dev` push and includes full Windows/Linux/macOS packages
+- `latest` tracks the newest `master` push and includes full Windows/Linux/macOS packages
+
+Lite bundles and package contents manifests are retained as CI artifacts for diagnostics, but are not promoted to the public Releases page.
 
 GitHub also shows automatic `Source code (zip)` / `Source code (tar.gz)` snapshots for each release tag; those are repository archives, not runnable packages.
 

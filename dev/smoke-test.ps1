@@ -191,8 +191,8 @@ foreach ($file in $requiredFiles) {
     }
 }
 
-# Package must contain managed payload DLLs.
-$rootDllCount = @(Get-ChildItem -Path $testDir -Filter "*.dll" -File -Recurse).Count
+# Package must contain either bundled DLL payloads or single-file app executables.
+$dllCount = @(Get-ChildItem -Path $testDir -Filter "*.dll" -File -Recurse).Count
 $binDir = Join-Path $testDir "bin"
 $binDllCount = if (Test-Path $binDir) {
     @(Get-ChildItem -Path $binDir -Filter "*.dll" -File -Recurse).Count
@@ -200,12 +200,16 @@ $binDllCount = if (Test-Path $binDir) {
 else {
     0
 }
+$singleFileRuntime = (Test-Path $uiExecutable) -and -not (Test-Path (Join-Path $testDir "Thaddeus.Runtime.dll"))
 
-if ($rootDllCount -gt 0 -or $binDllCount -gt 0) {
-    Pass "Managed payload present (root DLLs: $rootDllCount, bin DLLs: $binDllCount)"
+if ($dllCount -gt 0 -or $binDllCount -gt 0) {
+    Pass "Support DLL payload present (DLLs: $dllCount, bin DLLs: $binDllCount)"
+}
+elseif ($singleFileRuntime) {
+    Pass "Single-file runtime payload present"
 }
 else {
-    Fail "No managed payload DLLs found in package"
+    Fail "No runtime payload found in package"
 }
 
 # Voice backend assets.

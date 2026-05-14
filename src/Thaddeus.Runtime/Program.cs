@@ -19,6 +19,7 @@ using Thaddeus.Runtime.Ws;
 using Thaddeus.SharedTypes;
 using SirThaddeus.Agent;
 using SirThaddeus.AuditLog;
+using SirThaddeus.RuntimeHost;
 using SirThaddeus.Wiki;
 using SirThaddeus.Wiki.Storage;
 
@@ -148,10 +149,10 @@ public static class Program
             builder.Services.AddSingleton<Thaddeus.Runtime.Memory.MemoryReflectionService>();
             builder.Services.AddSingleton<SirThaddeus.Memory.IMemoryStore>(sp =>
             {
-                var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
-                var dbPath = Environment.GetEnvironmentVariable("ST_MEMORY_DB_PATH");
-                if (string.IsNullOrWhiteSpace(dbPath))
-                    dbPath = Path.Combine(lockDir, "memory.sqlite");
+                var dbPath = RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPathFromEnvironment();
+                var dbDir = Path.GetDirectoryName(dbPath);
+                if (!string.IsNullOrWhiteSpace(dbDir))
+                    Directory.CreateDirectory(dbDir);
                 var store = new SirThaddeus.Memory.Sqlite.SqliteMemoryStore(dbPath);
                 // Block briefly so the first API request doesn't race the
                 // schema-init and 500. EnsureSchemaAsync is idempotent and
