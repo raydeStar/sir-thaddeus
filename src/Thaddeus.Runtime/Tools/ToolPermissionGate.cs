@@ -98,12 +98,21 @@ public sealed class ToolPermissionGate
         var group = ToolGroupClassifier.Classify(toolName);
         if (group == ToolGroup.Safe) return ToolPermissionDecision.Allow;
 
+        var doc = await _settings.GetAsync(ct).ConfigureAwait(false);
+        if (doc.Privacy.OfflineMode && group == ToolGroup.Web)
+        {
+            _logger.LogInformation(
+                "tool.permission.denied_by_offline_mode tool={Tool} group={Group}",
+                toolName, group);
+            return ToolPermissionDecision.Deny;
+        }
+
         // Session shortcut: if the user approved the group earlier this
-        // process, skip the prompt.
+        // process, skip the prompt. Offline mode is checked above so it
+        // always wins over stale session grants.
         if (_sessionAllow.TryGetValue(group, out var cached) && cached)
             return ToolPermissionDecision.Allow;
 
-        var doc = await _settings.GetAsync(ct).ConfigureAwait(false);
         var effective = ResolveEffectivePolicy(doc.Permissions, group);
 
         switch (effective)

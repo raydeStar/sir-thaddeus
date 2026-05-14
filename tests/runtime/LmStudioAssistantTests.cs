@@ -35,10 +35,12 @@ public class LmStudioAssistantTests : IDisposable
         public string Reply { get; init; } = "ok";
         public Exception? Throw { get; init; }
         public List<IReadOnlyList<LlmChatMessage>> Calls { get; } = new();
+        public List<IReadOnlyList<ToolDefinition>> ToolCalls { get; } = new();
 
         public Task<LlmResponse> ChatAsync(IReadOnlyList<LlmChatMessage> messages, IReadOnlyList<ToolDefinition>? tools = null, CancellationToken cancellationToken = default)
         {
             Calls.Add(messages);
+            ToolCalls.Add(tools ?? Array.Empty<ToolDefinition>());
             if (Throw is not null) throw Throw;
             return Task.FromResult(new LlmResponse { IsComplete = true, Content = Reply });
         }
@@ -52,10 +54,12 @@ public class LmStudioAssistantTests : IDisposable
 
     private sealed class FakeMcpClient : IMcpToolClient
     {
+        public IReadOnlyList<McpToolInfo> Tools { get; init; } = Array.Empty<McpToolInfo>();
+
         public Task<string> CallToolAsync(string toolName, string argumentsJson, CancellationToken cancellationToken = default)
             => Task.FromResult(string.Empty);
         public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<McpToolInfo>>(Array.Empty<McpToolInfo>());
+            => Task.FromResult(Tools);
     }
 
     private sealed class FakeSettingsStore : ISettingsStore
@@ -72,18 +76,23 @@ public class LmStudioAssistantTests : IDisposable
     }
 
     private (JsonFileThreadStore store, LmStudioAssistant assistant, List<RuntimeEvent<object?>> captured, FakeLlmClient fake)
-        NewSut(string reply = "hello world from model", Exception? throwOnCall = null)
+        NewSut(
+            string reply = "hello world from model",
+            Exception? throwOnCall = null,
+            IReadOnlyList<McpToolInfo>? tools = null,
+            bool offlineMode = false)
     {
         var store = new JsonFileThreadStore(_root, NullLogger<JsonFileThreadStore>.Instance);
         var bus = new EventBus(NullLogger<EventBus>.Instance);
         var publisher = new ChatTurnPublisher(bus);
         var fake = new FakeLlmClient { Reply = reply, Throw = throwOnCall };
-        var mcp = new FakeMcpClient();
+        var mcp = new FakeMcpClient { Tools = tools ?? Array.Empty<McpToolInfo>() };
         var gate = new ToolPermissionGate(new FakeSettingsStore(), bus, NullLogger<ToolPermissionGate>.Instance);
         var audit = new TestAuditLogger();
         var assistant = new LmStudioAssistant(fake, mcp, gate, store, publisher, audit, NullLogger<LmStudioAssistant>.Instance)
         {
             DeltaDelay = TimeSpan.Zero,
+            OfflineMode = offlineMode,
         };
         var captured = new List<RuntimeEvent<object?>>();
         bus.Subscribe((evt, _) => { captured.Add(evt); return Task.CompletedTask; });
@@ -141,5 +150,34 @@ public class LmStudioAssistantTests : IDisposable
         // the stub for the same turn.
         await Assert.ThrowsAsync<HttpRequestException>(() =>
             assistant.RespondAsync(thread.Id, "hi", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RespondAsync_filters_web_tools_when_offline_mode_is_on()
+    {
+        var tools = new[]
+        {
+            new McpToolInfo
+            {
+                Name = "web_search",
+                Description = "Search the web",
+                InputSchema = new { type = "object" },
+            },
+            new McpToolInfo
+            {
+                Name = "memory_retrieve",
+                Description = "Search local memory",
+                InputSchema = new { type = "object" },
+            },
+        };
+        var (store, assistant, _, fake) = NewSut(tools: tools, offlineMode: true);
+        var thread = await store.CreateAsync("t", CancellationToken.None);
+
+        await assistant.RespondAsync(thread.Id, "what is current?", CancellationToken.None);
+
+        var sentTools = fake.ToolCalls.Single();
+        Assert.DoesNotContain(sentTools, t => t.Function?.Name == "web_search");
+        Assert.Contains(sentTools, t => t.Function?.Name == "memory_retrieve");
+        Assert.Contains("Offline mode is ON", fake.Calls.Single()[0].Content);
     }
 }

@@ -266,6 +266,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     Footman = footmanCached,
                     LocationHint = string.IsNullOrWhiteSpace(loc?.ManualLocation) ? null : loc!.ManualLocation,
                     PreferredUnits = string.IsNullOrWhiteSpace(loc?.PreferredUnits) ? null : loc!.PreferredUnits,
+                    OfflineMode = doc.Privacy.OfflineMode,
                     PersonalityRuntime = personalityRuntime,
                     MemoryContextProvider = memoryProvider,
                     MemoryStore = memoryStore,

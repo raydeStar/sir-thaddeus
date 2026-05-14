@@ -13,9 +13,9 @@ Use this checklist before declaring Sir Thaddeus v1 ready. Mark skipped checks w
 - [ ] Run `Push-Location web; npm ci; npm run build; Pop-Location`.
 - [ ] Run `dotnet build SirThaddeus.sln -c Release --no-restore`.
 - [ ] Run `Push-Location web; npm run typecheck; npm run lint; Pop-Location`.
-- [ ] Run `pwsh dev/test.ps1 -Configuration Release -SkipScreenObserveHarness`.
+- [ ] Run `pwsh dev/test.ps1 -Configuration Release`.
       Expected: **0 failed**; the exact pass count changes as tests are added or retired.
-- [ ] *(optional)* If `artifacts/harness-suites/screen-observe/` is populated, drop `-SkipScreenObserveHarness` and re-run. The suite fixtures are not checked in — see [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
+- [ ] *(optional)* If `artifacts/harness-suites/screen-observe/` is populated, confirm the screen-observe harness is reported as enabled. The suite fixtures are not checked in — see [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 - [ ] *(optional)* `pwsh dev/preflight.ps1` for the heavier bootstrap path.
 
 ## Runtime Launch
@@ -164,6 +164,7 @@ Use this checklist before declaring Sir Thaddeus v1 ready. Mark skipped checks w
 - [ ] Run `./dev/package-runtime.ps1 -Rids win-x64`.
 - [ ] Run `./dev/release-package.ps1 -Runtime win-x64` when ready for a package candidate.
 - [ ] Run `./dev/smoke-test.ps1 -SkipLaunch` for package structure validation.
+- [ ] If building `-LiteBundle`, run `./dev/smoke-test.ps1 -SkipLaunch -AllowRuntimeAssetDownload` and record that bundled voice/search payloads are intentionally omitted.
 - [ ] Launch the packaged runtime or shell manually on a Windows machine.
 - [ ] Verify checksum files for release archives.
 - [ ] *(optional)* Repeat for `osx-arm64` / `linux-x64` if cross-build agents are available.

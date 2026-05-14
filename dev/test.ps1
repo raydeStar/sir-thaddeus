@@ -57,6 +57,7 @@ $SlnFile       = Join-Path $RepoRoot "SirThaddeus.sln"
 $Artifacts     = Join-Path $RepoRoot "artifacts"
 $TestArtifacts = Join-Path $Artifacts "test-results"
 $HarnessSuitesRoot = Join-Path $Artifacts "harness-suites"
+$ScreenObserveSuite = Join-Path $HarnessSuitesRoot "screen-observe"
 New-Item -ItemType Directory -Force -Path $TestArtifacts | Out-Null
 
 # Unique TRX per run (keeps last few runs visible for debugging)
@@ -69,7 +70,7 @@ if ($isCi -and -not $Restore) {
     Write-Host "  CI override   : enabled (restore forced)"
 }
 if ($Filter) { Write-Host "  Filter        : $Filter" }
-Write-Host "  Screen Harness: $(if ($SkipScreenObserveHarness) { 'skipped' } elseif ($Filter) { 'skipped (filtered run)' } else { 'enabled' })"
+Write-Host "  Screen Harness: $(if ($SkipScreenObserveHarness) { 'skipped' } elseif ($Filter) { 'skipped (filtered run)' } elseif (-not (Test-Path -LiteralPath $ScreenObserveSuite -PathType Container)) { 'skipped (fixtures not found)' } else { 'enabled' })"
 Write-Host "  Results       : $TestArtifacts\$trxName"
 
 # ── Policy Guard: no device geolocation APIs ─────────────────
@@ -125,20 +126,27 @@ $testExit = $LASTEXITCODE
 
 $harnessExit = 0
 if (-not $Filter -and -not $SkipScreenObserveHarness) {
-    Write-Section "Screen Observe Harness"
+    if (Test-Path -LiteralPath $ScreenObserveSuite -PathType Container) {
+        Write-Section "Screen Observe Harness"
 
-    $harnessArgs = @(
-        '--suites-root', $HarnessSuitesRoot,
-        '--suite', 'screen-observe',
-        '--max-iters', '1',
-        '--judge', 'none'
-    )
+        $harnessArgs = @(
+            '--suites-root', $HarnessSuitesRoot,
+            '--suite', 'screen-observe',
+            '--max-iters', '1',
+            '--judge', 'none'
+        )
 
-    & "$PSScriptRoot\harness.ps1" @harnessArgs
-    $harnessExit = $LASTEXITCODE
+        & "$PSScriptRoot\harness.ps1" @harnessArgs
+        $harnessExit = $LASTEXITCODE
 
-    if ($harnessExit -ne 0) {
-        Write-Host "  FAIL  Screen-observe harness failed." -ForegroundColor Red
+        if ($harnessExit -ne 0) {
+            Write-Host "  FAIL  Screen-observe harness failed." -ForegroundColor Red
+        }
+    }
+    else {
+        Write-Section "Screen Observe Harness"
+        Write-Host "  SKIP  Fixtures not found: $ScreenObserveSuite" -ForegroundColor Yellow
+        Write-Host "  INFO  Populate artifacts\harness-suites\screen-observe to include this optional harness." -ForegroundColor DarkGray
     }
 }
 

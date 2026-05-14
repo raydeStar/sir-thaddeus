@@ -146,6 +146,7 @@ public static class VoiceApi
             }
             catch (TaskCanceledException)
             {
+                voiceHost.InvalidateResponsiveCache(ttsEndpoint);
                 return Results.Json(
                     new VoiceTtsErrorResponse("voice_host_tts_timeout", "Timed out waiting for VoiceHost TTS."),
                     VoiceJsonContext.Default.VoiceTtsErrorResponse,
@@ -153,6 +154,7 @@ public static class VoiceApi
             }
             catch (HttpRequestException ex)
             {
+                voiceHost.InvalidateResponsiveCache(ttsEndpoint);
                 return Results.Json(
                     new VoiceTtsErrorResponse("voice_host_unreachable", $"Could not reach VoiceHost: {ex.Message}"),
                     VoiceJsonContext.Default.VoiceTtsErrorResponse,
@@ -247,6 +249,7 @@ public static class VoiceApi
             }
             catch (TaskCanceledException)
             {
+                voiceHost.InvalidateResponsiveCache(asrEndpoint);
                 return Results.Json(
                     new VoiceAsrErrorResponse("voice_host_asr_timeout", "Timed out waiting for VoiceHost ASR."),
                     VoiceJsonContext.Default.VoiceAsrErrorResponse,
@@ -254,6 +257,7 @@ public static class VoiceApi
             }
             catch (HttpRequestException ex)
             {
+                voiceHost.InvalidateResponsiveCache(asrEndpoint);
                 return Results.Json(
                     new VoiceAsrErrorResponse("voice_host_unreachable", $"Could not reach VoiceHost: {ex.Message}"),
                     VoiceJsonContext.Default.VoiceAsrErrorResponse,

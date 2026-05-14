@@ -38,6 +38,9 @@ Useful variants:
 
 # Build deterministic versioned file names (recommended for releases)
 .\dev\release-package.ps1 -Version v0.1.0
+
+# Build the smaller runtime-download profile when bundled sidecars are absent
+.\dev\release-package.ps1 -Version v0.1.0 -LiteBundle
 ```
 
 Outputs:
@@ -61,6 +64,11 @@ run it manually or let the build scripts handle it:
 End users get these assets automatically during the first-run onboarding wizard.
 
 Packaging smoke validation now includes an offline dependency gate that verifies bundled `uv` + Python + wheelhouse can create a venv and install voice dependencies before release publish.
+For lite packages, run smoke validation with runtime downloads allowed:
+
+```powershell
+.\dev\smoke-test.ps1 -SkipLaunch -AllowRuntimeAssetDownload
+```
 
 ### Bundled SearXNG sidecar
 
@@ -71,7 +79,9 @@ prepare or refresh the bundled `search/` payload manually:
 .\dev\build-searxng-package.ps1
 ```
 
-Release packaging now fails if a valid bundled SearXNG payload cannot be staged.
+Full release packaging fails if a valid bundled SearXNG payload cannot be staged.
+Lite packaging omits the bundled search payload and relies on configured/live
+providers when the machine has connectivity.
 
 ### Required ZIP contents
 

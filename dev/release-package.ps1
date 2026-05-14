@@ -403,7 +403,7 @@ foreach ($project in $projects) {
 }
 
 $searchStageDir = Join-Path $stageDir "search"
-$searchPayloadRequired = $Configuration -eq "Release"
+$searchPayloadRequired = $Configuration -eq "Release" -and -not $LiteBundle.IsPresent
 $searchSidecarStaged = $false
 $searchStageFailures = @()
 $rawSearxngPayloadCandidates = @(

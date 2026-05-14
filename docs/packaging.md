@@ -20,8 +20,8 @@ The staged package includes:
   and SHA-256 checksums.
 
 The lite package keeps the same runtime and MCP surface but skips heavyweight
-bundled voice and Playwright payloads. On Linux and macOS, lite packages also
-exclude `SirThaddeus.VoiceHost`.
+bundled voice, Playwright, and SearXNG payloads. On Linux and macOS, lite
+packages also exclude `SirThaddeus.VoiceHost`.
 
 Runtime state remains local to the machine, with settings managed by the web UI
 at `%USERPROFILE%\.thaddeus\runtime-settings.json` on Windows and equivalent
@@ -36,6 +36,13 @@ Windows release packaging is driven by:
 .\dev\build-searxng-package.ps1
 .\dev\release-package.ps1 -Version v0.1.0
 .\dev\release-package.ps1 -Version v0.1.0 -LiteBundle
+```
+
+Full packages require the bundled voice and SearXNG payloads to be present.
+Lite packages can be built without them and should be smoke-tested with:
+
+```pwsh
+.\dev\smoke-test.ps1 -SkipLaunch -AllowRuntimeAssetDownload
 ```
 
 Outputs land under `artifacts/release/`, for example:

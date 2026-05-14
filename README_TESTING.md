@@ -84,8 +84,10 @@ Use this when you are unsure:
 ```
 
 Builds in Debug, runs all tests, and writes a TRX report to
-`./artifacts/test-results/`. On unfiltered runs it also executes the
-`screen-observe` harness suite.
+`./artifacts/test-results/`. On unfiltered runs it executes the
+`screen-observe` harness suite when fixtures exist under
+`./artifacts/harness-suites/screen-observe/`; otherwise it reports that harness
+as skipped.
 
 ## Run a focused subset
 
@@ -104,7 +106,7 @@ Filtered runs skip the screen-observe harness so the fast loop stays fast.
 ```
 
 Restores packages, builds in Release, then runs the full suite.
-This includes the `screen-observe` harness suite.
+This includes the `screen-observe` harness suite when its fixtures are present.
 
 ## Production preflight (before release)
 
@@ -228,7 +230,7 @@ This now covers:
 
 - the standard .NET test suite
 - the Windows-only `SirThaddeus.Windows.Tests` helper tests
-- the `screen-observe` harness suite
+- the `screen-observe` harness suite, when fixtures are present
 
 Target just the screen-observe harness:
 

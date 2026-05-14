@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronRight, Loader2, MessageSquare, Mic, Sparkles, Square } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
-import { acquireMicStream, stopMicStream } from '../lib/micCapture';
+import { acquireMicStream, isStreamLive, prepareMicCapture, stopMicStream } from '../lib/micCapture';
 import { trimSilenceToWav } from '../lib/audioTrim';
 import { transcribeSpeech, warmVoiceHost } from '../lib/voiceApi';
 
@@ -31,6 +31,7 @@ function HomeRoute() {
   const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing'>('idle');
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const warmStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef(0);
   const abortRef = useRef(false);
@@ -45,6 +46,10 @@ function HomeRoute() {
         stopMicStream(streamRef.current);
         streamRef.current = null;
       }
+      if (warmStreamRef.current) {
+        stopMicStream(warmStreamRef.current);
+        warmStreamRef.current = null;
+      }
     };
   }, []);
 
@@ -54,6 +59,7 @@ function HomeRoute() {
 
   useEffect(() => {
     void warmVoiceHost().catch(() => undefined);
+    void prepareMicCapture().catch(() => undefined);
   }, []);
 
   const start = useCallback(async (text: string, wikiContext?: WikiContextSelection) => {
@@ -91,18 +97,27 @@ function HomeRoute() {
     chunksRef.current = [];
     abortRef.current = false;
     startedAtRef.current = performance.now();
-    setVoiceState('starting');
+    void warmVoiceHost().catch(() => undefined);
+    const reusedWarm = isStreamLive(warmStreamRef.current);
+    setVoiceState(reusedWarm ? 'recording' : 'starting');
 
     try {
-      const acquired = await acquireMicStream();
+      let stream: MediaStream;
+      if (reusedWarm && warmStreamRef.current) {
+        stream = warmStreamRef.current;
+      } else {
+        const acquired = await acquireMicStream();
+        stream = acquired.stream;
+        warmStreamRef.current = stream;
+      }
+
       if (abortRef.current) {
-        stopMicStream(acquired.stream);
         abortRef.current = false;
         setVoiceState('idle');
         return;
       }
 
-      const recorder = new MediaRecorder(acquired.stream, mediaRecorderOptions());
+      const recorder = new MediaRecorder(stream, mediaRecorderOptions());
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
       };
@@ -112,7 +127,7 @@ function HomeRoute() {
         setVoiceState('idle');
       };
 
-      streamRef.current = acquired.stream;
+      streamRef.current = stream;
       recorderRef.current = recorder;
       recorder.start();
       setVoiceState('recording');
@@ -357,10 +372,9 @@ function releaseHomeMic(
     try { recorder.stop(); } catch { /* best effort */ }
   }
   recorderRef.current = null;
-  if (streamRef.current) {
-    stopMicStream(streamRef.current);
-    streamRef.current = null;
-  }
+  // The home route keeps the first successful MediaStream warm so repeat
+  // PTT presses don't pay getUserMedia startup again. Unmount owns teardown.
+  streamRef.current = null;
 }
 
 function homeVoiceButtonLabel(state: 'idle' | 'starting' | 'recording' | 'transcribing'): string {

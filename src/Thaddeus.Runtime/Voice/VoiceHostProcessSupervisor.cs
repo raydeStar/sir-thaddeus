@@ -8,12 +8,16 @@ namespace Thaddeus.Runtime.Voice;
 public sealed class VoiceHostProcessSupervisor : IDisposable
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan PositiveProbeCacheTtl = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan DefaultStartupTimeout = TimeSpan.FromSeconds(120);
 
     private readonly ILogger<VoiceHostProcessSupervisor> _logger;
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _startLock = new(1, 1);
+    private readonly object _healthCacheGate = new();
     private Process? _process;
+    private Uri? _lastHealthyUri;
+    private DateTimeOffset _lastHealthyUntil = DateTimeOffset.MinValue;
     private bool _disposed;
 
     public VoiceHostProcessSupervisor(ILogger<VoiceHostProcessSupervisor> logger)
@@ -29,18 +33,31 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (await ProbeAsync(voiceHostEndpoint, cancellationToken).ConfigureAwait(false))
+        var healthUri = BuildHealthUri(voiceHostEndpoint);
+        if (IsRecentlyHealthy(healthUri))
             return VoiceHostEnsureResult.Ok();
+
+        if (await ProbeAsync(healthUri, cancellationToken).ConfigureAwait(false))
+        {
+            MarkHealthy(healthUri);
+            return VoiceHostEnsureResult.Ok();
+        }
 
         await _startLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (await ProbeAsync(voiceHostEndpoint, cancellationToken).ConfigureAwait(false))
+            if (IsRecentlyHealthy(healthUri))
                 return VoiceHostEnsureResult.Ok();
+
+            if (await ProbeAsync(healthUri, cancellationToken).ConfigureAwait(false))
+            {
+                MarkHealthy(healthUri);
+                return VoiceHostEnsureResult.Ok();
+            }
 
             if (_process is not null && !_process.HasExited)
             {
-                return await WaitForHealthAsync(voiceHostEndpoint, _process, ResolveStartupTimeout(settings), cancellationToken).ConfigureAwait(false);
+                return await WaitForHealthAsync(healthUri, _process, ResolveStartupTimeout(settings), cancellationToken).ConfigureAwait(false);
             }
 
             if (!TryBuildStartInfo(voiceHostEndpoint, settings, out var startInfo, out var error))
@@ -63,11 +80,24 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
             AttachLogging(process);
             _logger.LogInformation("voicehost.started pid={Pid} command={Command}", process.Id, startInfo.FileName);
 
-            return await WaitForHealthAsync(voiceHostEndpoint, process, ResolveStartupTimeout(settings), cancellationToken).ConfigureAwait(false);
+            return await WaitForHealthAsync(healthUri, process, ResolveStartupTimeout(settings), cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _startLock.Release();
+        }
+    }
+
+    public void InvalidateResponsiveCache(Uri voiceHostEndpoint)
+    {
+        var healthUri = BuildHealthUri(voiceHostEndpoint);
+        lock (_healthCacheGate)
+        {
+            if (_lastHealthyUri is not null && SameUri(_lastHealthyUri, healthUri))
+            {
+                _lastHealthyUri = null;
+                _lastHealthyUntil = DateTimeOffset.MinValue;
+            }
         }
     }
 
@@ -87,6 +117,7 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
 
     private bool StopProcess()
     {
+        ClearHealthCache();
         var process = _process;
         _process = null;
         if (process is null)
@@ -114,7 +145,7 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
     }
 
     private async Task<VoiceHostEnsureResult> WaitForHealthAsync(
-        Uri voiceHostEndpoint,
+        Uri healthUri,
         Process process,
         TimeSpan startupTimeout,
         CancellationToken cancellationToken)
@@ -124,8 +155,11 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (await ProbeAsync(voiceHostEndpoint, cancellationToken).ConfigureAwait(false))
+            if (await ProbeAsync(healthUri, cancellationToken).ConfigureAwait(false))
+            {
+                MarkHealthy(healthUri);
                 return VoiceHostEnsureResult.Ok();
+            }
 
             if (process.HasExited)
             {
@@ -142,14 +176,14 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
             $"VoiceHost did not respond to /health within {(int)startupTimeout.TotalSeconds} seconds.");
     }
 
-    private async Task<bool> ProbeAsync(Uri voiceHostEndpoint, CancellationToken cancellationToken)
+    private async Task<bool> ProbeAsync(Uri healthUri, CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(ProbeTimeout);
 
         try
         {
-            using var response = await _http.GetAsync(BuildHealthUri(voiceHostEndpoint), timeoutCts.Token)
+            using var response = await _http.GetAsync(healthUri, timeoutCts.Token)
                 .ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }
@@ -158,6 +192,37 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
             return false;
         }
     }
+
+    private bool IsRecentlyHealthy(Uri healthUri)
+    {
+        lock (_healthCacheGate)
+        {
+            return _lastHealthyUri is not null &&
+                   SameUri(_lastHealthyUri, healthUri) &&
+                   DateTimeOffset.UtcNow < _lastHealthyUntil;
+        }
+    }
+
+    private void MarkHealthy(Uri healthUri)
+    {
+        lock (_healthCacheGate)
+        {
+            _lastHealthyUri = healthUri;
+            _lastHealthyUntil = DateTimeOffset.UtcNow + PositiveProbeCacheTtl;
+        }
+    }
+
+    private void ClearHealthCache()
+    {
+        lock (_healthCacheGate)
+        {
+            _lastHealthyUri = null;
+            _lastHealthyUntil = DateTimeOffset.MinValue;
+        }
+    }
+
+    private static bool SameUri(Uri left, Uri right)
+        => string.Equals(left.AbsoluteUri, right.AbsoluteUri, StringComparison.OrdinalIgnoreCase);
 
     private bool TryBuildStartInfo(
         Uri voiceHostEndpoint,

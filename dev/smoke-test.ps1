@@ -325,7 +325,12 @@ foreach ($asset in $searchPayloadChecks) {
 }
 
 if ($detectedSearchPayload -eq 0) {
-    Fail "Bundled SearXNG payload not found"
+    if ($AllowRuntimeAssetDownload) {
+        Warn "Bundled SearXNG payload not found (will use configured/live search providers when available)"
+    }
+    else {
+        Fail "Bundled SearXNG payload not found"
+    }
 }
 else {
     foreach ($asset in $searchPayloadChecks) {

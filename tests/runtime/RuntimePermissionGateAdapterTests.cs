@@ -65,18 +65,35 @@ public class RuntimePermissionGateAdapterTests
         Assert.Contains("blocked", result.DenialReason, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task CheckAsync_denies_Web_group_when_offline_mode_is_on()
+    {
+        using var fixture = new GateFixture(webPolicy: "always", offlineMode: true);
+        var adapter = new RuntimePermissionGateAdapter(fixture.Gate, "t1", "turn1");
+
+        var result = await adapter.CheckAsync("web_search", "{\"q\":\"hi\"}", CancellationToken.None);
+
+        Assert.False(result.Granted);
+        Assert.True(result.PermissionRequired);
+        Assert.Contains("blocked", result.DenialReason, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class GateFixture : IDisposable
     {
         public ToolPermissionGate Gate { get; }
 
-        public GateFixture(string webPolicy = "ask")
+        public GateFixture(string webPolicy = "ask", bool offlineMode = false)
         {
             var defaults = SettingsDocument.Defaults();
             var perms = defaults.Permissions! with
             {
                 Web = webPolicy,
             };
-            var doc = defaults with { Permissions = perms };
+            var doc = defaults with
+            {
+                Permissions = perms,
+                Privacy = defaults.Privacy with { OfflineMode = offlineMode },
+            };
 
             var store = new InMemorySettingsStore(doc);
             var bus = new EventBus(NullLogger<EventBus>.Instance);

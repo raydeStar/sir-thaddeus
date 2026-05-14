@@ -72,6 +72,12 @@ public sealed class LmStudioAssistant : IAssistant
     public string? PreferredUnits { get; init; }
 
     /// <summary>
+    /// When true, chat turns hide web-classified tools and instruct the
+    /// model to work from local/internal context only.
+    /// </summary>
+    public bool OfflineMode { get; init; }
+
+    /// <summary>
     /// Personality runtime used by <c>PersonalityInjectionStep</c> to wrap
     /// the base system prompt with tone / formality / warmth modifiers
     /// and to inject few-shot examples. Null leaves the pipeline without
@@ -209,8 +215,9 @@ public sealed class LmStudioAssistant : IAssistant
 
         var dateBlock = BuildDateBlock();
         var locBlock = BuildLocationBlock();
+        var offlineBlock = BuildOfflineModeBlock();
         var preamble = string.Join("\n\n",
-            new[] { dateBlock, locBlock }.Where(s => !string.IsNullOrEmpty(s)));
+            new[] { dateBlock, locBlock, offlineBlock }.Where(s => !string.IsNullOrEmpty(s)));
         return string.IsNullOrEmpty(preamble) ? text : preamble + "\n\n" + text;
     }
 
@@ -250,6 +257,16 @@ public sealed class LmStudioAssistant : IAssistant
             "Pass the location string to weather_geocode and similar location-scoped " +
             "tools verbatim. Do not announce that you know their home location — " +
             "just use it naturally when they omit one.";
+    }
+
+    private string BuildOfflineModeBlock()
+    {
+        if (!OfflineMode) return string.Empty;
+        return
+            "Offline mode is ON. Do not use web, browser, weather, places, feed, " +
+            "holiday, status-check, or other network-backed tools. Work from local " +
+            "conversation context, local memory, wiki/files when available, and " +
+            "clearly say when a question needs live web access that offline mode is blocking.";
     }
 
     public LmStudioAssistant(
@@ -603,6 +620,9 @@ public sealed class LmStudioAssistant : IAssistant
         var defs = new List<ToolDefinition>(mcpTools.Count);
         foreach (var t in mcpTools)
         {
+            if (OfflineMode && RuntimeToolGroupClassifier.Instance.Classify(t.Name) == ToolGroup.Web.ToString())
+                continue;
+
             defs.Add(new ToolDefinition
             {
                 Function = new FunctionDefinition

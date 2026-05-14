@@ -48,6 +48,7 @@ export interface PrivacySettings {
   telemetryEnabled: boolean;
   allowScreenCapture: boolean;
   localOnly: boolean;
+  offlineMode?: boolean;
 }
 
 export interface AppFlags {

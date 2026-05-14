@@ -53,7 +53,8 @@ public sealed record ShortcutSettings(
 public sealed record PrivacySettings(
     bool TelemetryEnabled,
     bool AllowScreenCapture,
-    bool LocalOnly);
+    bool LocalOnly,
+    bool OfflineMode = false);
 
 /// <summary>
 /// Per-group tool permission policy. Every MCP tool is classified into one

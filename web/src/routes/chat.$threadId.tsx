@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, Copy, Loader2, Mic, Plus, RotateCcw, Square, Volume2 } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Loader2, Mic, Plus, RotateCcw, Square, Volume2, WifiOff } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
@@ -10,7 +10,8 @@ import { MemoryRecallChip } from '../components/MemoryRecallChip';
 import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
 import { subscribeVoicePttEvents, synthesizeSpeech, transcribeSpeech, warmVoiceHost } from '../lib/voiceApi';
 import { stopAllProcesses } from '../lib/runtimeActions';
-import { acquireMicStream, isStreamLive, stopMicStream } from '../lib/micCapture';
+import { getSettings, putSettings } from '../lib/settingsApi';
+import { acquireMicStream, isStreamLive, prepareMicCapture, stopMicStream } from '../lib/micCapture';
 import { trimSilenceToWav } from '../lib/audioTrim';
 import type { ChatMessageSource } from '@thaddeus/shared-types';
 
@@ -38,6 +39,9 @@ function ChatThreadRoute() {
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [speechState, setSpeechState] = useState<{ messageId: string; status: 'loading' | 'playing' } | null>(null);
   const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing' | 'sending'>('idle');
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [offlineModeLoading, setOfflineModeLoading] = useState(true);
+  const [offlineModeSaving, setOfflineModeSaving] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -52,14 +56,39 @@ function ChatThreadRoute() {
   // Persistent stream kept warm across PTT presses so the second and
   // subsequent presses skip the getUserMedia spinner.
   const warmStreamRef = useRef<MediaStream | null>(null);
+  const voiceWarmupRef = useRef<Promise<unknown> | null>(null);
+
+  const ensureVoiceWarmup = useCallback(() => {
+    voiceWarmupRef.current ??= warmVoiceHost().catch(() => undefined);
+    return voiceWarmupRef.current;
+  }, []);
 
   useEffect(() => {
     void openThread(threadId);
   }, [openThread, threadId]);
 
   useEffect(() => {
-    void warmVoiceHost().catch(() => undefined);
+    let disposed = false;
+    setOfflineModeLoading(true);
+    getSettings()
+      .then((doc) => {
+        if (!disposed) setOfflineMode(doc.privacy.offlineMode ?? false);
+      })
+      .catch(() => {
+        if (!disposed) setOfflineMode(false);
+      })
+      .finally(() => {
+        if (!disposed) setOfflineModeLoading(false);
+      });
+    return () => {
+      disposed = true;
+    };
   }, []);
+
+  useEffect(() => {
+    void ensureVoiceWarmup();
+    void prepareMicCapture().catch(() => undefined);
+  }, [ensureVoiceWarmup]);
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -108,6 +137,31 @@ function ChatThreadRoute() {
     setDraft('');
     await send(text, wikiContext);
   };
+
+  const toggleOfflineMode = useCallback(async () => {
+    if (offlineModeSaving) return;
+    const next = !offlineMode;
+    setOfflineMode(next);
+    setOfflineModeSaving(true);
+    setSpeechError(null);
+    try {
+      const doc = await getSettings();
+      const saved = await putSettings({
+        ...doc,
+        privacy: {
+          ...doc.privacy,
+          offlineMode: next,
+        },
+      });
+      setOfflineMode(saved.privacy.offlineMode ?? false);
+    } catch (e) {
+      setOfflineMode(!next);
+      setSpeechError((e as Error).message || 'Could not update offline mode.');
+    } finally {
+      setOfflineModeSaving(false);
+      setOfflineModeLoading(false);
+    }
+  }, [offlineMode, offlineModeSaving]);
 
   const stopSpeech = useCallback(() => {
     speechRequestRef.current += 1;
@@ -209,6 +263,7 @@ function ChatThreadRoute() {
     abortPendingCaptureRef.current = false;
     micChunksRef.current = [];
     micStartedAtRef.current = performance.now();
+    void ensureVoiceWarmup();
     stopSpeech();
     setSpeechError(null);
 
@@ -272,7 +327,7 @@ function ChatThreadRoute() {
       }
       abortPendingCaptureRef.current = false;
     }
-  }, [activeTurn, sending, stopSpeech, triggerShutup, voiceState]);
+  }, [activeTurn, ensureVoiceWarmup, sending, stopSpeech, triggerShutup, voiceState]);
 
   const finishVoiceCapture = useCallback(async () => {
     const recorder = recorderRef.current;
@@ -520,6 +575,30 @@ function ChatThreadRoute() {
             sendTestId="chat-send"
             rightActions={
               <>
+                <button
+                  type="button"
+                  className={`chat-composer-icon-button ${
+                    offlineMode
+                      ? 'border-amber-400 bg-amber-500/10 text-amber-800 dark:text-amber-200'
+                      : ''
+                  }`}
+                  aria-label={offlineMode ? 'Turn offline mode off' : 'Turn offline mode on'}
+                  aria-pressed={offlineMode}
+                  title={
+                    offlineMode
+                      ? 'Offline mode on: web-backed tools are blocked'
+                      : 'Offline mode off: web-backed tools may run with permission'
+                  }
+                  data-testid="chat-offline-toggle"
+                  disabled={offlineModeLoading || offlineModeSaving}
+                  onClick={() => void toggleOfflineMode()}
+                >
+                  {offlineModeSaving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} />
+                  ) : (
+                    <WifiOff className="h-4 w-4" strokeWidth={1.9} />
+                  )}
+                </button>
                 <button
                   type="button"
                   className={`chat-composer-icon-button ${voiceState === 'recording' ? 'border-red-400 bg-red-500/10 text-red-700 dark:text-red-300' : ''}`}

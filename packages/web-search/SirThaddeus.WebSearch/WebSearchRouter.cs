@@ -106,19 +106,19 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
             return true;
 
         if (_mode == "searxng")
-            return await _searxng.IsAvailableAsync(cancellationToken);
+            return await SafeIsAvailableAsync(_searxng, cancellationToken);
 
         if (_mode == "search_api")
-            return await _searchApi.IsAvailableAsync(cancellationToken);
+            return await SafeIsAvailableAsync(_searchApi, cancellationToken);
 
         if (_mode == "ddg_html")
-            return await _ddg.IsAvailableAsync(cancellationToken);
+            return await SafeIsAvailableAsync(_ddg, cancellationToken);
 
         if (_mode == "google_news")
-            return await _googleNews.IsAvailableAsync(cancellationToken);
+            return await SafeIsAvailableAsync(_googleNews, cancellationToken);
 
-        return await _searxng.IsAvailableAsync(cancellationToken)
-            || await _ddg.IsAvailableAsync(cancellationToken);
+        return await SafeIsAvailableAsync(_searxng, cancellationToken)
+            || await SafeIsAvailableAsync(_ddg, cancellationToken);
     }
 
     private async Task<SearchResults> SearchAutoAsync(
@@ -133,7 +133,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
 
         if (_searxngAvailable == true)
         {
-            var result = await _searxng.SearchAsync(query, options, ct);
+            var result = await SafeSearchAsync(_searxng, query, options, ct);
             result = AttachSearchDiagnostic(result, _searxng.Name, "search", diagnostics);
             if (result.Results.Count > 0)
                 return result;
@@ -146,7 +146,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
 
         if (_searchApiAvailable == true)
         {
-            var hostedFallback = await _searchApi.SearchAsync(query, options, ct);
+            var hostedFallback = await SafeSearchAsync(_searchApi, query, options, ct);
             hostedFallback = AttachSearchDiagnostic(hostedFallback, _searchApi.Name, "search", diagnostics);
             if (hostedFallback.Results.Count > 0)
                 return hostedFallback;
@@ -159,7 +159,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         // headlines regardless of query for anything its "generic news"
         // heuristic claims, which silently poisons non-news searches
         // with unrelated current headlines.
-        var ddgFallback = await _ddg.SearchAsync(query, options, ct);
+        var ddgFallback = await SafeSearchAsync(_ddg, query, options, ct);
         ddgFallback = AttachSearchDiagnostic(ddgFallback, _ddg.Name, "fallback", diagnostics);
         if (ddgFallback.Results.Count > 0)
             return ddgFallback;
@@ -169,7 +169,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         // Last-resort: GoogleNews RSS. Useful for genuine news asks and
         // when DDG is blocked (anti-bot throttling), but its headlines-
         // mode fallback is off-topic for general queries.
-        var googleFallback = await _googleNews.SearchAsync(query, options, ct);
+        var googleFallback = await SafeSearchAsync(_googleNews, query, options, ct);
         return AttachSearchDiagnostic(googleFallback, _googleNews.Name, "fallback", diagnostics);
     }
 
@@ -197,8 +197,8 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
                 return;
             }
 
-            _searxngAvailable = await _searxng.IsAvailableAsync(ct);
-            _searchApiAvailable = await _searchApi.IsAvailableAsync(ct);
+            _searxngAvailable = await SafeIsAvailableAsync(_searxng, ct);
+            _searchApiAvailable = await SafeIsAvailableAsync(_searchApi, ct);
             _lastProbeTime = DateTime.UtcNow;
         }
         finally
@@ -220,7 +220,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         WebSearchOptions options,
         CancellationToken ct)
     {
-        var result = await _searxng.SearchAsync(query, options, ct);
+        var result = await SafeSearchAsync(_searxng, query, options, ct);
 
         if (result.Results.Count == 0 && result.Errors.Count > 0)
         {
@@ -238,7 +238,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         WebSearchOptions options,
         CancellationToken ct)
     {
-        var result = await _searchApi.SearchAsync(query, options, ct);
+        var result = await SafeSearchAsync(_searchApi, query, options, ct);
         return AttachSearchDiagnostic(result, _searchApi.Name, "search");
     }
 
@@ -247,7 +247,7 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         WebSearchOptions options,
         CancellationToken ct)
     {
-        var result = await _ddg.SearchAsync(query, options, ct);
+        var result = await SafeSearchAsync(_ddg, query, options, ct);
         return AttachSearchDiagnostic(result, _ddg.Name, "search");
     }
 
@@ -256,8 +256,58 @@ public sealed class WebSearchRouter : IWebSearchProvider, IDisposable
         WebSearchOptions options,
         CancellationToken ct)
     {
-        var result = await _googleNews.SearchAsync(query, options, ct);
+        var result = await SafeSearchAsync(_googleNews, query, options, ct);
         return AttachSearchDiagnostic(result, _googleNews.Name, "search");
+    }
+
+    private static async Task<bool> SafeIsAvailableAsync(
+        IWebSearchProvider provider,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await provider.IsAvailableAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task<SearchResults> SafeSearchAsync(
+        IWebSearchProvider provider,
+        string query,
+        WebSearchOptions options,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await provider.SearchAsync(query, options, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return new SearchResults
+            {
+                Provider = provider.Name,
+                Errors = ["Search timed out"]
+            };
+        }
+        catch (Exception ex)
+        {
+            return new SearchResults
+            {
+                Provider = provider.Name,
+                Errors = [$"{provider.Name} search failed: {ex.GetType().Name}: {ex.Message}"]
+            };
+        }
     }
 
     private static SearchResults ManualModeResult()

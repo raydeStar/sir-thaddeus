@@ -406,6 +406,10 @@ function SettingsRoute() {
 function withDefaults(doc: SettingsDocument): SettingsDocument {
   return {
     ...doc,
+    privacy: {
+      ...doc.privacy,
+      offlineMode: doc.privacy.offlineMode ?? false,
+    },
     location: doc.location ?? DEFAULT_LOCATION,
     limits: doc.limits ?? DEFAULT_LIMITS,
     uiPrefs: doc.uiPrefs ?? DEFAULT_UI_PREFS,
@@ -536,6 +540,13 @@ function GeneralTab({
       </Section>
 
       <Section title="Privacy" description="Defaults are private. Opt in only to what you need.">
+        <Toggle
+          testId="settings-privacy-offline-mode"
+          label="Offline mode"
+          description="Hide and block web, browser, weather, places, feeds, and other network-backed tools."
+          checked={doc.privacy.offlineMode ?? false}
+          onChange={(v) => setDoc({ ...doc, privacy: { ...doc.privacy, offlineMode: v } })}
+        />
         <Toggle
           testId="settings-privacy-local-only"
           label="Local-only mode"
