@@ -47,6 +47,26 @@ function Fail([string]$Message, [int]$Code = 1) {
     exit $Code
 }
 
+function Ensure-NpmDependencies([string]$PackageDir, [string]$Label) {
+    if (-not (Test-Path -LiteralPath $PackageDir -PathType Container)) {
+        return
+    }
+
+    $packageJson = Join-Path $PackageDir "package.json"
+    $packageLock = Join-Path $PackageDir "package-lock.json"
+    $nodeModules = Join-Path $PackageDir "node_modules"
+
+    if (-not (Test-Path -LiteralPath $packageJson -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $packageLock -PathType Leaf) -or
+        (Test-Path -LiteralPath $nodeModules -PathType Container)) {
+        return
+    }
+
+    Write-Host "  Installing npm dependencies for $Label"
+    & npm ci --prefix $PackageDir
+    if ($LASTEXITCODE -ne 0) { Fail "npm ci failed for $Label (exit code $LASTEXITCODE)." $LASTEXITCODE }
+}
+
 # ── Setup ──────────────────────────────────────────────────────
 Write-Section "Test Run (.NET)"
 
@@ -58,6 +78,7 @@ $Artifacts     = Join-Path $RepoRoot "artifacts"
 $TestArtifacts = Join-Path $Artifacts "test-results"
 $HarnessSuitesRoot = Join-Path $Artifacts "harness-suites"
 $ScreenObserveSuite = Join-Path $HarnessSuitesRoot "screen-observe"
+$HealthPackDir = Join-Path $RepoRoot "thaddeus-health-pack"
 New-Item -ItemType Directory -Force -Path $TestArtifacts | Out-Null
 
 # Unique TRX per run (keeps last few runs visible for debugging)
@@ -86,6 +107,12 @@ if ($effectiveRestore) {
 }
 
 # ── Build ─────────────────────────────────────────────────────
+# Runtime module tests invoke the external Health Pack MCP server via its
+# manifest (`npm run mcp`). Fresh CI runners need that package restored before
+# dotnet test starts the child process.
+Write-Section "Node Packages"
+Ensure-NpmDependencies $HealthPackDir "Health Pack"
+
 Write-Section "Build"
 
 $buildArgs = @(

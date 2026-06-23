@@ -9,29 +9,34 @@ public sealed class SettingsManagerEnvironmentOverrideTests
     [Fact]
     public void GetSettingsPath_UsesEnvironmentOverride()
     {
+        var settingsPath = CreateTempSettingsPath();
+        var settingsDirectory = Path.GetDirectoryName(settingsPath)!;
+
         using var envScope = new EnvironmentVariableScope(new Dictionary<string, string?>
         {
-            ["ST_SETTINGS_PATH"] = @"C:\temp\sandbox\settings.json"
+            ["ST_SETTINGS_PATH"] = settingsPath
         });
 
-        var settingsPath = SettingsManager.GetSettingsPath();
+        var resolvedSettingsPath = SettingsManager.GetSettingsPath();
 
-        Assert.Equal(@"C:\temp\sandbox\settings.json", settingsPath);
-        Assert.Equal(@"C:\temp\sandbox", SettingsManager.GetSettingsDirectory());
-        Assert.Equal(@"C:\temp\sandbox\profiles", SettingsManager.GetPersonalityProfilesDirectory());
+        Assert.Equal(settingsPath, resolvedSettingsPath);
+        Assert.Equal(settingsDirectory, SettingsManager.GetSettingsDirectory());
+        Assert.Equal(Path.Combine(settingsDirectory, "profiles"), SettingsManager.GetPersonalityProfilesDirectory());
     }
 
     [Fact]
     public void AuditLogger_DefaultPath_UsesEnvironmentOverride()
     {
+        var auditPath = CreateTempAuditPath();
+
         using var envScope = new EnvironmentVariableScope(new Dictionary<string, string?>
         {
-            ["ST_AUDIT_PATH"] = @"C:\temp\sandbox\audit.jsonl"
+            ["ST_AUDIT_PATH"] = auditPath
         });
 
-        var auditPath = JsonLineAuditLogger.GetDefaultPath();
+        var resolvedAuditPath = JsonLineAuditLogger.GetDefaultPath();
 
-        Assert.Equal(@"C:\temp\sandbox\audit.jsonl", auditPath);
+        Assert.Equal(auditPath, resolvedAuditPath);
     }
 
     [Fact]
@@ -211,6 +216,13 @@ public sealed class SettingsManagerEnvironmentOverrideTests
             "SirThaddeusTests",
             Guid.NewGuid().ToString("N"),
             "settings.json");
+
+    private static string CreateTempAuditPath()
+        => Path.Combine(
+            Path.GetTempPath(),
+            "SirThaddeusTests",
+            Guid.NewGuid().ToString("N"),
+            "audit.jsonl");
 
     private static void DeleteTempSettingsPath(string settingsPath)
     {

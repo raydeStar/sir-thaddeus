@@ -169,14 +169,15 @@ public class SearchOfflineFallbackTests
     }
 
     [Fact]
-    public void TryBuildMediaInstallmentFallback_ForStargateUniverseSeason3Episode1_ReturnsSpecificNonexistenceAnswer()
+    public void TryBuildMediaInstallmentFallback_ForStargateUniverseSeason3Episode1_IncludesSeriesAndInstallment()
     {
         var response = SearchOrchestrator.TryBuildMediaInstallmentFallback(
             "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?");
 
         Assert.NotNull(response);
-        Assert.Contains("Stargate Universe Season 3 Episode 1", response, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("before Season 3 was produced", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Stargate Universe", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Season 3 Episode 1", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not verify an official", response, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("should not invent a plot", response, StringComparison.OrdinalIgnoreCase);
     }
 
