@@ -12,8 +12,25 @@ Write-Host "══════════════════════�
 
 $DebugMode = $args -contains "--debug"
 $TerminalMode = $args -contains "--terminal"
-$ForwardArgs = @($args | Where-Object { $_ -ne "--debug" -and $_ -ne "--terminal" })
+$OfflineRequested = $args -contains "--offline"
+$ForwardArgs = @($args | Where-Object { $_ -ne "--debug" -and $_ -ne "--terminal" -and $_ -ne "--offline" })
 $ToolsRequested = $ForwardArgs -contains "--tools"
+
+function Test-InternetAvailable {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/" -Method Head -TimeoutSec 3 -ErrorAction Stop
+        return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+    }
+    catch {
+        return $false
+    }
+}
+
+$IsOffline = $OfflineRequested -or -not (Test-InternetAvailable)
+if ($IsOffline) {
+    $reason = if ($OfflineRequested) { "--offline was specified" } else { "internet connectivity check failed" }
+    Write-Host "      Offline mode enabled ($reason)." -ForegroundColor DarkYellow
+}
 
 function Test-ProjectAssetsPresent {
     param([string]$ProjectPath)
@@ -26,12 +43,17 @@ function Test-ProjectAssetsPresent {
 function Invoke-ProjectBuild {
     param(
         [string]$ProjectPath,
-        [string]$Label
+        [string]$Label,
+        [bool]$Offline = $false
     )
 
     $buildArgs = @("build", $ProjectPath, "-m:1", "-v", "q")
-    if (Test-ProjectAssetsPresent -ProjectPath $ProjectPath) {
+    $assetsPresent = Test-ProjectAssetsPresent -ProjectPath $ProjectPath
+    if ($assetsPresent -or $Offline) {
         $buildArgs += "--no-restore"
+    }
+    if ($Offline -and -not $assetsPresent) {
+        Write-Host "      Offline mode: $Label has no project.assets.json; build may need a prior restore." -ForegroundColor DarkYellow
     }
 
     & dotnet @buildArgs
@@ -39,7 +61,7 @@ function Invoke-ProjectBuild {
         Write-Host "      Retrying $Label build with verbose output..." -ForegroundColor DarkYellow
 
         $retryArgs = @("build", $ProjectPath, "-m:1", "-v", "m")
-        if (Test-ProjectAssetsPresent -ProjectPath $ProjectPath) {
+        if ($assetsPresent -or $Offline) {
             $retryArgs += "--no-restore"
         }
 
@@ -107,7 +129,10 @@ function Stop-ExistingInstances {
 Stop-ExistingInstances -RepoRootPath $RepoRoot
 
 function Ensure-LocalVoiceAssets {
-    param([string]$RepoRootPath)
+    param(
+        [string]$RepoRootPath,
+        [bool]$Offline = $false
+    )
 
     $voiceBackendDir = Join-Path $RepoRootPath "apps/voice-backend"
     $fetchScript = Join-Path $RepoRootPath "dev/fetch-assets.ps1"
@@ -148,6 +173,11 @@ function Ensure-LocalVoiceAssets {
         }
 
         if ($hasMissingPayload) {
+            if ($Offline) {
+                Write-Host "      Missing voice asset payload for $($entry.AssetId). Skipping fetch in offline mode." -ForegroundColor DarkYellow
+                continue
+            }
+
             Write-Host "      Missing voice asset payload for $($entry.AssetId). Fetching..." -ForegroundColor Cyan
             & powershell -NoProfile -ExecutionPolicy Bypass -File $fetchScript -AssetId $entry.AssetId
             if ($LASTEXITCODE -ne 0) {
@@ -212,7 +242,10 @@ function Get-LocalSearxngSidecarStatus {
 }
 
 function Ensure-LocalSearxngSidecar {
-    param([string]$RepoRootPath)
+    param(
+        [string]$RepoRootPath,
+        [bool]$Offline = $false
+    )
 
     $buildScript = Join-Path $RepoRootPath "dev/build-searxng-package.ps1"
     $status = Get-LocalSearxngSidecarStatus -RepoRootPath $RepoRootPath
@@ -225,13 +258,41 @@ function Ensure-LocalSearxngSidecar {
         return $status
     }
 
+    if ($Offline) {
+        Write-Host "      Missing SearXNG sidecar payload. Skipping build in offline mode." -ForegroundColor DarkYellow
+        return $status
+    }
+
     Write-Host "      Missing SearXNG sidecar payload. Building..." -ForegroundColor Cyan
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $buildScript
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $buildScript 2>&1 | ForEach-Object {
+        Write-Host "      $_"
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "      WARN: failed to build bundled SearXNG sidecar (exit $LASTEXITCODE)." -ForegroundColor Yellow
     }
 
     return (Get-LocalSearxngSidecarStatus -RepoRootPath $RepoRootPath)
+}
+
+function Normalize-SearxngSidecarStatus {
+    param($SidecarStatus)
+
+    $candidate = $SidecarStatus
+    if ($candidate -is [array]) {
+        $candidate = $candidate |
+            Where-Object { $null -ne $_ -and $null -ne $_.PSObject.Properties['Ready'] } |
+            Select-Object -Last 1
+    }
+
+    if ($null -eq $candidate -or $null -eq $candidate.PSObject.Properties['Ready']) {
+        return [pscustomobject]@{
+            Ready = $false
+            PackageRoot = ""
+            StartScript = ""
+        }
+    }
+
+    return $candidate
 }
 
 function Get-WebSearchRuntimeInfo {
@@ -373,6 +434,7 @@ function Write-SearxngStartupExpectation {
         $SidecarStatus
     )
 
+    $SidecarStatus = Normalize-SearxngSidecarStatus -SidecarStatus $SidecarStatus
     $healthUrl = ($RuntimeInfo.BaseUrl.TrimEnd('/') + "/search?q=thaddeus&format=json")
     $healthText = if (Test-HttpUrlReachable -Url $healthUrl) { "reachable" } else { "not reachable yet" }
     $sidecarText = if ($SidecarStatus.Ready) {
@@ -431,19 +493,19 @@ if ($LASTEXITCODE -ne 0) {
 
 # 2. Local voice asset/session repair
 Write-Host "`n[2/5] Checking local voice assets/session state..." -ForegroundColor Yellow
-Ensure-LocalVoiceAssets -RepoRootPath $RepoRoot
+Ensure-LocalVoiceAssets -RepoRootPath $RepoRoot -Offline:$IsOffline
 Repair-StaleVoiceSessionState
-$SearxngSidecarStatus = Ensure-LocalSearxngSidecar -RepoRootPath $RepoRoot
+$SearxngSidecarStatus = Ensure-LocalSearxngSidecar -RepoRootPath $RepoRoot -Offline:$IsOffline
 $SearxngRuntimeInfo = Get-WebSearchRuntimeInfo
 
 # 3. Build VoiceHost & MCP Server (UI/terminal hosts don't directly reference them)
 Write-Host "`n[3/5] Building VoiceHost..." -ForegroundColor Yellow
 $VoiceHostPath = Join-Path $RepoRoot "apps/voice-host/SirThaddeus.VoiceHost/SirThaddeus.VoiceHost.csproj"
-Invoke-ProjectBuild -ProjectPath $VoiceHostPath -Label "VoiceHost"
+Invoke-ProjectBuild -ProjectPath $VoiceHostPath -Label "VoiceHost" -Offline:$IsOffline
 
 Write-Host "`n[4/5] Building MCP Server..." -ForegroundColor Yellow
 $McpServerPath = Join-Path $RepoRoot "apps/mcp-server/SirThaddeus.McpServer/SirThaddeus.McpServer.csproj"
-Invoke-ProjectBuild -ProjectPath $McpServerPath -Label "MCP Server"
+Invoke-ProjectBuild -ProjectPath $McpServerPath -Label "MCP Server" -Offline:$IsOffline
 
 # 5. Preparation & Execution
 if ($DebugMode) {
@@ -498,14 +560,14 @@ Write-SearxngStartupExpectation -IsTerminalMode:$TerminalMode -IsToolsRequested:
 
 # Keep startup snappy: rely on normal incremental build.
 if ($TerminalMode) {
-    Invoke-ProjectBuild -ProjectPath $HeadlessProjectPath -Label "headless runtime"
+    Invoke-ProjectBuild -ProjectPath $HeadlessProjectPath -Label "headless runtime" -Offline:$IsOffline
     $ProjectPath = $HeadlessProjectPath
 }
 else {
     # Shell spawns Runtime as a child via dotnet run --no-build, so both must be
     # built ahead of time in the same (Debug) configuration.
-    Invoke-ProjectBuild -ProjectPath $RuntimeProjectPath -Label "runtime"
-    Invoke-ProjectBuild -ProjectPath $ShellProjectPath -Label "shell"
+    Invoke-ProjectBuild -ProjectPath $RuntimeProjectPath -Label "runtime" -Offline:$IsOffline
+    Invoke-ProjectBuild -ProjectPath $ShellProjectPath -Label "shell" -Offline:$IsOffline
     $ProjectPath = $ShellProjectPath
 }
 

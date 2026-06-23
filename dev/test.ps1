@@ -23,9 +23,7 @@ param(
     #   "Category=Unit"
     [string]$Filter = '',
 
-    [switch]$SkipScreenObserveHarness,
-
-    [switch]$IncludeKnowledgeStoreHarness
+    [switch]$SkipScreenObserveHarness
 )
 
 Set-StrictMode -Version Latest
@@ -59,11 +57,12 @@ $SlnFile       = Join-Path $RepoRoot "SirThaddeus.sln"
 $Artifacts     = Join-Path $RepoRoot "artifacts"
 $TestArtifacts = Join-Path $Artifacts "test-results"
 $HarnessSuitesRoot = Join-Path $Artifacts "harness-suites"
+$ScreenObserveSuite = Join-Path $HarnessSuitesRoot "screen-observe"
 New-Item -ItemType Directory -Force -Path $TestArtifacts | Out-Null
 
 # Unique TRX per run (keeps last few runs visible for debugging)
 $stamp  = Get-Date -Format "yyyyMMdd-HHmmss"
-$trxName = "test-$stamp.trx"
+$trxName = "test-$stamp"
 
 Write-Host "  Configuration : $Configuration"
 Write-Host "  Restore       : $effectiveRestore"
@@ -71,8 +70,7 @@ if ($isCi -and -not $Restore) {
     Write-Host "  CI override   : enabled (restore forced)"
 }
 if ($Filter) { Write-Host "  Filter        : $Filter" }
-Write-Host "  Screen Harness: $(if ($SkipScreenObserveHarness) { 'skipped' } elseif ($Filter) { 'skipped (filtered run)' } else { 'enabled' })"
-Write-Host "  Knowledge Store Harness: $(if ($IncludeKnowledgeStoreHarness) { if ($Filter) { 'requested but skipped (filtered run)' } elseif ($isCi) { 'requested but skipped (CI)' } else { 'enabled' } } else { 'disabled (opt-in)' })"
+Write-Host "  Screen Harness: $(if ($SkipScreenObserveHarness) { 'skipped' } elseif ($Filter) { 'skipped (filtered run)' } elseif (-not (Test-Path -LiteralPath $ScreenObserveSuite -PathType Container)) { 'skipped (fixtures not found)' } else { 'enabled' })"
 Write-Host "  Results       : $TestArtifacts\$trxName"
 
 # ── Policy Guard: no device geolocation APIs ─────────────────
@@ -107,7 +105,7 @@ $testArgs = @(
     '-c', $Configuration,
     '--nologo',
     '--no-build',
-    '--logger', "trx;LogFileName=$trxName",
+    '--logger', "trx;LogFilePrefix=$trxName",
     '--results-directory', $TestArtifacts
 )
 
@@ -128,39 +126,34 @@ $testExit = $LASTEXITCODE
 
 $harnessExit = 0
 if (-not $Filter -and -not $SkipScreenObserveHarness) {
-    Write-Section "Screen Observe Harness"
+    if (Test-Path -LiteralPath $ScreenObserveSuite -PathType Container) {
+        Write-Section "Screen Observe Harness"
 
-    $harnessArgs = @(
-        '--suites-root', $HarnessSuitesRoot,
-        '--suite', 'screen-observe',
-        '--max-iters', '1',
-        '--judge', 'none'
-    )
+        $harnessArgs = @(
+            '--suites-root', $HarnessSuitesRoot,
+            '--suite', 'screen-observe',
+            '--max-iters', '1',
+            '--judge', 'none'
+        )
 
-    & "$PSScriptRoot\harness.ps1" @harnessArgs
-    $harnessExit = $LASTEXITCODE
+        & "$PSScriptRoot\harness.ps1" @harnessArgs
+        $harnessExit = $LASTEXITCODE
 
-    if ($harnessExit -ne 0) {
-        Write-Host "  FAIL  Screen-observe harness failed." -ForegroundColor Red
+        if ($harnessExit -ne 0) {
+            Write-Host "  FAIL  Screen-observe harness failed." -ForegroundColor Red
+        }
     }
-}
-
-$knowledgeStoreHarnessExit = 0
-if ($IncludeKnowledgeStoreHarness -and -not $Filter -and -not $isCi) {
-    Write-Section "Knowledge Store Harness"
-
-    & "$PSScriptRoot\run-knowledge-store-harness.ps1"
-    $knowledgeStoreHarnessExit = $LASTEXITCODE
-
-    if ($knowledgeStoreHarnessExit -ne 0) {
-        Write-Host "  FAIL  Knowledge-store harness failed." -ForegroundColor Red
+    else {
+        Write-Section "Screen Observe Harness"
+        Write-Host "  SKIP  Fixtures not found: $ScreenObserveSuite" -ForegroundColor Yellow
+        Write-Host "  INFO  Populate artifacts\harness-suites\screen-observe to include this optional harness." -ForegroundColor DarkGray
     }
 }
 
 # ── Summary ───────────────────────────────────────────────────
 Write-Section "Summary"
 
-if ($testExit -eq 0 -and $harnessExit -eq 0 -and $knowledgeStoreHarnessExit -eq 0) {
+if ($testExit -eq 0 -and $harnessExit -eq 0) {
     Write-Host "  OK  All tests passed." -ForegroundColor Green
     Write-Host "  TRX : $TestArtifacts\$trxName"
     exit 0
@@ -172,9 +165,6 @@ if ($testExit -ne 0) {
 else {
     Write-Host "  FAIL  Screen-observe harness failed." -ForegroundColor Red
 }
-if ($knowledgeStoreHarnessExit -ne 0) {
-    Write-Host "  FAIL  Knowledge-store harness failed." -ForegroundColor Red
-}
 Write-Host "  TRX : $TestArtifacts\$trxName"
 Write-Host ""
 Write-Host "  Tip: run with -Filter to focus, e.g."
@@ -182,13 +172,7 @@ Write-Host "    .\dev\test.ps1 -Filter 'FullyQualifiedName~MyProject.Tests.MyCla
 if (-not $SkipScreenObserveHarness -and -not $Filter) {
     Write-Host "  Screen harness: .\dev\harness.ps1 --suites-root .\artifacts\harness-suites --suite screen-observe --max-iters 1 --judge none"
 }
-if ($IncludeKnowledgeStoreHarness -and -not $Filter -and -not $isCi) {
-    Write-Host "  Knowledge-store harness: .\dev\run-knowledge-store-harness.ps1"
-}
 if ($testExit -ne 0) {
     exit $testExit
 }
-if ($harnessExit -ne 0) {
-    exit $harnessExit
-}
-exit $knowledgeStoreHarnessExit
+exit $harnessExit

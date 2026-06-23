@@ -21,6 +21,52 @@ test.describe('chat smoke', () => {
 
     await context.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
 
+    let offlineMode = false;
+    await page.route(`${baseUrl}/api/settings`, async (route) => {
+      if (route.request().method() === 'PUT') {
+        const body = route.request().postDataJSON() as {
+          privacy?: { offlineMode?: boolean };
+        };
+        offlineMode = Boolean(body.privacy?.offlineMode);
+      }
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          llm: {
+            provider: 'lmstudio',
+            modelId: 'auto',
+            baseUrl: 'http://127.0.0.1:1234/v1',
+            apiKey: null,
+            maxTokens: 4096,
+            contextWindowTokens: 16384,
+            temperature: 0.7,
+          },
+          voice: {
+            sttProvider: 'whisper-cpp',
+            ttsProvider: 'kokoro-sharp',
+            piperVoicePath: null,
+          },
+          audio: {
+            ttsEnabled: true,
+            inputGain: 1,
+          },
+          shortcuts: {
+            pushToTalk: 'Ctrl+Alt+M',
+            stopAll: 'Ctrl+Alt+Esc',
+          },
+          privacy: {
+            telemetryEnabled: false,
+            allowScreenCapture: false,
+            localOnly: true,
+            offlineMode,
+          },
+          flags: {
+            onboardingCompleted: true,
+          },
+        }),
+      });
+    });
+
     await page.route(`${baseUrl}/api/threads`, async (route) => {
       await route.fulfill({
         contentType: 'application/json',
@@ -94,7 +140,16 @@ test.describe('chat smoke', () => {
     await expect(cards).toHaveCount(2);
     await expect(page.getByRole('link', { name: /Shipping insurers reassess Strait of Hormuz risk/i })).toBeVisible();
     await expect(page.getByTestId('chat-source-cards')).toContainText('example.com');
-    await expect(page.getByTestId('chat-source-cards')).toContainText('Markets are reacting to new transit risk assessments');
+    // The editorial source cards lead with image + title + domain + date.
+    // Featured cards may also show a short excerpt.
+    await expect(page.getByTestId('chat-source-cards')).toContainText('example.org');
+    await expect(page.getByTestId('chat-source-cards')).toContainText(
+      'Regional navies increase monitoring near key shipping lanes',
+    );
+    const offlineToggle = page.getByTestId('chat-offline-toggle');
+    await expect(offlineToggle).toHaveAttribute('aria-pressed', 'false');
+    await offlineToggle.click();
+    await expect(offlineToggle).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('chat-latest-response-actions')).toBeVisible();
     await expect(page.getByTestId('chat-speak-response')).toBeVisible();
     await expect(page.getByTestId('chat-copy-latest-response')).toBeVisible();

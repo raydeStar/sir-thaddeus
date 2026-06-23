@@ -309,6 +309,7 @@ public static class UtilityRouter
             ?? TryMetaCapabilities(trimmed)
             ?? TryStatus(trimmed)
             ?? TryFeed(trimmed)
+            ?? EnumerableSetCounter.TryHandle(trimmed)
             ?? TryLetterCount(trimmed)
             ?? TrySimpleFact(trimmed, preferredUnits)
             ?? TryCalculator(trimmed)

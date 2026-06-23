@@ -13,6 +13,7 @@ public static class SettingsApi
 {
     private const string SecretMask = "***";
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(6) };
+    private static readonly string[] ModelDiscoveryPaths = ["/api/v0/models", "/v1/models", "/models"];
 
     public static IEndpointRouteBuilder MapSettingsApi(this IEndpointRouteBuilder app)
     {
@@ -151,8 +152,7 @@ public static class SettingsApi
             var samePrimaryModel = string.Equals(llm.ModelId, llm.GatekeeperModelId,
                 StringComparison.OrdinalIgnoreCase);
             var sameEndpoint = UriHostsMatchSafe(llm.BaseUrl ?? "", gkBaseUrl ?? "");
-            var reusingPrimary = llm.ReusePrimaryForGatekeeperOnSharedEndpoint
-                && sameEndpoint && !samePrimaryModel;
+            var reusingPrimary = sameEndpoint && samePrimaryModel;
 
             if (string.IsNullOrWhiteSpace(gkBaseUrl))
             {
@@ -240,8 +240,7 @@ public static class SettingsApi
     private static async Task<(IReadOnlyList<string> Models, string ProbedUrl, string? Error)>
         FetchModelIdsAsync(string baseUrl, string? apiKey, CancellationToken ct)
     {
-        // Ordered by specificity — LM Studio's v0 beats the generic shim.
-        var candidatePaths = new[] { "/api/v0/models", "/v1/models", "/models" };
+        var candidateUrls = BuildModelDiscoveryProbeUrls(baseUrl);
 
         var reachedAny = false;
         var union = new List<string>();
@@ -250,9 +249,8 @@ public static class SettingsApi
         string? lastProbedUrl = null;
         string? successUrl = null;
 
-        foreach (var path in candidatePaths)
+        foreach (var probeUrl in candidateUrls)
         {
-            var probeUrl = baseUrl.TrimEnd('/') + path;
             lastProbedUrl = probeUrl;
             try
             {
@@ -293,6 +291,22 @@ public static class SettingsApi
 
         union.Sort(StringComparer.OrdinalIgnoreCase);
         return (union, successUrl ?? baseUrl, null);
+    }
+
+    internal static IReadOnlyList<string> BuildModelDiscoveryProbeUrls(string baseUrl)
+    {
+        var normalizedBase = NormalizeModelDiscoveryBaseUrl(baseUrl);
+        return ModelDiscoveryPaths
+            .Select(path => normalizedBase.TrimEnd('/') + path)
+            .ToArray();
+    }
+
+    private static string NormalizeModelDiscoveryBaseUrl(string baseUrl)
+    {
+        var trimmed = (baseUrl ?? string.Empty).Trim().TrimEnd('/');
+        return trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
+            ? trimmed[..^3]
+            : trimmed;
     }
 
     private static bool UriHostsMatchSafe(string left, string right)

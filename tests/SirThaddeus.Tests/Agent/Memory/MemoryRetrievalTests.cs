@@ -618,6 +618,31 @@ internal sealed class FakeMemoryStore : IMemoryStore
         string? filter, int skip, int take, CancellationToken ct = default) =>
         Task.FromResult<(IReadOnlyList<MemoryNugget>, int)>(([], 0));
 
+    public Task<MemoryNugget?> FindNuggetByIdAsync(
+        string nuggetId, CancellationToken ct = default) =>
+        Task.FromResult(Nuggets.FirstOrDefault(n => n.NuggetId == nuggetId));
+
+    public Task<IReadOnlyList<MemoryNugget>> ListPinnedNuggetsAsync(
+        int maxResults, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<MemoryNugget>>(
+            Nuggets
+                .Where(n => n.PinLevel >= 1)
+                .OrderByDescending(n => n.PinLevel)
+                .ThenByDescending(n => n.UseCount)
+                .ThenByDescending(n => n.UpdatedAt)
+                .Take(maxResults)
+                .ToList());
+
+    public Task<MemoryNugget?> SetNuggetPinLevelAsync(
+        string nuggetId, int pinLevel, CancellationToken ct = default)
+    {
+        var index = Nuggets.FindIndex(n => n.NuggetId == nuggetId);
+        if (index < 0) return Task.FromResult<MemoryNugget?>(null);
+        var updated = Nuggets[index] with { PinLevel = pinLevel, UpdatedAt = DateTimeOffset.UtcNow };
+        Nuggets[index] = updated;
+        return Task.FromResult<MemoryNugget?>(updated);
+    }
+
     public Task StoreNuggetAsync(MemoryNugget nugget, CancellationToken ct = default)
     { Nuggets.Add(nugget); return Task.CompletedTask; }
 

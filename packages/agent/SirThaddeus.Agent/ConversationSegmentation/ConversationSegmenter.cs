@@ -98,7 +98,7 @@ public sealed class ConversationSegmenter : IConversationSegmenter
 
     /// <summary>
     /// Recombines spans that were split on a period that is part of a dotted
-    /// token (e.g. ".NET", "U.S.", "Dr.") rather than a real sentence boundary.
+    /// token rather than a real sentence boundary.
     /// A split point is considered a dotted-token artifact when the text
     /// immediately after the period starts with a letter (no whitespace gap).
     /// </summary>
@@ -131,8 +131,7 @@ public sealed class ConversationSegmenter : IConversationSegmenter
             var isDottedToken = false;
             if (betweenStart < text.Length && text[betweenStart] == '.')
             {
-                // Check if the character directly after the dot is a letter
-                // (no whitespace gap → ".NET", not ". Next sentence").
+                // Check if the character directly after the dot is a letter.
                 var afterDot = betweenStart + 1;
                 if (afterDot < text.Length && char.IsLetter(text[afterDot]))
                     isDottedToken = true;

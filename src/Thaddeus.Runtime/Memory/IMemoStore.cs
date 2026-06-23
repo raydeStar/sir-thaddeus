@@ -20,4 +20,11 @@ public interface IMemoStore
         bool? pinned,
         CancellationToken ct);
     Task<bool> DeleteAsync(string id, CancellationToken ct);
+
+    /// <summary>
+    /// Removes every memo. Used by the harness reset endpoint between
+    /// tests so a prior test's state never bleeds into the next one.
+    /// Returns the number of memos that were deleted.
+    /// </summary>
+    Task<int> WipeAllAsync(CancellationToken ct);
 }

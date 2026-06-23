@@ -8,6 +8,7 @@ using SirThaddeus.Agent.Pipeline.Steps;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.Agent.Validation;
+using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine;
 using Thaddeus.Runtime.Chat.Pipeline;
@@ -34,6 +35,7 @@ public sealed class LmStudioAssistant : IAssistant
     private readonly ToolPermissionGate _gate;
     private readonly IThreadStore _store;
     private readonly ChatTurnPublisher _publisher;
+    private readonly IAuditLogger _audit;
     private readonly ILogger<LmStudioAssistant> _logger;
 
     /// <summary>Delay between streamed deltas. Tests override to zero.</summary>
@@ -70,6 +72,12 @@ public sealed class LmStudioAssistant : IAssistant
     public string? PreferredUnits { get; init; }
 
     /// <summary>
+    /// When true, chat turns hide web-classified tools and instruct the
+    /// model to work from local/internal context only.
+    /// </summary>
+    public bool OfflineMode { get; init; }
+
+    /// <summary>
     /// Personality runtime used by <c>PersonalityInjectionStep</c> to wrap
     /// the base system prompt with tone / formality / warmth modifiers
     /// and to inject few-shot examples. Null leaves the pipeline without
@@ -83,6 +91,15 @@ public sealed class LmStudioAssistant : IAssistant
     /// facts relevant to the current turn. Null = no memory read.
     /// </summary>
     public IMemoryContextProvider? MemoryContextProvider { get; init; }
+
+    /// <summary>
+    /// Optional direct handle to the semantic memory store, used by
+    /// <c>CoreMemoryStep</c> to inject a small always-in-prompt block
+    /// (user profile + top user-pinned nuggets) on every turn.
+    /// Independent from <see cref="MemoryContextProvider"/>, which handles
+    /// situation-specific dynamic retrieval. Null = no core memory tier.
+    /// </summary>
+    public SirThaddeus.Memory.IMemoryStore? MemoryStore { get; init; }
 
     /// <summary>
     /// Optional fire-and-forget memory extractor for
@@ -198,8 +215,9 @@ public sealed class LmStudioAssistant : IAssistant
 
         var dateBlock = BuildDateBlock();
         var locBlock = BuildLocationBlock();
+        var offlineBlock = BuildOfflineModeBlock();
         var preamble = string.Join("\n\n",
-            new[] { dateBlock, locBlock }.Where(s => !string.IsNullOrEmpty(s)));
+            new[] { dateBlock, locBlock, offlineBlock }.Where(s => !string.IsNullOrEmpty(s)));
         return string.IsNullOrEmpty(preamble) ? text : preamble + "\n\n" + text;
     }
 
@@ -241,12 +259,23 @@ public sealed class LmStudioAssistant : IAssistant
             "just use it naturally when they omit one.";
     }
 
+    private string BuildOfflineModeBlock()
+    {
+        if (!OfflineMode) return string.Empty;
+        return
+            "Offline mode is ON. Do not use web, browser, weather, places, feed, " +
+            "holiday, status-check, or other network-backed tools. Work from local " +
+            "conversation context, local memory, wiki/files when available, and " +
+            "clearly say when a question needs live web access that offline mode is blocking.";
+    }
+
     public LmStudioAssistant(
         ILlmClient llm,
         IMcpToolClient mcp,
         ToolPermissionGate gate,
         IThreadStore store,
         ChatTurnPublisher publisher,
+        IAuditLogger audit,
         ILogger<LmStudioAssistant> logger)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
@@ -254,6 +283,7 @@ public sealed class LmStudioAssistant : IAssistant
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
+        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -285,7 +315,18 @@ public sealed class LmStudioAssistant : IAssistant
         var sink = new ChatTurnPublisherEventSink(
             _publisher, NullLogger<ChatTurnPublisherEventSink>.Instance);
         var gateAdapter = new RuntimePermissionGateAdapter(_gate, threadId, messageId);
-        var pipeline = BuildTurnPipeline(sink, gateAdapter);
+
+        // Wrap the raw MCP client so every tool call writes
+        // MCP_TOOL_CALL_START/END events to the audit log. The CLI harness
+        // and any other auditing consumer reconstruct the tool trace from
+        // those entries — without this wrapper, v2's audit file is empty.
+        var auditedMcp = new AuditedMcpToolClient(
+            _mcp,
+            _audit,
+            gateAdapter,
+            sessionId: messageId);
+
+        var pipeline = BuildTurnPipeline(auditedMcp, sink, gateAdapter);
 
         var initialContext = new TurnContext
         {
@@ -396,17 +437,22 @@ public sealed class LmStudioAssistant : IAssistant
     /// footman, footman before the tool loop, post-process before the
     /// composer.
     /// </summary>
-    private ChatPipeline BuildTurnPipeline(IChatEventSink sink, IToolPermissionGate permissionGate)
+    private ChatPipeline BuildTurnPipeline(IMcpToolClient mcp, IChatEventSink sink, IToolPermissionGate permissionGate)
     {
         var sanitize = new Func<TurnContext, string, string>((_, draft) =>
             AssistantResponseSanitizer.CleanChatReply(draft));
 
         var toolLoop = new ToolLoopStep(
-            _llm, _mcp, sink,
+            _llm, mcp, sink,
             permissionGate: permissionGate,
             groupClassifier: RuntimeToolGroupClassifier.Instance,
             interceptors: Array.Empty<IToolCallInterceptor>(),
-            argsRewriters: [new LocationAwarePlacesArgsRewriter(() => LocationHint)],
+            argsRewriters:
+            [
+                new LocationAwarePlacesArgsRewriter(() => LocationHint),
+                new FactSearchArgsRewriter(),
+                new ExistenceSearchArgsRewriter()
+            ],
             maxRoundTrips: MaxRoundTrips);
 
         return new ChatPipeline(new ITurnStep[]
@@ -441,7 +487,27 @@ public sealed class LmStudioAssistant : IAssistant
             // TurnContext.IsNewUser from the provider's onboarding
             // signal so the next step can fire on cold starts. No-op
             // when MemoryContextProvider is null.
-            new MemoryContextStep(MemoryContextProvider),
+            new MemoryContextStep(
+                MemoryContextProvider,
+                onRecalled: async (n, ct) =>
+                {
+                    await _publisher.PublishMemoryRecalledAsync(
+                        n.ThreadId,
+                        n.MessageId,
+                        n.FactsCount,
+                        n.EventsCount,
+                        n.ChunksCount,
+                        n.NuggetsCount,
+                        n.Preview,
+                        n.DurationMs,
+                        ct).ConfigureAwait(false);
+                }),
+
+            // Core memory: always-in-prompt [CORE MEMORY] block carrying
+            // the user's display name + top user-pinned nuggets. Reads
+            // IMemoryStore directly — no MCP roundtrip, no LLM call.
+            // No-op when MemoryStore is null or no items qualify.
+            new CoreMemoryStep(MemoryStore),
 
             // Onboarding injection: appends the cold-introduction
             // suffix when the memory provider signals no profile facts
@@ -554,6 +620,9 @@ public sealed class LmStudioAssistant : IAssistant
         var defs = new List<ToolDefinition>(mcpTools.Count);
         foreach (var t in mcpTools)
         {
+            if (OfflineMode && RuntimeToolGroupClassifier.Instance.Classify(t.Name) == ToolGroup.Web.ToString())
+                continue;
+
             defs.Add(new ToolDefinition
             {
                 Function = new FunctionDefinition

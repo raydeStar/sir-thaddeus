@@ -9,6 +9,7 @@ using SirThaddeus.Agent.Validation;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine;
+using Thaddeus.Runtime.Modules;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.Runtime.Tools;
 using Thaddeus.SharedTypes;
@@ -38,6 +39,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
     private readonly StubAssistant _stub;
     private readonly Func<SettingsDocument, IAssistant> _llmFactory;
     private readonly ILogger<AssistantRouter> _logger;
+    private readonly ModuleRuntimeService? _modules;
 
     /// <summary>Production constructor — builds an <see cref="LmStudioAssistant"/>
     /// over a cached <see cref="LmStudioClient"/> on demand.</summary>
@@ -49,10 +51,14 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         IThreadStore store,
         ChatTurnPublisher publisher,
         IAuditLogger audit,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        ModuleRuntimeService modules,
+        LlmRuntimeRegistry llmRuntime,
+        SirThaddeus.Memory.IMemoryStore? memoryStore = null)
         : this(settings, stub,
-              CreateDefaultFactory(mcp, gate, store, publisher, audit, loggerFactory),
-              loggerFactory.CreateLogger<AssistantRouter>())
+              CreateDefaultFactory(mcp, gate, store, publisher, audit, loggerFactory, llmRuntime, memoryStore),
+              loggerFactory.CreateLogger<AssistantRouter>(),
+              modules)
     {
     }
 
@@ -61,18 +67,26 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         ISettingsStore settings,
         StubAssistant stub,
         Func<SettingsDocument, IAssistant> llmFactory,
-        ILogger<AssistantRouter> logger)
+        ILogger<AssistantRouter> logger,
+        ModuleRuntimeService? modules = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _stub = stub ?? throw new ArgumentNullException(nameof(stub));
         _llmFactory = llmFactory ?? throw new ArgumentNullException(nameof(llmFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _modules = modules;
 
         _settings.Changed += OnSettingsChanged;
     }
 
     public async Task<RuntimeChatMessage> RespondAsync(string threadId, string userText, CancellationToken ct)
     {
+        if (_modules is not null && _modules.IsHealthBriefRequest(userText))
+        {
+            var reply = await _modules.BuildHealthBriefChatResponseAsync(ct).ConfigureAwait(false);
+            return await _stub.RespondWithAsync(threadId, reply, ct).ConfigureAwait(false);
+        }
+
         var doc = await _settings.GetAsync(ct).ConfigureAwait(false);
         var llm = doc.Llm;
 
@@ -112,7 +126,9 @@ public sealed class AssistantRouter : IAssistant, IDisposable
 
     private static Func<SettingsDocument, IAssistant> CreateDefaultFactory(
         IMcpToolClient mcp, ToolPermissionGate gate, IThreadStore store, ChatTurnPublisher publisher,
-        IAuditLogger audit, ILoggerFactory loggerFactory)
+        IAuditLogger audit, ILoggerFactory loggerFactory,
+        LlmRuntimeRegistry llmRuntime,
+        SirThaddeus.Memory.IMemoryStore? memoryStore)
     {
         var cacheLock = new object();
         LmStudioClient? cached = null;
@@ -141,22 +157,16 @@ public sealed class AssistantRouter : IAssistant, IDisposable
             {
                 if (cached is null || fingerprint != fp)
                 {
-                    var options = new LlmClientOptions
-                    {
-                        BaseUrl = llm.BaseUrl!,
-                        Model = llm.ModelId,
-                        MaxTokens = llm.MaxTokens,
-                        ContextWindowTokens = llm.ContextWindowTokens,
-                        Temperature = llm.Temperature,
-                    };
+                    var options = ToClientOptions(llm);
                     if (cached is null)
                     {
-                        cached = new LmStudioClient(options);
+                        cached = new LmStudioClient(options, logger: loggerFactory.CreateLogger<LmStudioClient>());
                     }
                     else
                     {
                         cached.UpdateOptions(options);
                     }
+                    llmRuntime.SetPrimary(cached);
                     fingerprint = fp;
 
                     // Guardrails, validator, and repair loop are all
@@ -195,7 +205,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                             var options = gatekeeperPolicy.ToClientOptions();
                             if (gatekeeperCached is null)
                             {
-                                gatekeeperCached = new LmStudioClient(options);
+                                gatekeeperCached = new LmStudioClient(options, logger: loggerFactory.CreateLogger<LmStudioClient>());
                             }
                             else
                             {
@@ -258,14 +268,16 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                 var repair = repairCached ??= new RepairLoop(cached, validator);
 
                 return new LmStudioAssistant(
-                    cached, mcp, gate, store, publisher,
+                    cached, mcp, gate, store, publisher, audit,
                     loggerFactory.CreateLogger<LmStudioAssistant>())
                 {
                     Footman = footmanCached,
                     LocationHint = string.IsNullOrWhiteSpace(loc?.ManualLocation) ? null : loc!.ManualLocation,
                     PreferredUnits = string.IsNullOrWhiteSpace(loc?.PreferredUnits) ? null : loc!.PreferredUnits,
+                    OfflineMode = doc.Privacy.OfflineMode,
                     PersonalityRuntime = personalityRuntime,
                     MemoryContextProvider = memoryProvider,
+                    MemoryStore = memoryStore,
                     SearchFallbackExecutor = searchFallback,
                     GuardrailsPipeline = guardrails,
                     CompletionValidator = validator,
@@ -295,12 +307,42 @@ public sealed class AssistantRouter : IAssistant, IDisposable
             return GatekeeperPolicy.SharedPrimary(llm, gkBaseUrl);
         }
 
-        if (sameEndpoint && llm.ReusePrimaryForGatekeeperOnSharedEndpoint)
+        if (sameEndpoint &&
+            llm.ReusePrimaryForGatekeeperOnSharedEndpoint &&
+            string.IsNullOrWhiteSpace(llm.GatekeeperModelId))
         {
             return GatekeeperPolicy.HeuristicOnly(llm, gkBaseUrl);
         }
 
         return GatekeeperPolicy.SeparateLlm(llm, gkBaseUrl);
+    }
+
+    internal static LlmClientOptions ToClientOptions(LlmSettings llm)
+    {
+        return new LlmClientOptions
+        {
+            BaseUrl = llm.BaseUrl!,
+            Model = llm.ModelId,
+            MaxTokens = llm.MaxTokens,
+            ContextWindowTokens = llm.ContextWindowTokens,
+            Temperature = llm.Temperature,
+            ChatCompletionPath = string.IsNullOrWhiteSpace(llm.ChatCompletionPath)
+                ? "/v1/chat/completions"
+                : llm.ChatCompletionPath,
+            PreloadModelKey = llm.PreloadModelKey,
+            EnableStartupWarmup = llm.EnableStartupWarmup,
+            EnableKeepWarm = llm.EnableKeepWarm,
+            ContextLength = llm.ContextLength > 0 ? llm.ContextLength : 4096,
+            FlashAttention = llm.FlashAttention,
+            OffloadKvCacheToGpu = llm.OffloadKvCacheToGpu,
+            MaxConcurrentLlmRequests = llm.MaxConcurrentLlmRequests > 0 ? llm.MaxConcurrentLlmRequests : 1,
+            WarmupTimeoutSeconds = llm.WarmupTimeoutSeconds > 0 ? llm.WarmupTimeoutSeconds : 120,
+            KeepWarmIntervalMinutes = llm.KeepWarmIntervalMinutes > 0 ? llm.KeepWarmIntervalMinutes : 30,
+            MaxInputTokensSoftCap = llm.MaxInputTokensSoftCap > 0 ? llm.MaxInputTokensSoftCap : 4000,
+            MaxOutputTokensDefault = llm.MaxOutputTokensDefault > 0
+                ? llm.MaxOutputTokensDefault
+                : Math.Min(Math.Max(llm.MaxTokens, 128), 4096)
+        };
     }
 
     private static bool UriHostsMatch(string left, string right)

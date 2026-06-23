@@ -53,6 +53,42 @@ public class ResponseComposerStepTests
         Assert.Same(calls, term.Response.ToolCallsMade);
     }
 
+    [Fact]
+    public async Task Replaces_released_product_existence_draft_from_tool_evidence()
+    {
+        var step = new ResponseComposerStep();
+        var ctx = new TurnContext
+        {
+            ThreadId = "t1",
+            MessageId = "m1",
+            UserText = "Does Vendor Z1 exist as a released product?",
+            AssistantDraft = "Vendor Z1 is probably real, based on future-model chatter.",
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\"Vendor Z1 release date\"}",
+                    Result = """
+                        [search: 1 result(s) returned]
+
+                        <!-- SOURCES_JSON -->
+                        {"sources":[{"url":"https://vendor.example/z1","title":"Vendor Z1 - Tech Specs","domain":"vendor.example","snippet":"Year introduced: 2024. Vendor Z1 tech specs."}]}
+                        """,
+                    Success = true
+                }
+            ]
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.StartsWith("Yes", term.Response.Text);
+        Assert.Contains("Vendor Z1 exists as a released product", term.Response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2024", term.Response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("future-model chatter", term.Response.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

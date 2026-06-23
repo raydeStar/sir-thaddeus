@@ -371,7 +371,11 @@ jobs:
           # with tagged semver releases for the Latest pin.
           prerelease: true
           make_latest: false
+          # Keep the public rolling release surface readable. Lite bundles and
+          # contents manifests remain CI artifacts, but the Releases page shows
+          # only the normal full downloads and archive checksums.
           files: |
-            release-assets/*.zip
-            release-assets/*.tar.gz
-            release-assets/*.sha256.txt
+            release-assets/*-full.zip
+            release-assets/*-full.tar.gz
+            release-assets/*-full.zip.sha256.txt
+            release-assets/*-full.tar.gz.sha256.txt

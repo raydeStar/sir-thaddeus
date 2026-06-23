@@ -52,7 +52,7 @@ public class DialogueStateStepTests
         var result = await step.ExecuteAsync(ctx, CancellationToken.None);
 
         var cont = Assert.IsType<StepResult.Continue>(result);
-        var system = Assert.Single(cont.Next.LlmMessages.Where(m => m.Role == "system"));
+        var system = Assert.Single(cont.Next.LlmMessages, m => m.Role == "system");
         Assert.Contains("[CONVERSATION CONTEXT]", system.Content);
         Assert.Contains("Topic: quarterly report", system.Content);
     }

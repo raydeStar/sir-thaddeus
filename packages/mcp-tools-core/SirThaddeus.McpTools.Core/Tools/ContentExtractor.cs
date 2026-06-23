@@ -294,7 +294,7 @@ public static class ContentExtractor
         foreach (var selector in selectors)
         {
             var node = doc.DocumentNode.SelectSingleNode(selector);
-            var href = node?.GetAttributeValue("href", null);
+            var href = node?.GetAttributeValue("href", string.Empty);
 
             if (!string.IsNullOrWhiteSpace(href))
             {
@@ -324,7 +324,7 @@ public static class ContentExtractor
             ?? doc.DocumentNode.SelectSingleNode("//meta[@name='twitter:image']")
             ?? doc.DocumentNode.SelectSingleNode("//meta[@property='og:image:url']");
 
-        var content = metaNode?.GetAttributeValue("content", null);
+        var content = metaNode?.GetAttributeValue("content", string.Empty);
         if (string.IsNullOrWhiteSpace(content))
             return null;
 
@@ -513,7 +513,7 @@ public static class ContentExtractor
             if (checkedCount++ > GoogleNewsResolveMaxLinks)
                 break;
 
-            var href = node.GetAttributeValue("href", null);
+            var href = node.GetAttributeValue("href", string.Empty);
             if (string.IsNullOrWhiteSpace(href))
                 continue;
 
@@ -548,7 +548,7 @@ public static class ContentExtractor
         doc.LoadHtml(html);
 
         var node = doc.DocumentNode.SelectSingleNode("//link[@rel='canonical']");
-        var href = node?.GetAttributeValue("href", null);
+        var href = node?.GetAttributeValue("href", string.Empty);
         if (string.IsNullOrWhiteSpace(href))
             return null;
 

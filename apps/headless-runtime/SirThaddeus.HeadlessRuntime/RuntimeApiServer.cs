@@ -40,6 +40,7 @@ internal static partial class RuntimeApiServer
         Func<CancellationToken, Task<SearchStatusResponse>> getSearchStatus,
         IAuditLogger audit,
         ApiPermissionGate? permissionGate,
+        Action? resetToolBudgets,
         CancellationToken cancellationToken)
     {
         var builder = WebApplication.CreateBuilder();
@@ -83,6 +84,8 @@ internal static partial class RuntimeApiServer
 
         MapProfileEndpoints(app, getSettings, PersistSettings);
         MapPersonalityEndpoints(app, getSettings, PersistSettings);
+
+        MapHarnessEndpoints(app, getSettings, permissionGate, resetToolBudgets);
 
         await app.RunAsync(cancellationToken);
     }

@@ -236,8 +236,8 @@ public sealed class EntityResolver
 
             var trimmedName = name!.Trim();
 
-            // Reject degenerate extractions — single-char names like "."
-            // from small models mishandling acronyms (e.g. ".NET" → ".").
+            // Reject degenerate extractions like a single punctuation mark
+            // from small models mishandling dotted acronyms.
             if (trimmedName.Length < 2)
                 return null;
 

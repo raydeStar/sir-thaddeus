@@ -799,16 +799,17 @@ public static class WebSearchTools
         for (var i = 0; i < results.Count; i++)
         {
             var r = results[i];
-            var hasExtraction = extractionMap.TryGetValue(r.Url, out var ext) && IsUsefulExtraction(ext, strictNewsMode);
+            var hasMetadataExtraction = extractionMap.TryGetValue(r.Url, out var metadataExt);
+            var hasExtraction = metadataExt is not null && IsUsefulExtraction(metadataExt, strictNewsMode);
 
-            var title = !string.IsNullOrWhiteSpace(r.Title) ? r.Title : (hasExtraction ? ext!.Title : "(untitled)");
+            var title = !string.IsNullOrWhiteSpace(r.Title) ? r.Title : (hasExtraction ? metadataExt!.Title : "(untitled)");
             var excerpt = hasExtraction
-                ? CleanExcerpt(ContentExtractor.Truncate(ext!.TextContent.Trim(), CardExcerptChars))
+                ? CleanExcerpt(ContentExtractor.Truncate(metadataExt!.TextContent.Trim(), CardExcerptChars))
                 : CleanExcerpt(r.Snippet);
-            var favicon = hasExtraction ? ext!.FaviconBase64 : null;
-            var thumbnail = hasExtraction ? GetArticleThumbnail(ext!) : null;
-            var url = hasExtraction ? ext!.Url : r.Url;
-            var domain = hasExtraction ? ext!.Domain : r.Source;
+            var favicon = hasMetadataExtraction ? metadataExt!.FaviconBase64 : null;
+            var thumbnail = hasMetadataExtraction ? GetArticleThumbnail(metadataExt!) : null;
+            var url = hasMetadataExtraction ? metadataExt!.Url : r.Url;
+            var domain = hasMetadataExtraction ? metadataExt!.Domain : r.Source;
 
             sources.Add(new
             {
@@ -1007,27 +1008,41 @@ public static class WebSearchTools
         if (string.IsNullOrWhiteSpace(url))
             return null;
 
-        // Skip thumbnails that are likely generic site branding, not article images.
-        // These produce misleading cards (stock photo of a woman for a finance article, etc.)
+        // Skip thumbnails that are clearly generic site branding rather than
+        // article images. Be conservative — og:image/twitter:image are the
+        // publisher's intended share image, so the filter should only catch
+        // the most obvious branding cases (logos, placeholders, vector icons).
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
             var path = uri.AbsolutePath.ToLowerInvariant();
+            var file = path.Substring(path.LastIndexOf('/') + 1);
 
-            // Very short paths are usually root-level brand images
-            if (path.Length < 10)
+            if (path.EndsWith(".svg"))
                 return null;
 
-            // Common generic image path segments
-            if (path.Contains("/logo") || path.Contains("/brand") ||
-                path.Contains("/default") || path.Contains("/placeholder") ||
-                path.Contains("/icon") || path.Contains("/social-share") ||
-                path.Contains("/og-image") || path.Contains("/site-image") ||
-                path.EndsWith(".svg"))
+            // Match logo/brand/placeholder words as path *segments* or in the
+            // filename only. Substring matches were over-eager — many real
+            // article images live under /wp-content/.../og-image/<slug>.jpg.
+            if (HasJunkSegment(path, "logo") ||
+                HasJunkSegment(path, "brand") ||
+                HasJunkSegment(path, "placeholder") ||
+                HasJunkSegment(path, "default") ||
+                file.StartsWith("icon") ||
+                file == "og-image.jpg" || file == "og-image.png" ||
+                file == "social-share.jpg" || file == "social-share.png" ||
+                file == "share.jpg" || file == "share.png")
                 return null;
         }
 
         return url;
     }
+
+    private static bool HasJunkSegment(string path, string token) =>
+        path.Contains($"/{token}/") ||
+        path.Contains($"/{token}.") ||
+        path.Contains($"/{token}-") ||
+        path.Contains($"-{token}.") ||
+        path.EndsWith($"/{token}");
 
     /// <summary>
     /// Clamps the recency value to a known enum-like token.

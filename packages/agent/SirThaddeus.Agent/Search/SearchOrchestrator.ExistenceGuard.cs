@@ -62,8 +62,9 @@ public sealed partial class SearchOrchestrator
         {
             var year = TryExtractReleaseYear(positiveEvidence);
             var yearClause = year is null ? string.Empty : $", introduced in {year}";
+            var sourceClause = BuildEvidenceSourceClause(positiveEvidence);
 
-            return $"Yes \u2014 {subject} exists as a released product{yearClause}.";
+            return $"Yes \u2014 {subject} exists as a released product{yearClause}. {sourceClause}";
         }
 
         var negativeEvidence = subjectMatches
@@ -72,9 +73,16 @@ public sealed partial class SearchOrchestrator
 
         if (negativeEvidence.Count > 0 && negativeEvidence.Count == subjectMatches.Count)
         {
+            var sourceClause = BuildEvidenceSourceClause(negativeEvidence);
             return
-                $"Based on the available release lists, {subject} likely does not exist as a released product. " +
-                $"The returned sources include negative indicators (for example unreleased/rumor language) rather than official released-model references.";
+                $"No \u2014 I did not find evidence that {subject} exists as a released product. " +
+                $"The returned sources include negative indicators such as unreleased, rumor, or no-such-model language. {sourceClause}";
+        }
+
+        if (subjectMatches.Count == 0 &&
+            TryBuildAbsentFromReleaseCatalogResponse(subject, subjectTokens, sources) is { Length: > 0 } absentFromCatalog)
+        {
+            return absentFromCatalog;
         }
 
         return
@@ -438,8 +446,12 @@ public sealed partial class SearchOrchestrator
                     ($"{s.Title} {s.Snippet}")
                     .Contains(priorSeasonLabel, StringComparison.OrdinalIgnoreCase));
                 var hasCancelSignal = evidence.Any(s =>
-                    ($"{s.Title} {s.Snippet}")
-                    .Contains("cancel", StringComparison.OrdinalIgnoreCase));
+                {
+                    var text = $"{s.Title} {s.Snippet}";
+                    return text.Contains("cancel", StringComparison.OrdinalIgnoreCase) ||
+                           text.Contains("ended", StringComparison.OrdinalIgnoreCase) ||
+                           text.Contains("never renewed", StringComparison.OrdinalIgnoreCase);
+                });
 
                 if (hasPriorSeason && hasCancelSignal)
                     score += 10;
@@ -512,8 +524,11 @@ public sealed partial class SearchOrchestrator
     private static bool HasReleasedProductPositiveSignal(SourceItem source)
     {
         var text = $"{source.Title} {source.Snippet}";
-         var isOfficialDomain = source.Domain.Contains("apple.com", StringComparison.OrdinalIgnoreCase) ||
-                       source.Domain.Contains("gsmarena.com", StringComparison.OrdinalIgnoreCase);
+        var isTrustedProductDomain =
+            source.Domain.Equals("apple.com", StringComparison.OrdinalIgnoreCase) ||
+            source.Domain.Equals("www.apple.com", StringComparison.OrdinalIgnoreCase) ||
+            source.Domain.Equals("support.apple.com", StringComparison.OrdinalIgnoreCase) ||
+            source.Domain.Contains("gsmarena.com", StringComparison.OrdinalIgnoreCase);
          var hasNegativeReleaseCue = text.Contains("not released", StringComparison.OrdinalIgnoreCase) ||
                          text.Contains("unreleased", StringComparison.OrdinalIgnoreCase) ||
                          text.Contains("no such", StringComparison.OrdinalIgnoreCase) ||
@@ -524,7 +539,26 @@ public sealed partial class SearchOrchestrator
              (!hasNegativeReleaseCue && text.Contains("released", StringComparison.OrdinalIgnoreCase)) ||
                text.Contains("available now", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("in production", StringComparison.OrdinalIgnoreCase) ||
-             isOfficialDomain;
+               (!hasNegativeReleaseCue && HasTrustedLifecycleSupportSignal(source)) ||
+             (isTrustedProductDomain && HasReleasedProductCatalogSignal(source));
+    }
+
+    private static bool HasTrustedLifecycleSupportSignal(SourceItem source)
+    {
+        var text = $"{source.Title} {source.Snippet} {source.Domain}";
+        var hasLifecycleSignal = text.Contains("supported by", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("supported from", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("support status", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("version support", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("endoflife", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("end of life", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("eol", StringComparison.OrdinalIgnoreCase);
+        if (!hasLifecycleSignal)
+            return false;
+
+        return source.Domain.Contains("endoflife", StringComparison.OrdinalIgnoreCase) ||
+               source.Domain.Contains("support.", StringComparison.OrdinalIgnoreCase) ||
+               source.Domain.StartsWith("support", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool HasReleasedProductNegativeSignal(SourceItem source)
@@ -538,6 +572,99 @@ public sealed partial class SearchOrchestrator
                text.Contains("rumor", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("rumour", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("concept", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TryBuildAbsentFromReleaseCatalogResponse(
+        string subject,
+        IReadOnlyList<string> subjectTokens,
+        IReadOnlyList<SourceItem> sources)
+    {
+        if (string.IsNullOrWhiteSpace(subject) || subjectTokens.Count == 0 || sources.Count == 0)
+            return null;
+
+        var familyTokens = BuildProductFamilyTokens(subjectTokens);
+        if (familyTokens.Count == 0)
+            return null;
+
+        var catalogEvidence = sources
+            .Where(source => SourceMentionsProductFamily(source, familyTokens) &&
+                             HasReleasedProductCatalogSignal(source))
+            .ToList();
+        if (catalogEvidence.Count < 2)
+            return null;
+
+        var sourceClause = BuildEvidenceSourceClause(catalogEvidence);
+        return
+            $"No \u2014 I did not find {subject} in the returned release/model-list evidence. " +
+            $"The strongest sources discuss the same product family but do not identify {subject} as a released model. {sourceClause}";
+    }
+
+    private static bool HasReleasedProductCatalogSignal(SourceItem source)
+    {
+        var text = $"{source.Title} {source.Snippet} {source.Domain}";
+        return text.Contains("list of", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("release", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("released", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("model", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("models", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("lineup", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("chronological", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("history", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("introduced", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("compare", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("specs", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("support", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<string> BuildProductFamilyTokens(IReadOnlyList<string> subjectTokens)
+    {
+        var generic = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "product",
+            "device",
+            "model",
+            "phone",
+            "version",
+            "release",
+            "released"
+        };
+
+        return subjectTokens
+            .Where(token => token.Any(char.IsLetter))
+            .Where(token => !generic.Contains(token))
+            .ToList();
+    }
+
+    private static bool SourceMentionsProductFamily(SourceItem source, IReadOnlyList<string> familyTokens)
+    {
+        if (familyTokens.Count == 0)
+            return false;
+
+        var lower = $"{source.Title} {source.Snippet}".ToLowerInvariant();
+        return familyTokens.Any(token => lower.Contains(token, StringComparison.Ordinal));
+    }
+
+    private static string BuildEvidenceSourceClause(IReadOnlyList<SourceItem> sources)
+    {
+        var labels = sources
+            .OrderBy(source => IsCommunityDiscussionSource(source) ? 1 : 0)
+            .Select(source => string.IsNullOrWhiteSpace(source.Domain) ? source.Title : source.Domain)
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(2)
+            .ToList();
+
+        return labels.Count == 0
+            ? "I based that on the returned search evidence."
+            : $"Evidence checked: {string.Join(", ", labels)}.";
+    }
+
+    private static bool IsCommunityDiscussionSource(SourceItem source)
+    {
+        var text = $"{source.Domain} {source.Title} {source.Url}";
+        return text.Contains("discussions.", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("community", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("forum", StringComparison.OrdinalIgnoreCase);
     }
 
     private static List<string> BuildSubjectTokens(string subject)

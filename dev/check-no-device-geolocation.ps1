@@ -31,7 +31,7 @@ foreach ($root in $sourceRoots) {
         $ext = $file.Extension.ToLowerInvariant()
         if ($allowedExtensions -notcontains $ext) { return }
 
-        if ($file.FullName -match '[\\/](bin|obj|artifacts|\.git)[\\/]') { return }
+        if ($file.FullName -match '[\\/](bin|obj|artifacts|\.git|node_modules|dist|coverage)[\\/]') { return }
 
         $content = Get-Content -Path $file.FullName -Raw
         foreach ($pattern in $forbiddenPatterns) {

@@ -157,6 +157,7 @@ function ThreadRow({ thread, onPinToggle, onRename, onDelete }: ThreadRowProps) 
       <Link
         to="/chat/$threadId"
         params={{ threadId: thread.id }}
+        search={{ focusMessageId: undefined }}
         className="min-w-0 flex-1 transition-colors hover:text-accent"
       >
         <div className="flex items-baseline justify-between gap-2">

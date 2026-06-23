@@ -8,7 +8,7 @@ public class IntentFeatureExtractorTests
     [Fact]
     public void LooksLikeFactLookup_SeasonEpisodePlotQuery_ReturnsTrue()
     {
-        var lower = "what would be the plot of episode 1 of season 3 of stargate universe about?"
+        var lower = "what would be the plot of episode 2 of season 7 of meridian drift about?"
             .ToLowerInvariant();
 
         var result = IntentFeatureExtractor.LooksLikeFactLookup(lower);
@@ -51,6 +51,37 @@ public class IntentFeatureExtractorTests
         Assert.Equal("released_product_existence", evidence.ReasonCode);
     }
 
+    [Fact]
+    public void WebLookupHeuristicEvidence_LatestCurrentEventDetails_RequestsLookup()
+    {
+        var lower = "bring me up some latest details on the iran war"
+            .ToLowerInvariant();
+
+        var evidence = IntentFeatureExtractor.GetWebLookupHeuristicEvidence(lower);
+
+        Assert.True(evidence.ShouldLookup);
+        Assert.True(evidence.Score >= 2.0);
+        Assert.Equal("freshness_update_combo", evidence.ReasonCode);
+    }
+
+    [Fact]
+    public void LooksLikeExplicitNewsLookup_LatestCurrentEventDetails_ReturnsTrue()
+    {
+        var lower = "bring me up some latest details on the iran war"
+            .ToLowerInvariant();
+
+        Assert.True(IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower));
+    }
+
+    [Fact]
+    public void LooksLikeExplicitNewsLookup_PublicFigureMessageFollowup_ReturnsTrue()
+    {
+        var lower = "give me more info on putins message"
+            .ToLowerInvariant();
+
+        Assert.True(IntentFeatureExtractor.LooksLikeExplicitNewsLookup(lower));
+    }
+
     [Theory]
     [InlineData("ok i want to run a few tests -- can you tell me what is on mys creen right now?")]
     [InlineData("tell me what is on my screen right now")]
@@ -66,6 +97,15 @@ public class IntentFeatureExtractorTests
     public void LooksLikeFileRequest_DetectsNaturalFolderQuestions(string input)
     {
         Assert.True(IntentFeatureExtractor.LooksLikeFileRequest(input.ToLowerInvariant()));
+    }
+
+    [Fact]
+    public void LooksLikeFileRequest_DoesNotTreatDetailsAsLsCommand()
+    {
+        var lower = "bring me up some latest details on the iran war"
+            .ToLowerInvariant();
+
+        Assert.False(IntentFeatureExtractor.LooksLikeFileRequest(lower));
     }
 
     // ── HasLocalBusinessProximitySignals — proximity detection ────────

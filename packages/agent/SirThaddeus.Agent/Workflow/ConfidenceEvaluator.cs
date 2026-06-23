@@ -17,6 +17,7 @@ public sealed class ConfidenceEvaluator : IConfidenceEvaluator
         var agreement = evidence.Count == 0 ? 0.45 : Clamp01((supports - contradicts + evidence.Count) / (2.0 * evidence.Count));
 
         var hasAnswer = !string.IsNullOrWhiteSpace(state.DraftAnswer);
+        var hasFailurePlaceholderAnswer = LooksLikeFailurePlaceholder(state.DraftAnswer);
         var coverage = hasAnswer ? 0.9 : 0.3;
         var contradictionPenalty = evidence.Count == 0 ? 0 : Math.Min(0.35, contradicts * 0.12);
 
@@ -29,6 +30,11 @@ public sealed class ConfidenceEvaluator : IConfidenceEvaluator
         if (state.Envelope.Complexity == TaskComplexity.MultiStepResearch && !hasStrongToolEvidence)
         {
             score = Math.Min(score, 0.58);
+        }
+
+        if (hasFailurePlaceholderAnswer)
+        {
+            score = Math.Min(score, 0.20);
         }
 
         score = Clamp01(score);
@@ -62,4 +68,19 @@ public sealed class ConfidenceEvaluator : IConfidenceEvaluator
 
     private static double Clamp01(double value)
         => Math.Max(0.0, Math.Min(1.0, value));
+
+    private static bool LooksLikeFailurePlaceholder(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return true;
+
+        var trimmed = text.Trim();
+        var normalized = trimmed.TrimEnd('.', '!', '?');
+
+        return normalized.Equals("Cancelled", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("Canceled", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("(The model returned an empty response.)", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Contains("couldn't finish the answer cleanly", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Contains("event stream ended before completion", StringComparison.OrdinalIgnoreCase);
+    }
 }

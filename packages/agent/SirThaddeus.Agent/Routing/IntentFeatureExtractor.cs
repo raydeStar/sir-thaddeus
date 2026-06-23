@@ -84,7 +84,7 @@ public static class IntentFeatureExtractor
             "what's in the file", "whats in the file",
             "file contents",   "show me the file",
             "directory listing", "folder contents",
-            "list directory",  "ls ",
+            "list directory",
             "what's in my folder", "whats in my folder",
             "what is in my folder",
             "what's in this folder", "whats in this folder",
@@ -106,7 +106,13 @@ public static class IntentFeatureExtractor
             "what files are in"
         ];
 
-        return ContainsLoosePhrase(lower, patterns);
+        if (ContainsLoosePhrase(lower, patterns))
+            return true;
+
+        var normalized = NormalizeLoosePhraseInput(lower);
+        return normalized.Equals("ls", StringComparison.Ordinal) ||
+               normalized.StartsWith("ls ", StringComparison.Ordinal) ||
+               normalized.Contains(" ls ", StringComparison.Ordinal);
     }
 
     public static bool LooksLikeSystemCommand(string lower)
@@ -171,9 +177,7 @@ public static class IntentFeatureExtractor
 
         if (ContainsAny(lower,
             [
-                "file_read", "file read", "file_list", "file list", "file_write", "file write", "document_read", "document read",
-                "knowledge_store", "knowledge store", "knowledge_store_create_file", "knowledge_store_append_to_file",
-                "knowledge_store_read_file", "knowledge_store_list_files", "knowledge_store_journal_log_entry", "knowledge_store_list_roots"
+                "file_read", "file read", "file_list", "file list", "file_write", "file write", "document_read", "document read"
             ]))
         {
             return Intents.FileTask;
@@ -704,6 +708,8 @@ public static class IntentFeatureExtractor
             "search the web",  "search online",    "look it up",
             "look this up",    "find information",  "find info on",
             "search about",
+            "more info on",    "more information on",
+            "more detail on",  "more details on",
 
             // Recommendation / product signals -- these imply the user
             // needs current real-world data, not a canned opinion.
@@ -743,6 +749,14 @@ public static class IntentFeatureExtractor
         var hasTopic =
             lower.Contains("news", StringComparison.Ordinal) ||
             lower.Contains("headline", StringComparison.Ordinal) ||
+            lower.Contains("war", StringComparison.Ordinal) ||
+            lower.Contains("conflict", StringComparison.Ordinal) ||
+            lower.Contains("ceasefire", StringComparison.Ordinal) ||
+            lower.Contains("missile", StringComparison.Ordinal) ||
+            lower.Contains("airstrike", StringComparison.Ordinal) ||
+            lower.Contains("invasion", StringComparison.Ordinal) ||
+            lower.Contains("protest", StringComparison.Ordinal) ||
+            lower.Contains("election", StringComparison.Ordinal) ||
             lower.Contains("price", StringComparison.Ordinal) ||
             lower.Contains("stock", StringComparison.Ordinal) ||
             lower.Contains("market", StringComparison.Ordinal) ||
@@ -765,6 +779,15 @@ public static class IntentFeatureExtractor
             lower.Contains("movie", StringComparison.Ordinal) ||
             lower.Contains("film", StringComparison.Ordinal) ||
             lower.Contains("live action", StringComparison.Ordinal) ||
+            lower.Contains("message", StringComparison.Ordinal) ||
+            lower.Contains("speech", StringComparison.Ordinal) ||
+            lower.Contains("statement", StringComparison.Ordinal) ||
+            lower.Contains("putin", StringComparison.Ordinal) ||
+            lower.Contains("zelensky", StringComparison.Ordinal) ||
+            lower.Contains("netanyahu", StringComparison.Ordinal) ||
+            lower.Contains("khamenei", StringComparison.Ordinal) ||
+            lower.Contains("trump", StringComparison.Ordinal) ||
+            lower.Contains("biden", StringComparison.Ordinal) ||
             lower.Contains("review", StringComparison.Ordinal) ||
             lower.Contains("rating", StringComparison.Ordinal) ||
             lower.Contains("supplement", StringComparison.Ordinal) ||
@@ -913,11 +936,39 @@ public static class IntentFeatureExtractor
         ];
 
         var hasNewsSignal = ContainsAny(lower, newsSignals);
-        if (!hasNewsSignal)
-            return false;
+
+        ReadOnlySpan<string> currentEventSignals =
+        [
+            "war",
+            "conflict",
+            "ceasefire",
+            "missile",
+            "airstrike",
+            "invasion",
+            "protest",
+            "election",
+            "message",
+            "speech",
+            "statement",
+            "putin",
+            "zelensky",
+            "netanyahu",
+            "khamenei",
+            "trump",
+            "biden",
+            "earthquake",
+            "hurricane",
+            "wildfire",
+            "summit",
+            "trial",
+            "crisis"
+        ];
 
         if (ContainsAny(lower, listSignals) || ContainsAny(lower, timeSignals))
-            return true;
+            return hasNewsSignal || ContainsAny(lower, currentEventSignals);
+
+        if (!hasNewsSignal)
+            return false;
 
         return lower.Contains("news on ", StringComparison.Ordinal) ||
                lower.Contains("news about ", StringComparison.Ordinal) ||
@@ -1113,10 +1164,7 @@ public static class IntentFeatureExtractor
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
-        if (lower.Contains("knowledge_store", StringComparison.Ordinal) ||
-            lower.Contains("knowledge store", StringComparison.Ordinal) ||
-            lower.Contains("journal_log_entry", StringComparison.Ordinal) ||
-            lower.Contains("read_file", StringComparison.Ordinal) ||
+        if (lower.Contains("read_file", StringComparison.Ordinal) ||
             lower.Contains("file_list", StringComparison.Ordinal) ||
             lower.Contains("file_read", StringComparison.Ordinal) ||
             lower.Contains("tool call", StringComparison.Ordinal) ||
@@ -1572,6 +1620,9 @@ public static class IntentFeatureExtractor
 
         return lower.Contains("updates", StringComparison.Ordinal) ||
                lower.Contains("update", StringComparison.Ordinal) ||
+               lower.Contains("details", StringComparison.Ordinal) ||
+               lower.Contains("detail", StringComparison.Ordinal) ||
+               lower.Contains("latest details", StringComparison.Ordinal) ||
                lower.Contains("developments", StringComparison.Ordinal) ||
                lower.Contains("changes", StringComparison.Ordinal) ||
                lower.Contains("releases", StringComparison.Ordinal) ||
@@ -1590,20 +1641,17 @@ public static class IntentFeatureExtractor
         if (string.IsNullOrWhiteSpace(lower))
             return false;
 
-        var hasSeasonToken = lower.Contains("season ", StringComparison.Ordinal) ||
-                             lower.Contains("s1", StringComparison.Ordinal) ||
-                             lower.Contains("s2", StringComparison.Ordinal) ||
-                             lower.Contains("s3", StringComparison.Ordinal) ||
-                             lower.Contains("s4", StringComparison.Ordinal) ||
-                             lower.Contains("s5", StringComparison.Ordinal);
+        var hasSeasonToken =
+            System.Text.RegularExpressions.Regex.IsMatch(
+                lower,
+                @"\b(?:season\s+\d+|s\d+)\b",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-        var hasEpisodeToken = lower.Contains("episode ", StringComparison.Ordinal) ||
-                              lower.Contains("ep ", StringComparison.Ordinal) ||
-                              lower.Contains("e1", StringComparison.Ordinal) ||
-                              lower.Contains("e2", StringComparison.Ordinal) ||
-                              lower.Contains("e3", StringComparison.Ordinal) ||
-                              lower.Contains("e4", StringComparison.Ordinal) ||
-                              lower.Contains("e5", StringComparison.Ordinal);
+        var hasEpisodeToken =
+            System.Text.RegularExpressions.Regex.IsMatch(
+                lower,
+                @"\b(?:episode\s+\d+|ep\s+\d+|e\d+)\b",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
         if (!hasSeasonToken || !hasEpisodeToken)
             return false;

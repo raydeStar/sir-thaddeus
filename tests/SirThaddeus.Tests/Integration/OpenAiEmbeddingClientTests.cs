@@ -103,6 +103,18 @@ public class OpenAiEmbeddingClientTests
     }
 
     [Fact]
+    public async Task ReturnsNull_WhenModelIsBlank()
+    {
+        var handler = new ThrowingHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:1234") };
+        using var client = new OpenAiEmbeddingClient("http://localhost:1234", "   ", http);
+
+        var result = await client.EmbedAsync("hello world");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
     public async Task ReturnsNull_OnNetworkException()
     {
         var handler = new ThrowingHandler();

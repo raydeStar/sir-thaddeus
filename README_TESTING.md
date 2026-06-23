@@ -30,6 +30,7 @@ Most common commands:
 
 ```powershell
 ./dev/test.ps1
+./dev/verify-harness.ps1
 ./dev/harness.ps1 --suite quality --judge none
 ./dev/harness.ps1 --suite web-search --test web_local_business_deli --judge none
 ./dev/harness.ps1 stage --suite continuity --test local_business_followup_anchor
@@ -55,6 +56,7 @@ Short version for AI-assisted work:
 - Use stage suites under `tools/SirThaddeus.Harness/StageSuites/` for deterministic preprocess/classify/query regressions.
 - Use `followup_anchor` in stage suite `context` when a vague follow-up needs a deterministic resolved topic.
 - Do not modify harness scoring or suite expectations to make failures disappear.
+- Harness scoring uses rubric profiles with a 0..1 `overallScore` and 0..4 metric scores. Legacy fixture `min_score` values such as `7` are normalized to `0.7`.
 
 ## One-time setup
 
@@ -84,13 +86,15 @@ Use this when you are unsure:
 ```
 
 Builds in Debug, runs all tests, and writes a TRX report to
-`./artifacts/test-results/`. On unfiltered runs it also executes the
-`screen-observe` harness suite.
+`./artifacts/test-results/`. On unfiltered runs it executes the
+`screen-observe` harness suite when fixtures exist under
+`./artifacts/harness-suites/screen-observe/`; otherwise it reports that harness
+as skipped.
 
 ## Run a focused subset
 
 ```powershell
-.\dev\test.ps1 -Filter "FullyQualifiedName~SirThaddeus.Tests.AgentOrchestratorTests"
+.\dev\test.ps1 -Filter "FullyQualifiedName~PipelineBacked"
 ```
 
 Any valid `dotnet test --filter` expression works here.
@@ -104,24 +108,12 @@ Filtered runs skip the screen-observe harness so the fast loop stays fast.
 ```
 
 Restores packages, builds in Release, then runs the full suite.
-This includes the `screen-observe` harness suite.
-
-To include the live knowledge-store harness suite in that pass:
-
-```powershell
-.\dev\test_all.ps1 -IncludeKnowledgeStoreHarness
-```
+This includes the `screen-observe` harness suite when its fixtures are present.
 
 ## Production preflight (before release)
 
 ```powershell
 .\dev\preflight.ps1
-```
-
-To include the live knowledge-store harness suite in preflight:
-
-```powershell
-.\dev\preflight.ps1 -IncludeKnowledgeStoreHarness
 ```
 
 Runs bootstrap + full Release test suite as a single gate before packaging.
@@ -220,6 +212,22 @@ Recommended policy:
 - Use `--judge none` for PR runs; reserve judge modes for nightly.
 - Use `--all` before merges when you want one full headless pass.
 
+### Harness rubric reports
+
+Each harness iteration writes `score.json` with:
+
+- `passed`, `status`, `overallScore`, and normalized `threshold`
+- `profile`
+- per-metric `scores` from 0..4
+- `hardGateFailures`
+- deterministic check results
+- `strengths`, `problems`, and `requiredFixes`
+- latency and token counts when available
+
+Run-level `summary.json` and `summary.md` include failing tests sorted by
+severity, top recurring failure reasons, average score by rubric profile, and
+hard-gate failure counts.
+
 ### Overnight harness runs
 
 For long local runs such as `./dev/harness.ps1 --all --judge none`:
@@ -227,35 +235,6 @@ For long local runs such as `./dev/harness.ps1 --all --judge none`:
 - Keep the local model endpoint running for the entire run if your setup depends on LM Studio or another local OpenAI-compatible server.
 - Avoid overlapping harness runs after code changes. A stale headless runtime or MCP server can hold build outputs open and make the next run fail for the wrong reason.
 - If you interrupt a long run after rebuilding product code, restart the harness cleanly instead of trusting partial results from the old binaries.
-
-## Knowledge-store harness
-
-The knowledge-store suite uses an isolated temporary root plus a patched settings file,
-so it is exposed through a dedicated helper:
-
-```powershell
-.\dev\run-knowledge-store-harness.ps1
-```
-
-This suite currently covers:
-
-- journal write plus direct read-back
-- create plus list round-trip
-- configured root discovery via `knowledge_store_list_roots`
-
-Append behavior remains covered in unit tests. The live append conversation case was intentionally not added to the default harness suite because it was not stable enough to serve as a trustworthy gate.
-
-You can also opt into it from the normal test entrypoints:
-
-```powershell
-.\dev\test.ps1 -IncludeKnowledgeStoreHarness
-.\dev\test_all.ps1 -IncludeKnowledgeStoreHarness
-```
-
-Notes:
-
-- This is a live harness suite. It is intended for local validation with a configured model/runtime, not the default hosted CI gate.
-- The helper rewrites `knowledgeStore` settings into an isolated temp root so the run does not mutate your normal notes.
 
 ## Screen awareness validation
 
@@ -269,7 +248,7 @@ This now covers:
 
 - the standard .NET test suite
 - the Windows-only `SirThaddeus.Windows.Tests` helper tests
-- the `screen-observe` harness suite
+- the `screen-observe` harness suite, when fixtures are present
 
 Target just the screen-observe harness:
 

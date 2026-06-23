@@ -40,7 +40,7 @@ public class ExistenceGateTests
     }
 
     [Fact]
-    public void ReleasedProductExistenceAnswer_MissingModelInGenericLists_UsesUnclearWording()
+    public void ReleasedProductExistenceAnswer_MissingModelInGenericLists_UsesCatalogAbsenceWording()
     {
         var sources = new List<SourceItem>
         {
@@ -67,12 +67,13 @@ public class ExistenceGateTests
             sources);
 
         Assert.NotNull(answer);
-        Assert.Contains("could not confirm from the returned snippets", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("No", answer);
+        Assert.Contains("release/model-list evidence", answer, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("iPhone 99", answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ReleasedProductExistenceAnswer_ExplicitNegativeSignals_UsesLikelyDoesNotExistWording()
+    public void ReleasedProductExistenceAnswer_ExplicitNegativeSignals_UsesNoEvidenceWording()
     {
         var sources = new List<SourceItem>
         {
@@ -99,17 +100,66 @@ public class ExistenceGateTests
             sources);
 
         Assert.NotNull(answer);
-        Assert.Contains("likely does not exist", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("No", answer);
+        Assert.Contains("negative indicators", answer, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("iPhone 99", answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReleasedProductExistenceAnswer_CommunityDiscussionOnly_DoesNotTreatAsOfficialReleaseEvidence()
+    {
+        var sources = new List<SourceItem>
+        {
+            new()
+            {
+                Url = "https://discussions.apple.com/thread/123",
+                Title = "iPhone 15 question - Apple Community",
+                Domain = "discussions.apple.com",
+                Snippet = "A community member asks about iPhone 15 settings.",
+                SourceId = SourceItem.ComputeSourceId("https://discussions.apple.com/thread/123")
+            }
+        };
+
+        var answer = SearchOrchestrator.BuildReleasedProductExistenceAnswer(
+            "Does iPhone 15 exist as a released product?",
+            sources);
+
+        Assert.NotNull(answer);
+        Assert.Contains("could not confirm from the returned snippets", answer, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("exists as a released product", answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReleasedProductExistenceAnswer_LifecycleSupportEvidence_CountsAsReleasedProductEvidence()
+    {
+        var sources = new List<SourceItem>
+        {
+            new()
+            {
+                Url = "https://endoflife.example/vendor-z1",
+                Title = "Vendor Z1 lifecycle",
+                Domain = "endoflife.example",
+                Snippet = "Vendor Z1 is supported from platform version 4 through version 8.",
+                SourceId = SourceItem.ComputeSourceId("https://endoflife.example/vendor-z1")
+            }
+        };
+
+        var answer = SearchOrchestrator.BuildReleasedProductExistenceAnswer(
+            "Does Vendor Z1 exist as a released product?",
+            sources);
+
+        Assert.NotNull(answer);
+        Assert.StartsWith("Yes", answer);
+        Assert.Contains("Vendor Z1 exists as a released product", answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void QueryBundleBuilder_BuildsSeasonEpisodeBundle()
     {
-        var bundle = QueryBundleBuilder.Build("What is the plot of Episode 1 of Season 3 of Stargate Universe?");
+        var bundle = QueryBundleBuilder.Build("What is the plot of Episode 2 of Season 7 of Meridian Drift?");
 
         Assert.Equal(4, bundle.Count);
-        Assert.Contains("stargate universe season 3 cancelled", string.Join(" ", bundle).ToLowerInvariant());
+        Assert.Contains("meridian drift season 7 cancelled", string.Join(" ", bundle).ToLowerInvariant());
     }
 
     [Fact]
@@ -119,21 +169,21 @@ public class ExistenceGateTests
         {
             new()
             {
-                Title = "Stargate Universe cancelled after two seasons",
-                Url = "https://en.wikipedia.org/wiki/Stargate_Universe",
-                Snippet = "The series ended after season 2 and was never renewed for season 3.",
+                Title = "Meridian Drift ended after six seasons",
+                Url = "https://example.org/wiki/Meridian_Drift",
+                Snippet = "The series ended after season 6 and was never renewed for season 7.",
                 Source = "wikipedia.org"
             },
             new()
             {
-                Title = "Why SGU ended",
-                Url = "https://www.tvguide.com/news/stargate-universe-canceled",
-                Snippet = "Syfy canceled Stargate Universe and no season 3 was produced.",
+                Title = "Why Meridian Drift ended",
+                Url = "https://www.tvguide.com/news/meridian-drift-canceled",
+                Snippet = "The network canceled Meridian Drift and no season 7 was produced.",
                 Source = "tvguide.com"
             }
         };
 
-        var result = ExistenceGate.Evaluate("What is the plot of Episode 1 of Season 3 of Stargate Universe?", evidence);
+        var result = ExistenceGate.Evaluate("What is the plot of Episode 2 of Season 7 of Meridian Drift?", evidence);
 
         Assert.Equal(ExistenceVerdict.DoesNotExist, result.Verdict);
         Assert.True(result.Score <= -30);

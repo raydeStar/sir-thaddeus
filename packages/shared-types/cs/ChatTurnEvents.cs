@@ -36,6 +36,17 @@ public static class ChatTurnEvents
     /// see that the gatekeeper actually ran and what it decided.
     /// </summary>
     public const string FootmanDecision = "chat.footman.decision";
+
+    /// <summary>
+    /// Emitted when the per-turn memory retrieval (memory_retrieve) returns
+    /// at least one item — facts, events, chunks, or nuggets. The UI renders
+    /// this as a compact chip above the assistant reply so the user can see
+    /// that the assistant pulled in stored context. Critical for "did it
+    /// actually remember that?" trust: without this event, the user has no
+    /// way to tell whether the assistant recalled a fact or generated the
+    /// same answer from training.
+    /// </summary>
+    public const string MemoryRecalled = "chat.memory.recalled";
 }
 
 /// <summary>Payload for <see cref="ChatTurnEvents.Start"/>.</summary>
@@ -137,3 +148,31 @@ public sealed record ChatFootmanDecision(
     int ToolsTotal,
     long ElapsedMs,
     DateTimeOffset DecidedAt);
+
+/// <summary>
+/// Payload for <see cref="ChatTurnEvents.MemoryRecalled"/>. Reports the
+/// counts per memory kind plus a short preview of what was pulled, so the
+/// chat UI can show a "Recalled N memories" chip the user can click to
+/// expand and see exactly what the assistant brought into context.
+/// </summary>
+/// <param name="ThreadId">Thread the turn belongs to.</param>
+/// <param name="MessageId">Id of the assistant message this recall fed into.</param>
+/// <param name="FactsCount">Number of <c>MemoryFact</c> rows retrieved.</param>
+/// <param name="EventsCount">Number of <c>MemoryEvent</c> rows retrieved.</param>
+/// <param name="ChunksCount">Number of <c>MemoryChunk</c> rows retrieved.</param>
+/// <param name="NuggetsCount">Number of <c>MemoryNugget</c> rows retrieved.</param>
+/// <param name="Preview">Short truncated preview of the assembled memory
+/// pack text — first ~200 chars. Surfaced in the chip tooltip and the
+/// per-turn trace.</param>
+/// <param name="DurationMs">Wall-clock retrieval time including MCP roundtrip.</param>
+/// <param name="RecalledAt">UTC timestamp the recall completed.</param>
+public sealed record ChatMemoryRecalled(
+    string ThreadId,
+    string MessageId,
+    int FactsCount,
+    int EventsCount,
+    int ChunksCount,
+    int NuggetsCount,
+    string Preview,
+    long DurationMs,
+    DateTimeOffset RecalledAt);

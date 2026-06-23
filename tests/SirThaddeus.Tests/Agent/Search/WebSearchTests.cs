@@ -424,6 +424,48 @@ public class WebSearchRouterTests
     }
 
     [Fact]
+    public async Task AutoMode_ProviderFailures_ReturnErrorResultInsteadOfThrowing()
+    {
+        var searxng = new StubProvider(
+            "SearxNG",
+            available: true,
+            availabilityException: new InvalidOperationException("offline"));
+        var searchApi = new StubProvider(
+            "SearchApi",
+            available: true,
+            availabilityException: new InvalidOperationException("offline"));
+        var ddg = new StubProvider(
+            "DuckDuckGo",
+            available: true,
+            searchException: new InvalidOperationException("offline"));
+        var googleNews = new StubProvider(
+            "GoogleNews",
+            available: true,
+            searchException: new InvalidOperationException("offline"));
+
+        using var router = new WebSearchRouter("auto", searxng, searchApi, ddg, googleNews);
+        var result = await router.SearchAsync("latest framework release", new WebSearchOptions());
+
+        Assert.Empty(result.Results);
+        Assert.Equal("GoogleNews", result.Provider);
+        Assert.Contains(result.Errors, e =>
+            e.Contains("GoogleNews search failed", StringComparison.Ordinal) &&
+            e.Contains("offline", StringComparison.Ordinal));
+        Assert.Contains(result.Diagnostics, d =>
+            d.Provider == "SearxNG" &&
+            d.Phase == "probe" &&
+            d.Outcome == "unavailable");
+        Assert.Contains(result.Diagnostics, d =>
+            d.Provider == "DuckDuckGo" &&
+            d.Phase == "fallback" &&
+            d.Outcome == "error");
+        Assert.Contains(result.Diagnostics, d =>
+            d.Provider == "GoogleNews" &&
+            d.Phase == "fallback" &&
+            d.Outcome == "error");
+    }
+
+    [Fact]
     public async Task SearchApiMode_UsesHostedFallbackOnly()
     {
         var searxng = new StubProvider("SearxNG", available: true, results: OneResult("SearxNG", "https://searx.example/article"));
@@ -1006,11 +1048,20 @@ public sealed class StubProvider : IWebSearchProvider
 {
     private readonly SearchResults _results;
     private readonly bool _available;
+    private readonly Exception? _availabilityException;
+    private readonly Exception? _searchException;
 
-    public StubProvider(string name, bool available, SearchResults? results = null)
+    public StubProvider(
+        string name,
+        bool available,
+        SearchResults? results = null,
+        Exception? availabilityException = null,
+        Exception? searchException = null)
     {
         Name = name;
         _available = available;
+        _availabilityException = availabilityException;
+        _searchException = searchException;
         _results = results ?? new SearchResults
         {
             Provider = name,
@@ -1029,11 +1080,19 @@ public sealed class StubProvider : IWebSearchProvider
         CancellationToken cancellationToken = default)
     {
         SearchCallCount++;
+        if (_searchException is not null)
+            throw _searchException;
+
         return Task.FromResult(_results);
     }
 
     public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult(_available);
+    {
+        if (_availabilityException is not null)
+            throw _availabilityException;
+
+        return Task.FromResult(_available);
+    }
 }
 
 /// <summary>

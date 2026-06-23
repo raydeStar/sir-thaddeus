@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace SirThaddeus.WebSearch;
 
 public enum ExistenceVerdict
@@ -57,15 +59,15 @@ public static class ExistenceGate
         ("product page", 3),
         ("documentation", 2),
         ("release notes", 2),
-        ("specifications", 2),
-        ("s03e01", 4),
-        ("season 3 episode 1", 4)
+        ("specifications", 2)
     ];
 
     public static ExistenceGateResult Evaluate(string question, IReadOnlyList<SearchResult> evidence)
     {
         var score = 0;
         var reasons = new List<string>();
+
+        var requestedInstallment = TryParseRequestedSeasonEpisode(question);
 
         foreach (var result in evidence)
         {
@@ -89,15 +91,20 @@ public static class ExistenceGate
                 score += signalWeight * weight;
                 reasons.Add($"Positive signal '{signal}' from {result.Source}.");
             }
+
+            if (requestedInstallment is { } installment &&
+                ContainsRequestedInstallment(text, installment.Season, installment.Episode))
+            {
+                score += 4 * weight;
+                reasons.Add($"Positive signal for requested season/episode from {result.Source}.");
+            }
         }
 
-        // Strongly bias toward non-existence when question asks for higher season episode.
-        if (question.Contains("season 3", StringComparison.OrdinalIgnoreCase) &&
-            evidence.Any(e => ($"{e.Title} {e.Snippet}").Contains("season 2", StringComparison.OrdinalIgnoreCase)) &&
-            evidence.Any(e => ($"{e.Title} {e.Snippet}").Contains("cancel", StringComparison.OrdinalIgnoreCase)))
+        if (requestedInstallment is { Season: > 1 } requested &&
+            EvidenceReferencesEarlierSeasonCancellation(evidence, requested.Season, out var referencedSeason))
         {
             score -= 10;
-            reasons.Add("Question targets Season 3 while evidence references cancellation after Season 2.");
+            reasons.Add($"Question targets Season {requested.Season} while evidence references cancellation after Season {referencedSeason}.");
         }
 
         var verdict = score switch
@@ -123,6 +130,66 @@ public static class ExistenceGate
         value += NegativeSignals.Count(signal => text.Contains(signal.Signal, StringComparison.Ordinal)) * -2;
         value += PositiveSignals.Count(signal => text.Contains(signal.Signal, StringComparison.Ordinal)) * 2;
         return value;
+    }
+
+    private static (int Season, int Episode)? TryParseRequestedSeasonEpisode(string question)
+    {
+        var seasonMatch = Regex.Match(question ?? string.Empty, @"\b(?:season\s+|s)(\d+)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var episodeMatch = Regex.Match(question ?? string.Empty, @"\b(?:episode\s+|ep\s*|e)(\d+)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!seasonMatch.Success || !episodeMatch.Success)
+            return null;
+
+        if (!int.TryParse(seasonMatch.Groups[1].Value, out var season) ||
+            !int.TryParse(episodeMatch.Groups[1].Value, out var episode))
+        {
+            return null;
+        }
+
+        return (season, episode);
+    }
+
+    private static bool ContainsRequestedInstallment(string lowerText, int season, int episode)
+    {
+        if (lowerText.Contains($"season {season}", StringComparison.Ordinal) &&
+            lowerText.Contains($"episode {episode}", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return Regex.IsMatch(
+            lowerText,
+            $@"\bs0*{season}\s*e0*{episode}\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool EvidenceReferencesEarlierSeasonCancellation(
+        IReadOnlyList<SearchResult> evidence,
+        int requestedSeason,
+        out int referencedSeason)
+    {
+        referencedSeason = 0;
+        foreach (var result in evidence)
+        {
+            var text = $"{result.Title} {result.Snippet}";
+            if (!text.Contains("cancel", StringComparison.OrdinalIgnoreCase) &&
+                !text.Contains("ended", StringComparison.OrdinalIgnoreCase) &&
+                !text.Contains("never renewed", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (Match match in Regex.Matches(text, @"\bseason\s+(\d+)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            {
+                if (int.TryParse(match.Groups[1].Value, out var season) &&
+                    season > referencedSeason &&
+                    season < requestedSeason)
+                {
+                    referencedSeason = season;
+                }
+            }
+        }
+
+        return referencedSeason > 0;
     }
 
     private static int DomainWeight(string source, string url)

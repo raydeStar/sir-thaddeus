@@ -232,7 +232,7 @@ public class ContentExtractionHealthTests : IDisposable
 
         Assert.NotNull(iconNode);
 
-        var href = iconNode.GetAttributeValue("href", null);
+        var href = iconNode.GetAttributeValue("href", string.Empty);
         Assert.Equal("/static/favicon.png", href);
 
         // Verify relative URL resolution

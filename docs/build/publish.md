@@ -36,6 +36,13 @@ To create a smaller developer-oriented package that relies on runtime asset down
 ./dev/release-package.ps1 -LiteBundle
 ```
 
+Lite packages do not require bundled voice, Playwright, or SearXNG payloads at
+build time. Validate them with runtime downloads allowed:
+
+```powershell
+./dev/smoke-test.ps1 -SkipLaunch -AllowRuntimeAssetDownload
+```
+
 Outputs:
 
 - Staged folder: `artifacts/stage/win-x64`
@@ -100,6 +107,16 @@ Start terminal/headless flow:
 ```powershell
 ./dev/localrunner.ps1 --terminal
 ```
+
+Force offline startup behavior:
+
+```powershell
+./dev/localrunner.ps1 --offline
+```
+
+Offline mode skips network-dependent asset fetches and SearXNG package builds,
+then builds with `--no-restore`. It expects the repo to have been restored at
+least once before the connection went away.
 
 ## CI/publish target notes
 

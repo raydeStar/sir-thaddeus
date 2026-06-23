@@ -11,12 +11,15 @@ import { getSettings } from './settingsApi';
 interface MicResolutionCacheEntry {
   savedName: string | null;
   deviceId: string | null;
+  matchedLabel: string | null;
   hadLabeledInputs: boolean;
   resolvedAt: number;
 }
 
 let resolutionCache: MicResolutionCacheEntry | null = null;
+let resolutionPromise: Promise<ResolvedMicDevice> | null = null;
 const CACHE_TTL_MS = 30_000;
+const CAPTURE_RESOLUTION_BUDGET_MS = 180;
 
 export interface ResolvedMicDevice {
   /** The product name persisted in settings (audio.inputDeviceName). */
@@ -41,22 +44,35 @@ export interface AcquiredMic {
 
 export function clearMicResolutionCache(): void {
   resolutionCache = null;
+  resolutionPromise = null;
+}
+
+export async function prepareMicCapture(): Promise<void> {
+  await resolveSavedInputDevice();
 }
 
 export async function resolveSavedInputDevice(): Promise<ResolvedMicDevice> {
   const now = Date.now();
   if (resolutionCache && now - resolutionCache.resolvedAt < CACHE_TTL_MS) {
-    const matched = resolutionCache.deviceId
-      ? await findLabelForDeviceId(resolutionCache.deviceId)
-      : null;
     return {
       savedName: resolutionCache.savedName,
       deviceId: resolutionCache.deviceId,
-      matchedLabel: matched,
+      matchedLabel: resolutionCache.matchedLabel,
       hadLabeledInputs: resolutionCache.hadLabeledInputs,
     };
   }
+  if (resolutionPromise) return resolutionPromise;
 
+  resolutionPromise = resolveSavedInputDeviceUncached();
+  try {
+    return await resolutionPromise;
+  } finally {
+    resolutionPromise = null;
+  }
+}
+
+async function resolveSavedInputDeviceUncached(): Promise<ResolvedMicDevice> {
+  const now = Date.now();
   let savedName: string | null = null;
   try {
     const doc = await getSettings();
@@ -92,7 +108,7 @@ export async function resolveSavedInputDevice(): Promise<ResolvedMicDevice> {
     }
   }
 
-  resolutionCache = { savedName, deviceId, hadLabeledInputs, resolvedAt: now };
+  resolutionCache = { savedName, deviceId, matchedLabel, hadLabeledInputs, resolvedAt: now };
   return { savedName, deviceId, matchedLabel, hadLabeledInputs };
 }
 
@@ -104,29 +120,12 @@ function normalizeDeviceName(value: string): string {
     .trim();
 }
 
-async function findLabelForDeviceId(deviceId: string): Promise<string | null> {
-  if (!navigator.mediaDevices?.enumerateDevices) return null;
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const found = devices.find((d) => d.deviceId === deviceId && d.kind === 'audioinput');
-    return found?.label ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export async function acquireMicStream(): Promise<AcquiredMic> {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Microphone capture is not available in this browser shell.');
   }
 
-  let resolved = await resolveSavedInputDevice();
-  if (resolved.savedName && !resolved.deviceId && !resolved.hadLabeledInputs) {
-    stopMicStream(await navigator.mediaDevices.getUserMedia({ audio: true }));
-    clearMicResolutionCache();
-    resolved = await resolveSavedInputDevice();
-  }
-
+  const resolved = await resolveInputDeviceForCapture();
   const { savedName, deviceId, matchedLabel } = resolved;
   let stream: MediaStream;
   let usedDefault = false;
@@ -150,7 +149,37 @@ export async function acquireMicStream(): Promise<AcquiredMic> {
   }
 
   const trackLabel = stream.getAudioTracks()[0]?.label ?? matchedLabel ?? null;
+  if (savedName && !deviceId && !resolved.hadLabeledInputs) {
+    // The first permission grant often hides labels until after getUserMedia
+    // succeeds. Do not block recording to re-open the mic; refresh the
+    // mapping in the background so the next press can honor the saved device.
+    clearMicResolutionCache();
+    void resolveSavedInputDevice().catch(() => undefined);
+  }
   return { stream, requestedName: savedName, resolvedLabel: trackLabel, usedDefault };
+}
+
+async function resolveInputDeviceForCapture(): Promise<ResolvedMicDevice> {
+  if (isMicResolutionCacheFresh()) return resolveSavedInputDevice();
+
+  const pending = resolveSavedInputDevice();
+  const fallback = await Promise.race([
+    pending.then((resolved) => ({ resolved })),
+    new Promise<{ resolved: null }>((resolve) => {
+      window.setTimeout(() => resolve({ resolved: null }), CAPTURE_RESOLUTION_BUDGET_MS);
+    }),
+  ]);
+
+  return fallback.resolved ?? {
+    savedName: null,
+    deviceId: null,
+    matchedLabel: null,
+    hadLabeledInputs: false,
+  };
+}
+
+function isMicResolutionCacheFresh(): boolean {
+  return Boolean(resolutionCache && Date.now() - resolutionCache.resolvedAt < CACHE_TTL_MS);
 }
 
 export function isStreamLive(stream: MediaStream | null): boolean {

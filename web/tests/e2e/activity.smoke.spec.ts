@@ -36,6 +36,14 @@ test.describe('activity smoke', () => {
     await expect(page.getByTestId('chat-message-list')).toContainText('activity smoke', {
       timeout: 10_000,
     });
+    // The user bubble renders optimistically *before* the chat POST returns,
+    // so racing to /activity right now sometimes beats the server's
+    // activity.Append in ChatApi.cs:133. Wait for the assistant bubble to
+    // appear — that only happens once chat.turn.start has fired, which the
+    // server only emits after the activity entry is appended.
+    await expect(
+      page.getByTestId('chat-message-list').locator('[data-role="assistant"]'),
+    ).toBeVisible({ timeout: 30_000 });
 
     // Navigate to the activity log and wait for the row.
     await page.goto(`${baseUrl}/activity`, { waitUntil: 'domcontentloaded' });

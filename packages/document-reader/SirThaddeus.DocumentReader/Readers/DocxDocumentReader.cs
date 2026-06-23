@@ -8,7 +8,7 @@ public sealed class DocxDocumentReader : IDocumentReader
     public Task<DocumentContent> ReadAsync(string path, CancellationToken cancellationToken = default)
     {
         using var doc = WordprocessingDocument.Open(path, false);
-        var body = doc.MainDocumentPart?.Document.Body;
+        var body = doc.MainDocumentPart?.Document?.Body;
         var text = body is null
             ? string.Empty
             : string.Join("\n", body.Descendants<Text>().Select(t => t.Text).Where(t => !string.IsNullOrWhiteSpace(t)));

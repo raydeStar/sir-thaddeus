@@ -41,8 +41,8 @@ internal sealed class SingleTestRunner
             _context.SuiteName,
             test.Id,
             iteration);
-        await _context.HeadlessClient.InitializeAsync(cancellationToken);
-        var headlessResult = await _context.HeadlessClient.ExecuteAsync(test, cancellationToken);
+        await _context.Host.InitializeAsync(cancellationToken);
+        var headlessResult = await _context.Host.ExecuteAsync(test, cancellationToken);
         var modelName = settings.Llm.Model;
 
         await _artifactWriter.WriteInputAsync(
@@ -69,7 +69,12 @@ internal sealed class SingleTestRunner
             cancellationToken,
             steps: steps);
 
-        var score = _scoringEngine.Score(test, response, steps, judgeResult);
+        var score = _scoringEngine.Score(test, response, steps, judgeResult) with
+        {
+            LatencyMs = (long)Math.Round(headlessResult.Timing.TotalSeconds * 1000),
+            TokensIn = response.TokenUsage?.TokensIn,
+            TokensOut = response.TokenUsage?.TokensOut
+        };
 
         await _artifactWriter.WriteStepsAsync(artifacts, steps, cancellationToken);
         await _artifactWriter.WriteFinalAsync(artifacts, response.Text, cancellationToken);
@@ -89,7 +94,8 @@ internal sealed class SingleTestRunner
             JudgeResult = judgeResult,
             ArtifactPaths = artifacts,
             Steps = steps,
-            ModelName = modelName
+            ModelName = modelName,
+            Timing = headlessResult.Timing
         };
     }
 
@@ -103,12 +109,15 @@ internal sealed class SingleTestRunner
         {
             TestId = test.Id,
             TestName = test.Name,
+            Profile = ScoringEngine.ResolveProfile(test),
             UserMessage = test.UserMessage,
             AllowedTools = test.AllowedTools,
             FinalResponse = response.Text,
-            HardFailures = preliminary.HardFailures,
-            SoftScore = preliminary.SoftScore,
-            MinScore = test.MinScore,
+            HardGateFailures = preliminary.HardGateFailures,
+            DeterministicChecks = preliminary.DeterministicChecks,
+            Scores = preliminary.Scores,
+            OverallScore = preliminary.OverallScore,
+            MinScore = ScoringEngine.ResolveThreshold(test.MinScore),
             ToolCalls = recordedToolTurns
                 .Select(turn => new ToolCallSnapshot
                 {
@@ -123,11 +132,29 @@ internal sealed class SingleTestRunner
 
 }
 
-internal sealed record HeadlessExecutionResult
+/// <summary>
+/// Outcome of a single test run against a host adapter. Generic across
+/// host implementations — see <see cref="IHarnessHostAdapter"/>.
+/// </summary>
+internal sealed record HostExecutionResult
 {
     public required AgentResponse Response { get; init; }
     public required IReadOnlyList<TraceStep> Steps { get; init; }
     public required IReadOnlyList<RecordedToolTurn> ToolTurns { get; init; }
+    public HarnessTiming Timing { get; init; } = HarnessTiming.Empty;
+}
+
+/// <summary>
+/// Per-test timing breakdown surfaced by the harness client so the run
+/// log can show where time is going. Times are wall-clock seconds.
+/// </summary>
+internal sealed record HarnessTiming(
+    double RuntimeWarmupSeconds,
+    double ResetSeconds,
+    double TestWorkSeconds,
+    double TotalSeconds)
+{
+    public static HarnessTiming Empty { get; } = new(0, 0, 0, 0);
 }
 
 internal sealed record SuiteRunContext
@@ -135,5 +162,5 @@ internal sealed record SuiteRunContext
     public required HarnessCommandOptions Options { get; init; }
     public required string SuiteName { get; init; }
     public required string RunId { get; init; }
-    public required HeadlessRuntimeHarnessClient HeadlessClient { get; init; }
+    public required IHarnessHostAdapter Host { get; init; }
 }

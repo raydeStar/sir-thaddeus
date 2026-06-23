@@ -1,26 +1,32 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, Copy, Loader2, Mic, Plus, RotateCcw, Square, Volume2 } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Loader2, Mic, Plus, RotateCcw, Square, Volume2, WifiOff } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
 import { ToolActivityPills } from '../components/ToolActivityPills';
 import { FootmanDecisionChip } from '../components/FootmanDecisionChip';
+import { MemoryRecallChip } from '../components/MemoryRecallChip';
 import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
 import { subscribeVoicePttEvents, synthesizeSpeech, transcribeSpeech, warmVoiceHost } from '../lib/voiceApi';
 import { stopAllProcesses } from '../lib/runtimeActions';
-import { acquireMicStream, isStreamLive, stopMicStream } from '../lib/micCapture';
+import { getSettings, putSettings } from '../lib/settingsApi';
+import { acquireMicStream, isStreamLive, prepareMicCapture, stopMicStream } from '../lib/micCapture';
 import { trimSilenceToWav } from '../lib/audioTrim';
 import type { ChatMessageSource } from '@thaddeus/shared-types';
 
 const MIN_VOICE_HOLD_MS = 350;
 
 export const Route = createFileRoute('/chat/$threadId')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    focusMessageId: typeof search.focusMessageId === 'string' ? search.focusMessageId : undefined,
+  }),
   component: ChatThreadRoute,
 });
 
 function ChatThreadRoute() {
   const { threadId } = Route.useParams();
+  const { focusMessageId } = Route.useSearch();
   const thread = useChatStore((s) => s.activeThread);
   const activeTurn = useChatStore((s) => s.activeTurn);
   const sending = useChatStore((s) => s.sending);
@@ -33,6 +39,10 @@ function ChatThreadRoute() {
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [speechState, setSpeechState] = useState<{ messageId: string; status: 'loading' | 'playing' } | null>(null);
   const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing' | 'sending'>('idle');
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [offlineModeLoading, setOfflineModeLoading] = useState(true);
+  const [offlineModeSaving, setOfflineModeSaving] = useState(false);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
@@ -46,17 +56,70 @@ function ChatThreadRoute() {
   // Persistent stream kept warm across PTT presses so the second and
   // subsequent presses skip the getUserMedia spinner.
   const warmStreamRef = useRef<MediaStream | null>(null);
+  const voiceWarmupRef = useRef<Promise<unknown> | null>(null);
+
+  const ensureVoiceWarmup = useCallback(() => {
+    voiceWarmupRef.current ??= warmVoiceHost().catch(() => undefined);
+    return voiceWarmupRef.current;
+  }, []);
 
   useEffect(() => {
     void openThread(threadId);
   }, [openThread, threadId]);
 
   useEffect(() => {
-    void warmVoiceHost().catch(() => undefined);
+    let disposed = false;
+    setOfflineModeLoading(true);
+    getSettings()
+      .then((doc) => {
+        if (!disposed) setOfflineMode(doc.privacy.offlineMode ?? false);
+      })
+      .catch(() => {
+        if (!disposed) setOfflineMode(false);
+      })
+      .finally(() => {
+        if (!disposed) setOfflineModeLoading(false);
+      });
+    return () => {
+      disposed = true;
+    };
   }, []);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    void ensureVoiceWarmup();
+    void prepareMicCapture().catch(() => undefined);
+  }, [ensureVoiceWarmup]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    // Smart auto-scroll: prefer to bottom-pin so the newest text sits at
+    // the bottom of the viewport, but if the latest assistant message
+    // has grown tall enough that bottom-pinning would push its top
+    // off-screen, anchor the top of the message at the top of the
+    // viewport instead. The reader stays oriented at the *beginning*
+    // of long responses rather than chasing the tail.
+    const target = locateLatestMessageEl(container);
+    if (!target) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      return;
+    }
+
+    const TOP_PADDING = 24;
+    const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const targetTopInScrollCoords =
+      targetRect.top - containerRect.top + container.scrollTop;
+    const visibleTopAfterBottomPin = targetTopInScrollCoords - maxScroll;
+
+    const nextScrollTop =
+      visibleTopAfterBottomPin >= TOP_PADDING
+        ? maxScroll
+        : Math.max(0, Math.min(targetTopInScrollCoords - TOP_PADDING, maxScroll));
+
+    container.scrollTo({ top: nextScrollTop, behavior: 'smooth' });
   }, [thread?.messages.length, activeTurn?.text]);
 
   useEffect(() => () => {
@@ -74,6 +137,31 @@ function ChatThreadRoute() {
     setDraft('');
     await send(text, wikiContext);
   };
+
+  const toggleOfflineMode = useCallback(async () => {
+    if (offlineModeSaving) return;
+    const next = !offlineMode;
+    setOfflineMode(next);
+    setOfflineModeSaving(true);
+    setSpeechError(null);
+    try {
+      const doc = await getSettings();
+      const saved = await putSettings({
+        ...doc,
+        privacy: {
+          ...doc.privacy,
+          offlineMode: next,
+        },
+      });
+      setOfflineMode(saved.privacy.offlineMode ?? false);
+    } catch (e) {
+      setOfflineMode(!next);
+      setSpeechError((e as Error).message || 'Could not update offline mode.');
+    } finally {
+      setOfflineModeSaving(false);
+      setOfflineModeLoading(false);
+    }
+  }, [offlineMode, offlineModeSaving]);
 
   const stopSpeech = useCallback(() => {
     speechRequestRef.current += 1;
@@ -175,6 +263,7 @@ function ChatThreadRoute() {
     abortPendingCaptureRef.current = false;
     micChunksRef.current = [];
     micStartedAtRef.current = performance.now();
+    void ensureVoiceWarmup();
     stopSpeech();
     setSpeechError(null);
 
@@ -238,7 +327,7 @@ function ChatThreadRoute() {
       }
       abortPendingCaptureRef.current = false;
     }
-  }, [activeTurn, sending, stopSpeech, triggerShutup, voiceState]);
+  }, [activeTurn, ensureVoiceWarmup, sending, stopSpeech, triggerShutup, voiceState]);
 
   const finishVoiceCapture = useCallback(async () => {
     const recorder = recorderRef.current;
@@ -351,6 +440,25 @@ function ChatThreadRoute() {
   const empty = messages.length === 0 && !activeTurn;
 
   useEffect(() => {
+    if (!focusMessageId) return;
+
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const target = container.querySelector<HTMLElement>(`[data-testid="chat-message-${focusMessageId}"]`);
+    if (!target) return;
+
+    setHighlightedMessageId(focusMessageId);
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const timeout = window.setTimeout(() => {
+      setHighlightedMessageId((current) => (current === focusMessageId ? null : current));
+    }, 2600);
+
+    return () => window.clearTimeout(timeout);
+  }, [focusMessageId, messages.length, activeTurn?.messageId]);
+
+  useEffect(() => {
     if (!pendingVoiceResponseRef.current || activeTurn) return;
     const latest = messages[messages.length - 1];
     if (String(latest?.role || '').toLowerCase() !== 'assistant' || !latest?.text?.trim()) return;
@@ -412,6 +520,7 @@ function ChatThreadRoute() {
                     retryDisabled={sending || Boolean(activeTurn)}
                     speechStatus={speechState?.messageId === m.id ? speechState.status : null}
                     onSpeak={() => void onSpeakMessage(m.id, m.text)}
+                    highlighted={m.id === highlightedMessageId}
                     testId={`chat-message-${m.id}`}
                   />
                 );
@@ -468,6 +577,30 @@ function ChatThreadRoute() {
               <>
                 <button
                   type="button"
+                  className={`chat-composer-icon-button ${
+                    offlineMode
+                      ? 'border-amber-400 bg-amber-500/10 text-amber-800 dark:text-amber-200'
+                      : ''
+                  }`}
+                  aria-label={offlineMode ? 'Turn offline mode off' : 'Turn offline mode on'}
+                  aria-pressed={offlineMode}
+                  title={
+                    offlineMode
+                      ? 'Offline mode on: web-backed tools are blocked'
+                      : 'Offline mode off: web-backed tools may run with permission'
+                  }
+                  data-testid="chat-offline-toggle"
+                  disabled={offlineModeLoading || offlineModeSaving}
+                  onClick={() => void toggleOfflineMode()}
+                >
+                  {offlineModeSaving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} />
+                  ) : (
+                    <WifiOff className="h-4 w-4" strokeWidth={1.9} />
+                  )}
+                </button>
+                <button
+                  type="button"
                   className={`chat-composer-icon-button ${voiceState === 'recording' ? 'border-red-400 bg-red-500/10 text-red-700 dark:text-red-300' : ''}`}
                   aria-label={voiceButtonLabel(voiceState)}
                   title={voiceButtonLabel(voiceState)}
@@ -521,6 +654,7 @@ interface MessageRowProps {
   retryDisabled?: boolean;
   speechStatus?: 'loading' | 'playing' | null;
   onSpeak?: () => void;
+  highlighted?: boolean;
   testId: string;
 }
 
@@ -535,11 +669,15 @@ function MessageRow({
   retryDisabled,
   speechStatus,
   onSpeak,
+  highlighted,
   testId,
 }: MessageRowProps) {
   const normalized = String(role || '').toLowerCase();
   const isUser = normalized === 'user';
   const [copied, setCopied] = useState(false);
+  const highlightClass = highlighted
+    ? 'rounded-3xl ring-1 ring-accent/30 bg-accent-soft/40 px-3 py-2 transition-colors'
+    : undefined;
 
   useEffect(() => {
     if (!copied) return;
@@ -562,10 +700,12 @@ function MessageRow({
         data-testid={testId}
         data-role={role}
         data-streaming={streaming ? 'true' : undefined}
-        className="flex justify-end"
+        className={highlightClass}
       >
-        <div className="max-w-[82%] whitespace-pre-wrap rounded-3xl rounded-tr-lg bg-canvas-sunken px-4 py-2.5 text-[15px] leading-6 text-ink">
-          {text}
+        <div className="flex justify-end">
+          <div className="max-w-[82%] whitespace-pre-wrap rounded-3xl rounded-tr-lg bg-canvas-sunken px-4 py-2.5 text-[15px] leading-6 text-ink">
+            {text}
+          </div>
         </div>
       </div>
     );
@@ -581,8 +721,10 @@ function MessageRow({
       data-testid={testId}
       data-role={role}
       data-streaming={streaming ? 'true' : undefined}
+      className={highlightClass}
     >
       {messageId ? <FootmanDecisionChip messageId={messageId} /> : null}
+      {messageId ? <MemoryRecallChip messageId={messageId} /> : null}
       {messageId ? <ToolActivityPills messageId={messageId} /> : null}
       {showWorking ? (
         <div
@@ -655,6 +797,21 @@ function MessageRow({
       ) : null}
     </div>
   );
+}
+
+function locateLatestMessageEl(container: HTMLElement): HTMLElement | null {
+  // While the assistant is streaming, the streaming row is what the reader
+  // is following — anchor scroll math to it so we react to its growing
+  // height in real time.
+  const streaming = container.querySelector<HTMLElement>('[data-streaming="true"]');
+  if (streaming) return streaming;
+
+  // Otherwise pin to the latest assistant message. Fall through to the
+  // very last message of any role if there are no assistant rows yet.
+  const assistantRows = container.querySelectorAll<HTMLElement>('[data-role="assistant"]');
+  if (assistantRows.length > 0) return assistantRows[assistantRows.length - 1] ?? null;
+  const anyRows = container.querySelectorAll<HTMLElement>('[data-role]');
+  return anyRows.length > 0 ? anyRows[anyRows.length - 1] ?? null : null;
 }
 
 async function copyToClipboard(text: string): Promise<void> {

@@ -178,12 +178,98 @@ public sealed record LlmUsageSnapshot
     public int ContextWindowTokens { get; init; }
 }
 
+public enum LlmTaskKind
+{
+    Chat,
+    EmailClassification,
+    EmailSummary,
+    CalendarBrief,
+    HealthBrief,
+    DeepReasoning,
+    CreativeWriting
+}
+
+public enum LlmRequestPriority
+{
+    UserFacing,
+    Background
+}
+
+public sealed record LlmRequestContext
+{
+    public LlmTaskKind TaskKind { get; init; } = LlmTaskKind.Chat;
+    public LlmRequestPriority Priority { get; init; } = LlmRequestPriority.UserFacing;
+    public string? OperationName { get; init; }
+}
+
+public sealed record LlmRuntimeHealthSnapshot
+{
+    public bool LmStudioReachable { get; init; }
+    public string? ModelConfigured { get; init; }
+    public string? ModelLoadedOrReported { get; init; }
+    public bool WarmupCompleted { get; init; }
+    public int ActiveRequests { get; init; }
+    public int QueuedRequests { get; init; }
+    public long LastRequestDurationMs { get; init; }
+    public long LastQueueWaitMs { get; init; }
+    public int LastEstimatedInputTokens { get; init; }
+    public int LastRequestedOutputTokens { get; init; }
+    public string LastTaskKind { get; init; } = LlmTaskKind.Chat.ToString();
+    public bool LastRequestWasBackground { get; init; }
+    public string? LastError { get; init; }
+    public DateTimeOffset? LastWarmupAt { get; init; }
+    public DateTimeOffset? LastRequestAt { get; init; }
+}
+
+public sealed record LlmWarmupResult
+{
+    public bool Reachable { get; init; }
+    public bool Completed { get; init; }
+    public string? Model { get; init; }
+    public string? Error { get; init; }
+    public LlmRuntimeHealthSnapshot Snapshot { get; init; } = new();
+}
+
 /// <summary>
 /// Optional telemetry surface for callers that want token usage stats.
 /// </summary>
 public interface ILlmUsageTelemetry
 {
     LlmUsageSnapshot GetUsageSnapshot();
+}
+
+public interface ILlmRuntimeDiagnostics
+{
+    LlmRuntimeHealthSnapshot GetRuntimeHealthSnapshot();
+}
+
+public interface ILlmWarmupClient
+{
+    Task<LlmWarmupResult> WarmupAsync(CancellationToken cancellationToken = default);
+}
+
+public interface ILlmModelRouter
+{
+    string GetModelForTask(LlmTaskKind taskKind);
+}
+
+public sealed class ConfiguredLlmModelRouter : ILlmModelRouter
+{
+    private readonly string _defaultModel;
+    private readonly IReadOnlyDictionary<LlmTaskKind, string> _routes;
+
+    public ConfiguredLlmModelRouter(string defaultModel, IReadOnlyDictionary<LlmTaskKind, string>? routes = null)
+    {
+        _defaultModel = string.IsNullOrWhiteSpace(defaultModel) ? "auto" : defaultModel.Trim();
+        _routes = routes ?? new Dictionary<LlmTaskKind, string>();
+    }
+
+    public string GetModelForTask(LlmTaskKind taskKind)
+    {
+        return _routes.TryGetValue(taskKind, out var routed) && !string.IsNullOrWhiteSpace(routed)
+            ? routed.Trim()
+            : _defaultModel;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -201,15 +287,48 @@ public sealed record LlmClientOptions
     /// </summary>
     public string BaseUrl { get; init; } = "http://localhost:1234";
 
+    public string ChatCompletionPath { get; init; } = "/v1/chat/completions";
+
+    public string ModelsPath { get; init; } = "/v1/models";
+
+    public string ModelLoadPath { get; init; } = "/v1/models/load";
+
     /// <summary>
     /// Model identifier to use.
     /// </summary>
-    public string Model { get; init; } = "local-model";
+    public string Model { get; init; } = "auto";
+
+    public string? PreloadModelKey { get; init; }
+
+    public bool EnableStartupWarmup { get; init; } = true;
+
+    public bool EnableKeepWarm { get; init; } = true;
+
+    public int ContextLength { get; init; } = 4096;
+
+    public bool FlashAttention { get; init; } = true;
+
+    public bool OffloadKvCacheToGpu { get; init; } = true;
+
+    public int MaxConcurrentLlmRequests { get; init; } = 1;
+
+    public int WarmupTimeoutSeconds { get; init; } = 120;
+
+    public int KeepWarmIntervalMinutes { get; init; } = 30;
+
+    public int MaxInputTokensSoftCap { get; init; } = 4000;
+
+    public int MaxOutputTokensDefault { get; init; } = 700;
+
+    public int RequestTimeoutSeconds { get; init; } = 300;
+
+    public IReadOnlyDictionary<LlmTaskKind, string> ModelRoutes { get; init; } =
+        new Dictionary<LlmTaskKind, string>();
 
     /// <summary>
     /// Maximum tokens in the response.
     /// </summary>
-    public int MaxTokens { get; init; } = 2048;
+    public int MaxTokens { get; init; } = 4096;
 
     /// <summary>
     /// Approximate context window size used for context-fill percentage.
@@ -271,7 +390,7 @@ public sealed record LlmClientOptions
     /// </summary>
     public int EffectiveMaxTokens(int? explicitOverride = null)
     {
-        var requested = explicitOverride ?? MaxTokens;
+        var requested = explicitOverride ?? (MaxTokens > 0 ? MaxTokens : MaxOutputTokensDefault);
         if (!IsThinkingModel()) return requested;
         const int ThinkingMinTokens = 4096;
         return Math.Max(requested, ThinkingMinTokens);

@@ -26,8 +26,21 @@ namespace SirThaddeus.Agent.Pipeline.Steps;
 /// </summary>
 public sealed class MemoryContextStep : ITurnStep
 {
+    /// <summary>
+    /// Callback fired after a successful retrieval that returned at least
+    /// one item. Lets the host (the runtime, in practice) publish a typed
+    /// <c>chat.memory.recalled</c> event onto the event bus without the
+    /// agent package having to take a dependency on the runtime's event
+    /// bus directly. Failure here is swallowed; the recall is best-effort
+    /// visibility, never load-bearing for the turn.
+    /// </summary>
+    public delegate Task MemoryRecalledHandler(
+        MemoryRecalledNotification notification,
+        CancellationToken cancellationToken);
+
     private readonly IMemoryContextProvider? _provider;
     private readonly Func<TurnContext, MemoryContextRequest> _requestBuilder;
+    private readonly MemoryRecalledHandler? _onRecalled;
 
     /// <param name="provider">Memory retrieval abstraction. Null = step is
     /// a no-op (runtimes without a wired-up memory stack simply pass
@@ -37,12 +50,17 @@ public sealed class MemoryContextStep : ITurnStep
     /// from session state, toggle <see cref="MemoryContextRequest.MemoryEnabled"/>
     /// from settings). Defaults to a safe request built from the turn
     /// context alone.</param>
+    /// <param name="onRecalled">Optional callback fired when a turn's
+    /// retrieval returns at least one item, so the host can broadcast a
+    /// visibility event. Failure inside the callback is swallowed.</param>
     public MemoryContextStep(
         IMemoryContextProvider? provider,
-        Func<TurnContext, MemoryContextRequest>? requestBuilder = null)
+        Func<TurnContext, MemoryContextRequest>? requestBuilder = null,
+        MemoryRecalledHandler? onRecalled = null)
     {
         _provider = provider;
         _requestBuilder = requestBuilder ?? DefaultRequestBuilder;
+        _onRecalled = onRecalled;
     }
 
     public string Name => "MemoryContext";
@@ -86,6 +104,41 @@ public sealed class MemoryContextStep : ITurnStep
             return new StepResult.Continue(withOnboarding);
 
         var updatedMessages = AppendMemoryPackToSystemMessage(withOnboarding.LlmMessages, result.PackText);
+
+        // Fire the recall notification so the host can publish a visibility
+        // event. Wrapped in try/catch — recall visibility is best-effort;
+        // a host bug must not derail the turn.
+        if (_onRecalled is not null)
+        {
+            var totalItems =
+                result.Provenance.Facts +
+                result.Provenance.Events +
+                result.Provenance.Chunks +
+                result.Provenance.Nuggets;
+
+            if (totalItems > 0)
+            {
+                try
+                {
+                    await _onRecalled(new MemoryRecalledNotification(
+                        ThreadId: context.ThreadId,
+                        MessageId: context.MessageId,
+                        FactsCount: result.Provenance.Facts,
+                        EventsCount: result.Provenance.Events,
+                        ChunksCount: result.Provenance.Chunks,
+                        NuggetsCount: result.Provenance.Nuggets,
+                        Preview: result.Provenance.Summary,
+                        DurationMs: result.Provenance.DurationMs),
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Best-effort visibility; never block the turn on a
+                    // failed event publish.
+                }
+            }
+        }
+
         return new StepResult.Continue(withOnboarding with { LlmMessages = updatedMessages });
     }
 
@@ -151,3 +204,18 @@ public sealed class MemoryContextStep : ITurnStep
         return inserted;
     }
 }
+
+/// <summary>
+/// Payload handed to <see cref="MemoryContextStep.MemoryRecalledHandler"/>
+/// when a turn's retrieval surfaces at least one item. The host (runtime)
+/// translates this into a typed <c>chat.memory.recalled</c> event.
+/// </summary>
+public sealed record MemoryRecalledNotification(
+    string ThreadId,
+    string MessageId,
+    int FactsCount,
+    int EventsCount,
+    int ChunksCount,
+    int NuggetsCount,
+    string Preview,
+    long DurationMs);

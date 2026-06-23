@@ -185,7 +185,7 @@ public sealed class LocalWikiStoreTests : IDisposable
         Assert.Equal(2, updated!.Page.Version);
 
         var revisions = await store.ListRevisionsAsync(page.Page.Id, CancellationToken.None);
-        var aiRevision = Assert.Single(revisions.Where(revision => revision.Source == "ai"));
+        var aiRevision = Assert.Single(revisions, revision => revision.Source == "ai");
         Assert.Equal(2, aiRevision.Version);
         Assert.Equal("second", aiRevision.Markdown);
         Assert.Equal("AI rewrite", aiRevision.Summary);

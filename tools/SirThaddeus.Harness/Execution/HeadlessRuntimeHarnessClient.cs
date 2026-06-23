@@ -12,13 +12,16 @@ using SirThaddeus.Harness.Tracing;
 namespace SirThaddeus.Harness.Execution;
 
 /// <summary>
-/// Black-box harness client that starts the real headless runtime server,
-/// drives the public /api/chat endpoint, auto-approves permission prompts,
-/// and reconstructs tool calls from runtime audit events.
+/// v1-headless adapter. Starts the legacy headless runtime, drives the
+/// public /api/chat endpoint, auto-approves permission prompts, and
+/// reconstructs tool calls from the JSONL audit log. Reuses one process
+/// across every test in a harness run.
 ///
-/// This is the closest test path to the actual UI/runtime behavior.
+/// Implements <see cref="IHarnessHostAdapter"/> so the harness orchestrator
+/// can swap in the v2 hybrid runtime adapter (see
+/// <c>HybridRuntimeHostAdapter</c>) once that path is wired.
 /// </summary>
-internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
+internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
 {
     private readonly AppSettings _baseSettings;
     private readonly int _port;
@@ -29,6 +32,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 
     private Process? _process;
     private HarnessRuntimeSandbox? _sandbox;
+    private bool _processSpawnedThisCall;
 
     // Built once per process to avoid per-test DLL copy races when the
     // previous runtime process still holds file handles after Kill().
@@ -89,20 +93,109 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         }
     }
 
-    internal async Task<HeadlessExecutionResult> ExecuteAsync(
+    public async Task<HostExecutionResult> ExecuteAsync(
         HarnessTestCase test,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(test);
 
-        EnsureRuntimeBuilt();
-        await EnsureFreshRuntimeAsync(test, cancellationToken);
+        var totalStopwatch = Stopwatch.StartNew();
 
-        var runtimeProject = ResolveHeadlessRuntimeProject();
+        EnsureRuntimeBuilt();
+        var warmupStopwatch = Stopwatch.StartNew();
+        await EnsureRuntimeProcessAsync(cancellationToken);
+        warmupStopwatch.Stop();
+        var warmupSeconds = _processSpawnedThisCall ? warmupStopwatch.Elapsed.TotalSeconds : 0;
+        _processSpawnedThisCall = false;
+
+        var resetStopwatch = Stopwatch.StartNew();
+        await ApplyHarnessResetAsync(test, cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(test.PersonalityId))
+        {
+            await SetActivePersonalityAsync(test.PersonalityId!, cancellationToken);
+        }
+
+        var auditBaseline = await GetAuditEntriesAsync(cancellationToken);
+        resetStopwatch.Stop();
+        var resetSeconds = resetStopwatch.Elapsed.TotalSeconds;
+
+        var workStopwatch = Stopwatch.StartNew();
+        var auditCaptureStart = DateTimeOffset.UtcNow;
+        var startResponse = await PostChatAsync(test.UserMessage, cancellationToken);
+        var runOutcome = await ReadRunToCompletionAsync(startResponse.RunId, cancellationToken);
+        workStopwatch.Stop();
+        var workSeconds = workStopwatch.Elapsed.TotalSeconds;
+
+        var auditEntries = FilterNewAuditEntries(
+            auditCaptureStart,
+            auditBaseline,
+            await GetAuditEntriesAsync(cancellationToken));
+
+        var (toolCalls, toolTurns, steps) = BuildToolTraceFromAudit(auditEntries);
+
+        var finalSteps = steps.ToList();
+        finalSteps.Add(new TraceStep
+        {
+            StepIndex = finalSteps.Count + 1,
+            StepType = "final_response",
+            StartedAt = DateTimeOffset.UtcNow,
+            Content = runOutcome.FinalText
+        });
+
+        var response = new AgentResponse
+        {
+            Text = runOutcome.FinalText,
+            Success = runOutcome.Success,
+            Error = runOutcome.Success ? null : runOutcome.Error,
+            ToolCallsMade = toolCalls,
+            LlmRoundTrips = 0,
+            Sources = runOutcome.Sources
+        };
+
+        totalStopwatch.Stop();
+
+        return new HostExecutionResult
+        {
+            Response = response,
+            Steps = finalSteps,
+            ToolTurns = toolTurns,
+            Timing = new HarnessTiming(
+                RuntimeWarmupSeconds: warmupSeconds,
+                ResetSeconds: resetSeconds,
+                TestWorkSeconds: workSeconds,
+                TotalSeconds: totalStopwatch.Elapsed.TotalSeconds)
+        };
+    }
+
+    /// <summary>
+    /// Spawns the headless runtime exactly once per harness run and reuses
+    /// it for every test. The first call pays the dotnet startup, health
+    /// probe, and SearxNG warm-up costs (~10–45s); subsequent tests only
+    /// pay a sub-second reset round-trip.
+    /// </summary>
+    private async Task EnsureRuntimeProcessAsync(CancellationToken cancellationToken)
+    {
+        if (_process is { HasExited: false })
+            return;
+
+        DisposeRuntimeProcess();
+        _processSpawnedThisCall = true;
+        _sandbox ??= HarnessRuntimeSandbox.CreateShared(_baseSettings);
+
+        lock (_stdout)
+            _stdout.Clear();
+        lock (_stderr)
+            _stderr.Clear();
+
+        var runtimeDll = ResolveHeadlessRuntimeAssembly();
         var startInfo = new ProcessStartInfo
         {
+            // Direct DLL invocation skips ~0.5s of `dotnet run` project
+            // resolution and dependency-graph loading. EnsureRuntimeBuilt
+            // already produced the assembly, so this is safe.
             FileName = "dotnet",
-            Arguments = $"run --project \"{runtimeProject}\" --no-build -- --server --tools --port {_port}",
+            Arguments = $"exec \"{runtimeDll}\" --server --tools --port {_port}",
             WorkingDirectory = Directory.GetCurrentDirectory(),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -110,8 +203,11 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
             CreateNoWindow = true
         };
 
-        foreach (var pair in _sandbox!.Environment)
+        foreach (var pair in _sandbox.Environment)
             startInfo.Environment[pair.Key] = pair.Value;
+        // Marker so the runtime exposes /api/harness/reset only when the
+        // harness is the parent process.
+        startInfo.Environment["ST_HARNESS_RUN_ACTIVE"] = "true";
 
         _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _process.OutputDataReceived += (_, e) =>
@@ -137,63 +233,102 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 
         await WaitForHealthyAsync(cancellationToken);
         await WaitForSearxngReadyAsync(cancellationToken);
-
-        await ClearSessionAsync(cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(test.PersonalityId))
-        {
-            await SetActivePersonalityAsync(test.PersonalityId!, cancellationToken);
-        }
-
-        var auditBaseline = await GetAuditEntriesAsync(cancellationToken);
-        var auditCaptureStart = DateTimeOffset.UtcNow;
-        var startResponse = await PostChatAsync(test.UserMessage, cancellationToken);
-        var runOutcome = await ReadRunToCompletionAsync(startResponse.RunId, cancellationToken);
-        var auditEntries = FilterNewAuditEntries(
-            auditCaptureStart,
-            auditBaseline,
-            await GetAuditEntriesAsync(cancellationToken));
-
-        var (toolCalls, toolTurns, steps) = BuildToolTraceFromAudit(auditEntries);
-
-        var finalSteps = steps.ToList();
-        finalSteps.Add(new TraceStep
-        {
-            StepIndex = finalSteps.Count + 1,
-            StepType = "final_response",
-            StartedAt = DateTimeOffset.UtcNow,
-            Content = runOutcome.FinalText
-        });
-
-        var response = new AgentResponse
-        {
-            Text = runOutcome.FinalText,
-            Success = runOutcome.Success,
-            Error = runOutcome.Success ? null : runOutcome.Error,
-            ToolCallsMade = toolCalls,
-            LlmRoundTrips = 0
-        };
-
-        return new HeadlessExecutionResult
-        {
-            Response = response,
-            Steps = finalSteps,
-            ToolTurns = toolTurns
-        };
+        await PrewarmAgentPipelineAsync(cancellationToken);
     }
 
-    private async Task EnsureFreshRuntimeAsync(HarnessTestCase test, CancellationToken cancellationToken)
+    /// <summary>
+    /// Pays the agent-pipeline / MCP-client / HTTP-client lazy-init cost
+    /// during the runtime warmup phase instead of letting it land on the
+    /// first real test. Sends a tiny chat with no tools allowed so the LLM
+    /// composes a one-shot reply and the pipeline JITs end-to-end. Reset
+    /// runs after this to clear the warmup conversation from history.
+    /// </summary>
+    private async Task PrewarmAgentPipelineAsync(CancellationToken cancellationToken)
     {
-        DisposeRuntimeProcess();
-        _sandbox?.Dispose();
-        _sandbox = HarnessRuntimeSandbox.Create(_baseSettings, test);
+        if (ShouldSkipPrewarm())
+        {
+            Console.Error.WriteLine("[harness] Headless runtime prewarm skipped by ST_HARNESS_SKIP_PREWARM.");
+            return;
+        }
 
-        lock (_stdout)
-            _stdout.Clear();
-        lock (_stderr)
-            _stderr.Clear();
+        using var warmupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        warmupCts.CancelAfter(GetPrewarmTimeout());
 
-        await InitializeAsync(cancellationToken);
+        try
+        {
+            var resetRequest = new HarnessResetRequest(
+                AllowedTools: "__none__",
+                StubOverrides: null,
+                ClearMemoryData: true,
+                ClearChatHistory: true);
+            using (var resetResponse = await _http.PostAsJsonAsync(
+                "api/harness/reset", resetRequest, JsonOptions, warmupCts.Token))
+            {
+                resetResponse.EnsureSuccessStatusCode();
+            }
+
+            // Short, literal prompt the LLM can answer in <= 1 token. Cuts
+            // generation time during warmup vs an open-ended "ping" that
+            // might produce a paragraph-long preamble.
+            var startResponse = await PostChatAsync("Reply with only the word ok.", warmupCts.Token);
+            await ReadRunToCompletionAsync(startResponse.RunId, warmupCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            Console.Error.WriteLine($"[harness] Headless runtime prewarm timed out after {GetPrewarmTimeout().TotalSeconds:0}s; proceeding.");
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            Console.Error.WriteLine($"[harness] Headless runtime prewarm failed: {ex.Message}");
+            // Warmup is best-effort. If it fails, the first real test will
+            // simply pay the cold-start cost — not worth aborting the run.
+        }
+    }
+
+    private static bool ShouldSkipPrewarm()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_SKIP_PREWARM");
+        return raw is not null &&
+               (raw.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                raw.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                raw.Equals("yes", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static TimeSpan GetPrewarmTimeout()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_PREWARM_TIMEOUT_SECONDS");
+        return int.TryParse(raw, out var seconds)
+            ? TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 60))
+            : TimeSpan.FromSeconds(10);
+    }
+
+    private async Task ApplyHarnessResetAsync(HarnessTestCase test, CancellationToken cancellationToken)
+    {
+        var allowedTools = test.Assertions.AllowedToolsOnly
+            ? (test.AllowedTools.Count == 0 ? "__none__" : string.Join(",", test.AllowedTools))
+            : string.Empty; // empty string clears the override server-side
+
+        Dictionary<string, string?>? stubOverrides = null;
+        if (string.Equals(test.Mode, "stub", StringComparison.OrdinalIgnoreCase) &&
+            test.Stub.PerToolFailures.Count > 0)
+        {
+            stubOverrides = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (toolName, failure) in test.Stub.PerToolFailures)
+                stubOverrides[toolName] = failure;
+        }
+
+        var request = new HarnessResetRequest(
+            AllowedTools: allowedTools,
+            StubOverrides: stubOverrides,
+            ClearMemoryData: true,
+            ClearChatHistory: true);
+
+        using var response = await _http.PostAsJsonAsync(
+            "api/harness/reset",
+            request,
+            JsonOptions,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
     }
 
     private static IReadOnlyList<AuditEntryDto> FilterNewAuditEntries(
@@ -242,7 +377,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         return payload ?? throw new InvalidOperationException("Headless runtime returned an empty chat start response.");
     }
 
-    private async Task<(bool Success, string FinalText, string? Error)> ReadRunToCompletionAsync(
+    private async Task<(bool Success, string FinalText, string? Error, IReadOnlyList<AgentSource> Sources)> ReadRunToCompletionAsync(
         string runId,
         CancellationToken cancellationToken)
     {
@@ -255,6 +390,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 
         string? finalText = null;
         string? error = null;
+        IReadOnlyList<AgentSource> sources = [];
 
         while (true)
         {
@@ -296,17 +432,53 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
                     finalText = payload.TryGetProperty("finalText", out var finalTextProp)
                         ? finalTextProp.GetString()
                         : null;
-                    return (true, finalText ?? string.Empty, null);
+                    sources = TryReadSourceCards(payload);
+                    return (true, finalText ?? string.Empty, null, sources);
                 case RuntimeEventTypes.RunFailed:
                     error = payload.TryGetProperty("error", out var errorProp)
                         ? errorProp.GetString()
                         : "Unknown headless runtime failure.";
-                    return (false, error ?? "Unknown headless runtime failure.", error);
+                    return (false, error ?? "Unknown headless runtime failure.", error, sources);
             }
         }
 
-        return (false, finalText ?? "Headless runtime event stream ended before completion.", "event_stream_incomplete");
+        return (false, finalText ?? "Headless runtime event stream ended before completion.", "event_stream_incomplete", sources);
     }
+
+    private static IReadOnlyList<AgentSource> TryReadSourceCards(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("sourceCards", out var sourceCards) ||
+            sourceCards.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var sources = new List<AgentSource>();
+        foreach (var item in sourceCards.EnumerateArray())
+        {
+            var url = TryReadString(item, "url");
+            if (string.IsNullOrWhiteSpace(url))
+                continue;
+
+            sources.Add(new AgentSource
+            {
+                Url = url!,
+                Title = TryReadString(item, "title"),
+                Domain = TryReadString(item, "domain"),
+                Excerpt = TryReadString(item, "excerpt"),
+                Favicon = TryReadString(item, "favicon"),
+                Thumbnail = TryReadString(item, "thumbnail"),
+                PublishedAt = TryReadString(item, "publishedAt")
+            });
+        }
+
+        return sources;
+    }
+
+    private static string? TryReadString(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     private async Task<IReadOnlyList<AuditEntryDto>> GetAuditEntriesAsync(CancellationToken cancellationToken)
     {
@@ -318,94 +490,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
 
     private static (IReadOnlyList<ToolCallRecord> ToolCalls, IReadOnlyList<RecordedToolTurn> ToolTurns, IReadOnlyList<TraceStep> Steps)
         BuildToolTraceFromAudit(IReadOnlyList<AuditEntryDto> auditEntries)
-    {
-        var starts = new Dictionary<string, (string ToolName, string Arguments, DateTimeOffset Timestamp)>(StringComparer.OrdinalIgnoreCase);
-        var toolCalls = new List<ToolCallRecord>();
-        var toolTurns = new List<RecordedToolTurn>();
-        var steps = new List<TraceStep>();
-        var stepIndex = 0;
-        var toolTurnIndex = 0;
-
-        foreach (var entry in auditEntries.OrderBy(e => e.TimestampUtc))
-        {
-            if (string.Equals(entry.Category, "MCP_TOOL_CALL_START", StringComparison.OrdinalIgnoreCase))
-            {
-                var meta = ParseMetadata(entry.MetadataJson);
-                var requestId = GetString(meta, "request_id");
-                var toolName = GetString(meta, "tool_name_canonical") ?? "unknown";
-                var arguments = GetString(meta, "input_summary") ?? "{}";
-                if (!string.IsNullOrWhiteSpace(requestId))
-                {
-                    starts[requestId] = (toolName, arguments, entry.TimestampUtc);
-                }
-
-                steps.Add(new TraceStep
-                {
-                    StepIndex = ++stepIndex,
-                    StepType = "tool_call",
-                    CallId = requestId,
-                    ToolName = toolName,
-                    Arguments = arguments,
-                    StartedAt = entry.TimestampUtc
-                });
-            }
-            else if (string.Equals(entry.Category, "MCP_TOOL_CALL_END", StringComparison.OrdinalIgnoreCase))
-            {
-                var meta = ParseMetadata(entry.MetadataJson);
-                var requestId = GetString(meta, "request_id");
-                var errorMessage = GetString(meta, "error_message");
-                var outputSummary = GetString(meta, "output_summary") ?? string.Empty;
-                var success = entry.Message.Contains("(ok)", StringComparison.OrdinalIgnoreCase);
-
-                starts.TryGetValue(requestId ?? string.Empty, out var start);
-                var toolName = start.ToolName ?? GetString(meta, "tool_name_canonical") ?? "unknown";
-                var arguments = start.Arguments ?? GetString(meta, "input_summary") ?? "{}";
-                var resultText = success ? outputSummary : (errorMessage ?? outputSummary);
-
-                toolCalls.Add(new ToolCallRecord
-                {
-                    ToolName = toolName,
-                    Arguments = arguments,
-                    Result = resultText,
-                    Success = success
-                });
-
-                toolTurns.Add(new RecordedToolTurn
-                {
-                    Index = toolTurnIndex++,
-                    ToolName = toolName,
-                    ArgumentsJson = arguments,
-                    ResultText = resultText,
-                    Success = success
-                });
-
-                steps.Add(new TraceStep
-                {
-                    StepIndex = ++stepIndex,
-                    StepType = "tool_result",
-                    CallId = requestId,
-                    ToolName = toolName,
-                    Arguments = arguments,
-                    StartedAt = start.Timestamp == default ? entry.TimestampUtc : start.Timestamp,
-                    EndedAt = entry.TimestampUtc,
-                    DurationMs = Math.Max(0, (long)(entry.TimestampUtc - (start.Timestamp == default ? entry.TimestampUtc : start.Timestamp)).TotalMilliseconds),
-                    Result = success
-                        ? ToolResultPayloads.BuildSuccess(resultText)
-                        : ToolResultPayloads.BuildErrorJson("tool_error", resultText, false),
-                    Error = success
-                        ? null
-                        : new TraceError
-                        {
-                            Code = "tool_error",
-                            Message = resultText,
-                            Retriable = false
-                        }
-                });
-            }
-        }
-
-        return (toolCalls, toolTurns, steps);
-    }
+        => AuditTraceBuilder.BuildFromAuditEntries(auditEntries);
 
     private async Task WaitForHealthyAsync(CancellationToken cancellationToken)
     {
@@ -433,7 +518,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
                 lastError = ex;
             }
 
-            await Task.Delay(250, cancellationToken);
+            await Task.Delay(100, cancellationToken);
         }
 
         throw new TimeoutException($"Timed out waiting for headless runtime health. Last error: {lastError?.Message}");
@@ -511,6 +596,27 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         return projectPath;
     }
 
+    private static string ResolveHeadlessRuntimeAssembly()
+    {
+        var repoRoot = Directory.GetCurrentDirectory();
+        var assemblyPath = Path.Combine(
+            repoRoot,
+            "apps",
+            "headless-runtime",
+            "SirThaddeus.HeadlessRuntime",
+            "bin",
+            "Debug",
+            "net10.0",
+            "SirThaddeus.HeadlessRuntime.dll");
+
+        if (!File.Exists(assemblyPath))
+            throw new FileNotFoundException(
+                "Headless runtime assembly not found — EnsureRuntimeBuilt should run first.",
+                assemblyPath);
+
+        return assemblyPath;
+    }
+
     private static int GetFreeTcpPort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -523,40 +629,6 @@ internal sealed class HeadlessRuntimeHarnessClient : IAsyncDisposable
         {
             listener.Stop();
         }
-    }
-
-    private static JsonElement? ParseMetadata(string? metadataJson)
-    {
-        if (string.IsNullOrWhiteSpace(metadataJson))
-            return null;
-
-        try
-        {
-            using var doc = JsonDocument.Parse(metadataJson);
-            return doc.RootElement.Clone();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string? GetString(JsonElement? element, string propertyName)
-    {
-        if (element is not JsonElement root || root.ValueKind != JsonValueKind.Object)
-            return null;
-
-        if (!root.TryGetProperty(propertyName, out var prop))
-            return null;
-
-        return prop.ValueKind switch
-        {
-            JsonValueKind.String => prop.GetString(),
-            JsonValueKind.Number => prop.GetRawText(),
-            JsonValueKind.True => "true",
-            JsonValueKind.False => "false",
-            _ => prop.GetRawText()
-        };
     }
 
     private static string GetAuditSignature(AuditEntryDto entry)

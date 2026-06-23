@@ -66,6 +66,8 @@ public sealed record SourceItem
     public DateTimeOffset? PublishedAt    { get; init; }
     public int?   ExtractedWordCount      { get; init; }
     public string Snippet                 { get; init; } = "";
+    public string Favicon                 { get; init; } = "";
+    public string Thumbnail               { get; init; } = "";
 
     /// <summary>
     /// Computes a stable, truncated SHA-256 hash from a normalized URL.

@@ -21,21 +21,6 @@ function Fail([string]$Message, [int]$Code = 1) {
     exit $Code
 }
 
-function Try-SyncLegacyPackageDir([string]$SourceDir, [string]$LegacyDir) {
-    try {
-        if (Test-Path $LegacyDir) {
-            Remove-Item -Path $LegacyDir -Recurse -Force
-        }
-
-        New-Item -ItemType Directory -Force -Path $LegacyDir | Out-Null
-        Copy-Item -Path (Join-Path $SourceDir "*") -Destination $LegacyDir -Recurse -Force
-        Write-Host "  Legacy mirror : $LegacyDir"
-    }
-    catch {
-        Write-Host "  WARN: unable to refresh legacy package dir at $LegacyDir ($($_.Exception.Message))" -ForegroundColor Yellow
-    }
-}
-
 function Apply-WindowsCompatPatch([string]$SourceRoot) {
     $valkeyDbPath = Join-Path $SourceRoot "searx\valkeydb.py"
     if (-not (Test-Path $valkeyDbPath)) {
@@ -78,7 +63,6 @@ Set-Location $repoRoot
 
 $sourceExtractDir = Join-Path $repoRoot "artifacts\searxng\$Runtime\source"
 $packageDir = Join-Path $repoRoot "artifacts\searxng\$Runtime\package"
-$legacyPackageDir = Join-Path $repoRoot "apps\searxng\package"
 $sourceArchivePath = Join-Path $repoRoot "artifacts\searxng\$Runtime\searxng-source.tar.gz"
 $downloadUrl = "https://codeload.github.com/searxng/searxng/tar.gz/$SearxngRef"
 
@@ -93,15 +77,6 @@ if ($Force) {
         if (Test-Path $path) {
             Remove-Item -Path $path -Recurse -Force
         }
-    }
-
-    try {
-        if (Test-Path $legacyPackageDir) {
-            Remove-Item -Path $legacyPackageDir -Recurse -Force
-        }
-    }
-    catch {
-        Write-Host "  WARN: unable to clear legacy package dir at $legacyPackageDir ($($_.Exception.Message))" -ForegroundColor Yellow
     }
 }
 
@@ -220,7 +195,6 @@ $upstreamInfo = [ordered]@{
 $upstreamInfo | ConvertTo-Json | Set-Content -Path (Join-Path $packageDir "upstream.json") -Encoding ASCII
 
 $packageFileCount = @(Get-ChildItem -Path $packageDir -Recurse -File).Count
-Try-SyncLegacyPackageDir -SourceDir $packageDir -LegacyDir $legacyPackageDir
 
 Write-Section "Done"
 Write-Host "  Package root : $packageDir"

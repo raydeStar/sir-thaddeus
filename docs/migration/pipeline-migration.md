@@ -1,6 +1,6 @@
 # Pipeline Migration — AI Handoff Log
 
-**Status:** Phase 2D.5 complete — **legacy `AgentOrchestrator` retired**. UI and CLI pipelines now share the 17-step pipeline with no fallback path: safety boundary → utility fast-path → benign fallback → personality injection → feature extractor → logic-puzzle scaffold → memory context → onboarding injection → **dialogue state** → **existence verification hint** → footman router → **guardrails** → tool loop → post-process → **completion validation** → search fallback → auto-memory extract → response composer. The `ST_RUNTIME_USE_PIPELINE` env var is gone along with 8,939 lines of `AgentOrchestrator*.cs` partials and ~6,300 lines of legacy-only tests. Migration is done; future entries belong elsewhere.
+**Status:** Phase 2D.5 complete — **legacy `AgentOrchestrator` retired**. UI and CLI/headless now use the pipeline-backed assistant flow with no legacy fallback path. The shared core includes safety boundary, utility fast-path, benign fallback, personality injection, feature extraction, logic-puzzle scaffold, memory context, onboarding injection, dialogue state, existence-verification hint, footman routing, guardrails, freshness routing, tool loop, post-process, completion validation, search fallback, auto-memory extract, and response composition. Runtime-specific adapters and the UI-only core-memory step account for small composition differences. The `ST_RUNTIME_USE_PIPELINE` env var is gone along with 8,939 lines of `AgentOrchestrator*.cs` partials and ~6,300 lines of legacy-only tests. Migration is done; future entries belong elsewhere.
 
 **Purpose of this doc:** Any AI or contributor picking this up mid-stream should be able to read this file once and continue. Each phase ends with updates here. Keep it terse — it's a ledger, not prose.
 
@@ -40,32 +40,28 @@ After migration: both runtimes share the same pipeline; only their adapters diff
 | 2C.5 | `SearchFallbackStep` | Steps/ |
 | 2C.6 | `PersonalityInjectionStep` | Steps/ |
 | 2D.1 | `StdoutChatEventSink` (CLI-facing event sink) | Pipeline/ |
-| 2D.2a | `IHeadlessAgent` interface + `PipelineBackedAgentOrchestrator` (both the legacy `AgentOrchestrator` and the new pipeline-backed class implement it) | [packages/agent/SirThaddeus.Agent/IHeadlessAgent.cs](../../packages/agent/SirThaddeus.Agent/IHeadlessAgent.cs), [Pipeline/PipelineBackedAgentOrchestrator.cs](../../packages/agent/SirThaddeus.Agent/Pipeline/PipelineBackedAgentOrchestrator.cs) |
-| 2D.2b | HeadlessRuntime types swapped `AgentOrchestrator` → `IHeadlessAgent` across 5 files; env flag `ST_RUNTIME_USE_PIPELINE=1` picks pipeline-backed impl; off by default | [apps/headless-runtime/SirThaddeus.HeadlessRuntime/Program.cs](../../apps/headless-runtime/SirThaddeus.HeadlessRuntime/Program.cs) + `RuntimeApiServer.cs` + `RuntimeApiServer.EndpointMappings.Runs.cs` + `WorkflowChatRunCoordinator.cs` |
+| 2D.2a | `IHeadlessAgent` interface + `PipelineBackedAgentOrchestrator` introduced as the headless pipeline facade | [packages/agent/SirThaddeus.Agent/IHeadlessAgent.cs](../../packages/agent/SirThaddeus.Agent/IHeadlessAgent.cs), [Pipeline/PipelineBackedAgentOrchestrator.cs](../../packages/agent/SirThaddeus.Agent/Pipeline/PipelineBackedAgentOrchestrator.cs) |
+| 2D.2b | HeadlessRuntime types swapped from the legacy orchestrator to `IHeadlessAgent`; the transitional `ST_RUNTIME_USE_PIPELINE` flag was removed in 2D.5 | [apps/headless-runtime/SirThaddeus.HeadlessRuntime/Program.cs](../../apps/headless-runtime/SirThaddeus.HeadlessRuntime/Program.cs) + `RuntimeApiServer.cs` + `RuntimeApiServer.EndpointMappings.Runs.cs` + `WorkflowChatRunCoordinator.cs` |
 
-### UI pipeline shape (already running)
+### Current pipeline shape
 
-[LmStudioAssistant.BuildTurnPipeline](../../src/Thaddeus.Runtime/Chat/LmStudioAssistant.cs):
+Both UI and CLI/headless surfaces compose the same core pipeline flow with
+runtime-specific adapters. The active shared shape is:
 
 ```
-1. UtilityFastPathStep     ← terminates on deterministic match
-2. FeatureExtractorStep
-3. LogicPuzzleScaffoldStep
-4. FootmanRouterStep        ← emits gatekeeper chip
-5. ToolLoopStep             ← emits tool-start/complete chips
-6. PostProcessStep          ← sanitizer + automation-refusal collapse
-7. ResponseComposerStep     ← builds final AgentResponse
+SafetyBoundary -> UtilityFastPath -> BenignFallback -> PersonalityInjection
+-> FeatureExtractor -> LogicPuzzleScaffold -> MemoryContext -> OnboardingInjection
+-> DialogueState -> ExistenceVerificationHint -> FootmanRouter -> Guardrails
+-> FreshnessRouter -> ToolLoop -> PostProcess -> CompletionValidation -> SearchFallback
+-> AutoMemoryExtract -> ResponseComposer
 ```
 
-Memory / onboarding / search-fallback / personality steps exist but aren't wired into the UI yet (constructed with null providers on the facade side = no-op). See "next session" below.
+The UI runtime also includes `CoreMemoryStep` after `MemoryContextStep`. Both
+runtimes run a search-fallback sanitize post-process before auto-memory extract.
 
-### Not shipped — deferred to later phases
-
-| Phase | Deliverable | Notes |
-|---|---|---|
-| 2D.2 | Migrate `HeadlessRuntime` to the pipeline | **Next up.** Scope: wire `AgentOrchestrator`-shaped facade that delegates to `ChatPipeline`. ~8 files touched. |
-| 2D.3 | Retire / thin `AgentOrchestrator` | Only possible after 2D.2 ships. |
-| 2D.4 | Full 89-test harness run end-to-end | Depends on 2D.2/2D.3. |
+There are no remaining migration phases in this document. Active model and
+harness tuning now lives in
+[.github/instructions/local-model-harness-workflow.instructions.md](../../.github/instructions/local-model-harness-workflow.instructions.md).
 
 ---
 
@@ -104,41 +100,12 @@ Returns `Continue` with `AssistantDraft` set on the happy path (so downstream po
 
 ---
 
-## Resumption pointer — DO THIS NEXT
+## Current status
 
-**Phase 2D.2: Migrate HeadlessRuntime to pipeline.**
-
-### Target files (current orchestrator touch-points)
-
-```
-apps/headless-runtime/SirThaddeus.HeadlessRuntime/Program.cs           (5 sites: BuildOrchestrator, orchestrator.ResetConversation, GetAvailableToolCountAsync, ProcessAsync, orchestrator param)
-apps/headless-runtime/SirThaddeus.HeadlessRuntime/RuntimeApiServer.cs  (1 site: Func<AppSettings, AgentOrchestrator>)
-apps/headless-runtime/SirThaddeus.HeadlessRuntime/RuntimeApiServer.EndpointMappings.Runs.cs  (2 sites)
-apps/headless-runtime/SirThaddeus.HeadlessRuntime/WorkflowChatRunCoordinator.cs  (SeedHistory, TimeBudgetedAgentOrchestrator decorator, ProcessAsync)
-```
-
-### Strategy — pragmatic, two sub-PRs
-
-**2D.2a — Introduce `PipelineBackedAgentOrchestrator` in agent package.** Implements `IAgentOrchestrator` (2 methods: `ProcessAsync` with + without conversationId). Holds session state externally (simple `List<ChatMessage>` history per conversation, or a `IDialogueSessionStore` abstraction). Builds a `TurnContext` per turn, runs the 7-step pipeline, absorbs result back into state. Unit tests for: ProcessAsync produces reply, history is appended, ResetConversation clears, multiple conversation IDs don't cross-contaminate.
-
-**2D.2b — Migrate HeadlessRuntime's `BuildOrchestrator(settings)` factory.** Behind a feature flag (settings toggle or env var `ST_RUNTIME_USE_PIPELINE=1`), return `PipelineBackedAgentOrchestrator` instead of `AgentOrchestrator`. Both implement `IAgentOrchestrator` so `WorkflowChatRunCoordinator`, `TimeBudgetedAgentOrchestrator`, and the REST endpoints work unchanged. Run the smoke suite first (8 tests, ~2 min), then reasoning (18 tests), then the rest. Delete the flag once the harness passes fully.
-
-### Non-obvious calls the new class must support
-
-`AgentOrchestrator` exposes **more than `IAgentOrchestrator`**. The headless runtime uses these on the concrete type:
-
-- `ResetConversation()` — clears internal `_history`.
-- `SeedHistory(IEnumerable<(string role, string content)>)` — pre-populates history for workflow-run continuity.
-- `GetAvailableToolCountAsync(CancellationToken)` — diagnostic endpoint.
-- Properties: `ActiveProfileId`, `DeepDiveEnabled`, `AdvancedPlaceDiscoveryEnabled`, `MemoryEnabled`, `UserLocationHint`, `UserTimezone`, `PreferredUnits`, `MaxTokensBudget`, `ContextLocked`.
-
-**Recommendation:** make these part of a new `IHeadlessAgent` interface (extends `IAgentOrchestrator`) and implement on both the legacy `AgentOrchestrator` and the new `PipelineBackedAgentOrchestrator`. Avoid the concrete-type coupling that blocked us before.
-
-### Scope estimate
-
-- 2D.2a: ~150 lines new, ~200 lines of tests. 1-2 hours.
-- 2D.2b: ~50 lines of rewiring + feature flag. 1 hour.
-- Harness verification: run-time only (each test is one LLM call; full 89 is ~30-60 min depending on model).
+The migration is complete. `AgentOrchestrator` and the
+`ST_RUNTIME_USE_PIPELINE` escape hatch were removed in 2D.5, and both runtime
+surfaces now go through the pipeline-backed headless facade. Treat the phase log
+below as historical context, not as a to-do list.
 
 ---
 
@@ -186,8 +153,8 @@ dotnet test tests/runtime/Thaddeus.Runtime.Tests.csproj --no-build \
 Update this section when landing each sub-PR.
 
 - **2D.1 — StdoutChatEventSink.** Shipped. 8 tests pass. Consumed in 2D.2b.
-- **2D.2a — PipelineBackedAgentOrchestrator + IHeadlessAgent.** Shipped. 11 tests pass. Legacy `AgentOrchestrator` also implements `IHeadlessAgent` (just had to add the inheritance; methods already existed).
-- **2D.2b — HeadlessRuntime env-flag migration.** Shipped. Type signatures swapped to `IHeadlessAgent` across `Program.cs` + 3 server files. `BuildOrchestrator` branches on `ST_RUNTIME_USE_PIPELINE=1` env var — flag off by default so harness still tests the legacy path. CLI pipeline composition in `BuildPipelineBackedOrchestrator`: UtilityFastPath → FeatureExtractor → LogicPuzzleScaffold → FootmanRouter → ToolLoop → PostProcess → ResponseComposer. CLI-specific omissions: `AlwaysGrantGate` (permission check happens at `AuditedMcpToolClient`, not inside the loop), no propose_automation interceptor, no automation-args rewriter, stdout event sink.
+- **2D.2a — PipelineBackedAgentOrchestrator + IHeadlessAgent.** Shipped. Introduced the headless pipeline facade and shared interface.
+- **2D.2b — HeadlessRuntime pipeline migration.** Shipped. Type signatures swapped to `IHeadlessAgent` across `Program.cs` + 3 server files. The early `ST_RUNTIME_USE_PIPELINE` branch was transitional and was removed in 2D.5.
 - **2D.3a — Personality + auto-memory + memory-context + location wired into CLI pipeline.** Shipped. `BuildPipelineBackedOrchestrator` now constructs `PersonalityRuntime` + `MemoryContextProvider` (with `SmartIntentClassifier` against the gatekeeper LLM) and adds `PersonalityInjectionStep`, `MemoryContextStep`, `AutoMemoryExtractStep` to the pipeline. System prompt is pre-wrapped with a location block via `BuildHeadlessSystemPrompt` (mirrors the UI's `BuildLocationBlock`). CLI pipeline is now **10 steps**: UtilityFastPath → PersonalityInjection → FeatureExtractor → LogicPuzzleScaffold → MemoryContext → FootmanRouter → ToolLoop → PostProcess → AutoMemoryExtract → ResponseComposer. Fills gaps that would have caused personality-suite (22 tests) and memory-dependent suites to regress when the flag is on.
 
 - **2E.1 — CapturingChatEventSink.** Shipped. Agent-package class + 6 tests. Records every event to thread-safe queues; `Snapshot()` / `SnapshotOfKind()` / `Clear()` API. Useful for integration tests + future harness capture.
@@ -208,7 +175,7 @@ Update this section when landing each sub-PR.
 - **2K.5 — 2K steps wired into both pipelines.** Shipped.
   - **UI** (`AssistantRouter.CreateDefaultFactory`): caches a singleton `ThreadScopedDialogueStateAccessor` (survives settings rebuilds — it's per-thread chat state, not per-client wiring), lazily constructs `ReasoningGuardrailsPipeline`, `CompletionValidator`, `RepairLoop` pinned to the primary client (rebuilt when the primary client rebuilds). Passes all four via new init properties on `LmStudioAssistant`.
   - **CLI** (`BuildPipelineBackedOrchestrator`): constructs `SingletonDialogueStateAccessor(new DialogueStateStore())` (matches v1 orchestrator semantics — single active conversation), plus the guardrails pipeline + validator + repair loop once per orchestrator build.
-  - Step placement (both pipelines): `DialogueStateStep` after `OnboardingInjectionStep`, `GuardrailsStep` after `FootmanRouterStep` + before `ToolLoopStep`, `CompletionValidationStep` after `PostProcessStep` + before `SearchFallbackStep`. **Both pipelines now 17 steps.** Full `tests/SirThaddeus.Tests` sweep passes 2359/2359; 3 pre-existing `JsonFileSettingsStoreTests` failures in `tests/runtime` are unrelated to this work (settings-defaults drift, fail identically before and after 2K).
+  - Step placement at that point: `DialogueStateStep` after `OnboardingInjectionStep`, `GuardrailsStep` after `FootmanRouterStep` + before `ToolLoopStep`, `CompletionValidationStep` after `PostProcessStep` + before `SearchFallbackStep`. The historical `tests/SirThaddeus.Tests` sweep passed; later phases changed the test inventory.
 
 ### Known gaps relative to legacy orchestrator (harness will likely flag these)
 
@@ -229,8 +196,8 @@ The following orchestrator behaviors aren't ported as dedicated pipeline steps. 
 
 1. `git status` is clean, and you're on the expected branch.
 2. `dotnet build packages/agent/SirThaddeus.Agent/SirThaddeus.Agent.csproj` → 0 errors.
-3. `dotnet test tests/SirThaddeus.Tests/` → 2099 passing (as of 2D.5).
+3. `dotnet test tests/SirThaddeus.Tests/` should pass; do not rely on the historical 2D.5 count because the test inventory has changed.
 4. Read this doc.
-5. Look at `LmStudioAssistant.BuildTurnPipeline` and the CLI's `BuildPipelineBackedOrchestrator` — they compose the same 17-step pipeline with runtime-specific adapters. Changes should land on both sides.
+5. Look at `LmStudioAssistant.BuildTurnPipeline` and the CLI's `BuildPipelineBackedOrchestrator` — they compose the same core pipeline flow with runtime-specific adapters. Changes should land on both sides when the behavior is shared.
 
 When you finish a sub-PR: update the "Phase log" section above. Keep entries 1-2 lines each. Note: active tuning work now lives under [.github/instructions/local-model-harness-workflow.instructions.md](../../.github/instructions/local-model-harness-workflow.instructions.md) — this migration doc is effectively a historical record.

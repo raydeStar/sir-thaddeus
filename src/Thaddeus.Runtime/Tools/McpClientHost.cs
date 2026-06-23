@@ -149,12 +149,15 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
 
     /// <summary>
     /// Builds the env dictionary passed to the MCP server child. Today we
-    /// wire file-access settings (allowed roots + kill switch); memory,
-    /// weather, and web-search env will follow when those settings land.
+    /// wire file-access settings (allowed roots + kill switch) plus the
+    /// memory DB path shared by the audit API and memory tools.
     /// </summary>
     private static Dictionary<string, string> BuildEnv(SettingsDocument doc)
     {
-        var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ST_MEMORY_DB_PATH"] = RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPathFromEnvironment()
+        };
         var files = doc.Files;
         if (files is not null)
         {

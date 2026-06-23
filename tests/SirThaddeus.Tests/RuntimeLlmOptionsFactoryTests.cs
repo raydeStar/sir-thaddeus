@@ -6,7 +6,7 @@ namespace SirThaddeus.Tests;
 public sealed class RuntimeLlmOptionsFactoryTests
 {
     [Fact]
-    public void BuildGatekeeper_ReusesPrimaryModel_OnSharedEndpointByDefault()
+    public void BuildGatekeeper_UsesDedicatedModel_OnSharedEndpointEvenWhenReuseFlagSet()
     {
         var settings = new AppSettings
         {
@@ -15,13 +15,14 @@ public sealed class RuntimeLlmOptionsFactoryTests
                 BaseUrl = "http://localhost:1234",
                 Model = "main-model",
                 GatekeeperBaseUrl = "",
-                GatekeeperModelId = "small-footman-model"
+                GatekeeperModelId = "small-footman-model",
+                ReusePrimaryModelForGatekeeperOnSharedEndpoint = true
             }
         };
 
         var options = RuntimeLlmOptionsFactory.BuildGatekeeper(settings);
 
-        Assert.Equal("main-model", options.Model);
+        Assert.Equal("small-footman-model", options.Model);
         Assert.Equal("http://localhost:1234", options.BaseUrl);
         Assert.Equal(5, options.MaxTokens);
         Assert.Equal(0.0, options.Temperature);

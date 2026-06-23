@@ -19,7 +19,7 @@ This overview reflects the current code in [src/Thaddeus.Runtime/](../src/Thadde
 flowchart LR
   User[User]
   Shell[Thaddeus.Shell]
-  Browser[Workspace UI<br/>React + TanStack Router]
+  Browser[Workspace UI<br/>React + local router shim]
   Runtime[Thaddeus.Runtime<br/>Loopback REST + WS host]
   Assistant[AssistantRouter<br/>LmStudioAssistant]
   Llm[OpenAI-compatible LLM<br/>LM Studio / custom endpoint]
@@ -128,7 +128,7 @@ The original repo documentation described a five-layer split. That model still a
 | Workspace UI | [web/](../web/) | Chat, wiki, memory, routines, settings, diagnostics, onboarding, activity, compact experience |
 | Assistant and orchestration | [src/Thaddeus.Runtime/Chat/](../src/Thaddeus.Runtime/Chat/), [packages/agent/](../packages/agent/) | Routing, history shaping, memory/personality injection, tool loop, validation and repair |
 | Model integration | [packages/llm-client/](../packages/llm-client/) | OpenAI-compatible chat client, token budgets, endpoint abstraction |
-| Tools and knowledge | [apps/mcp-server/](../apps/mcp-server/), [packages/mcp-tools-core/](../packages/mcp-tools-core/), [packages/mcp-tools-windows/](../packages/mcp-tools-windows/), [packages/wiki/](../packages/wiki/) | Web, file, system, screen, memory, knowledge-store, and wiki capabilities |
+| Tools and knowledge | [apps/mcp-server/](../apps/mcp-server/), [packages/mcp-tools-core/](../packages/mcp-tools-core/), [packages/mcp-tools-windows/](../packages/mcp-tools-windows/), [packages/wiki/](../packages/wiki/) | Web, file, system, screen, semantic memory, and wiki capabilities |
 | Voice | [apps/voice-host/](../apps/voice-host/), [apps/voice-backend/](../apps/voice-backend/), [src/Thaddeus.Tts.Abstractions/](../src/Thaddeus.Tts.Abstractions/), [src/Thaddeus.Tts.Kokoro/](../src/Thaddeus.Tts.Kokoro/), [src/Thaddeus.Tts.Piper.Legacy/](../src/Thaddeus.Tts.Piper.Legacy/) | Speech-to-text, text-to-speech, voice sidecar startup, local model assets |
 
 ## Package And Project Map
@@ -139,7 +139,7 @@ The original repo documentation described a five-layer split. That model still a
 | Shared contracts | [packages/shared-types/](../packages/shared-types/), [packages/shared-schemas/](../packages/shared-schemas/), [packages/contracts/](../packages/contracts/) | DTOs and shared models used across runtime, UI, and services |
 | Assistant core | [packages/agent/](../packages/agent/), [packages/llm-client/](../packages/llm-client/), [packages/personality-engine/](../packages/personality-engine/), [packages/permission-broker/](../packages/permission-broker/), [packages/tool-runner/](../packages/tool-runner/), [packages/observation-spec/](../packages/observation-spec/) | Tool-capable agent loop, routing, validation, repair, personality, permissions |
 | Tooling and search | [apps/mcp-server/](../apps/mcp-server/), [packages/mcp-shared/](../packages/mcp-shared/), [packages/mcp-tools-core/](../packages/mcp-tools-core/), [packages/mcp-tools-windows/](../packages/mcp-tools-windows/), [packages/web-search/](../packages/web-search/), [packages/local-tools/](../packages/local-tools/), [packages/document-reader/](../packages/document-reader/) | Tool manifest, MCP transport, tool implementations, search providers, local file/document extraction |
-| Knowledge and memory | [packages/memory/](../packages/memory/), [packages/memory-sqlite/](../packages/memory-sqlite/), [packages/knowledge-store/](../packages/knowledge-store/), [packages/wiki/](../packages/wiki/) | Retrieved memory, optional SQLite storage, knowledge-store file roots, local wiki canvas |
+| Knowledge and memory | [packages/memory/](../packages/memory/), [packages/memory-sqlite/](../packages/memory-sqlite/), [packages/wiki/](../packages/wiki/) | Retrieved semantic memory, SQLite storage, core pinned memory, and the local wiki canvas |
 | Platform and infrastructure | [packages/config/](../packages/config/), [packages/core/](../packages/core/), [packages/runtime-host/](../packages/runtime-host/), [packages/logging/](../packages/logging/), [packages/startup-diagnostics/](../packages/startup-diagnostics/), [packages/voice/](../packages/voice/) | Configuration, logging, runtime helpers, diagnostics, shared voice contracts |
 | Legacy and harness | [apps/headless-runtime/](../apps/headless-runtime/), [tools/](../tools/) | Older runtime surface, harnesses, migration and transition support |
 
@@ -150,8 +150,8 @@ The original repo documentation described a five-layer split. That model still a
 | Chat and threads | Create threads, auto-title first turn, rename, pin, delete, retry latest reply, stream assistant deltas, render Markdown, surface sources, show tool activity, show footman decisions | Main conversation surface |
 | Voice | Browser mic capture, shell-driven push-to-talk phases, ASR proxy, TTS proxy, Piper voice catalog, voice-host health and warmup, stop-all control | Windows-first shell ergonomics, browser voice path available in workspace |
 | Search and live data | Web search, direct page fetch, place discovery, place lookup, weather geocoding, weather forecast, timezone resolution, holiday lookup, feed fetch, URL status checks | Exposed through MCP tools |
-| Memory | User memos with tags and pin state, plus agent memory retrieve/store/update/delete/list tools | Two layers: user-curated memos and agent-facing memory tools |
-| Files and knowledge | File list/read with preview/apply pattern, document extraction, allowlisted roots, knowledge-store root/file/journal tools | File access is permission-gated and root-scoped |
+| Memory | Semantic memory audit UI, recall chips, pinned core memory, and agent memory retrieve/store/update/delete/list tools | Wiki is the user-curated knowledge surface; memory is the retrieval/audit substrate |
+| Files and knowledge | File list/read with preview/apply pattern, document extraction, allowlisted roots, and wiki tools | File access is permission-gated and root-scoped |
 | Wiki | Root/folder/page CRUD, move/rename/delete/restore/purge, revisions, graph view endpoint, search, import/export, page chat, page drafting, selected-text rewrite | More capable than the older summary docs suggest |
 | Routines | Routine CRUD, checklist runs, run history, run patching, completion, discard | Manual accountability surface; no scheduler yet |
 | Settings and diagnostics | Model provider configuration, gatekeeper status, audio devices, voice catalogs, file-root policy, location and units, privacy flags, runtime info, diagnostics cards | Settings tabs are `general`, `models`, `audio`, `files`, `location`, and `advanced` |
@@ -223,7 +223,7 @@ The original repo documentation described a five-layer split. That model still a
 
 | Group | Endpoint(s) |
 | --- | --- |
-| Memos | `GET/POST /api/memos`, `GET/PATCH/DELETE /api/memos/{id}` |
+| Memory audit | `GET /api/memory/overview`, `GET /api/memory/{nuggets,facts,events,profiles}`, `DELETE /api/memory/{nuggets,facts,events}/{id}`, `POST /api/memory/nuggets/{id}/pin`, `POST /api/memory/reflect` |
 | Routines | `GET/POST /api/routines`, `GET/PATCH/DELETE /api/routines/{id}` |
 | Routine runs | `GET/POST /api/routines/{id}/runs`, `GET/PATCH/DELETE /api/routine-runs/{runId}`, `POST /api/routine-runs/{runId}/complete` |
 | Activity | `GET /api/activity`, `GET /api/activity/{id}` |
@@ -315,12 +315,12 @@ The manifest currently defines these tool groups.
 | Runtime lock file | Local lock-file path resolved at startup | Contains port, token, pid, start time, and sidecar metadata |
 | Threads | JSON files under the runtime threads directory | Managed by `JsonFileThreadStore` |
 | Settings | Local JSON settings file | Managed by `JsonFileSettingsStore` |
-| Memos | JSON files under the runtime memos directory | Managed by `JsonFileMemoStore` |
+| Legacy memos | JSON files under the runtime memos directory | Read only by `MemosToWikiMigrator`; no active UI or REST surface |
 | Routines and runs | JSON files under the runtime routines directory | Managed by `JsonFileRoutineStore` |
 | Audit trail | `logs/audit.jsonl` under the runtime root | Append-only local audit log |
 | Runtime logs | `logs/thaddeus-runtime-*.log` | Serilog rolling file sink |
 | Wiki library | Local wiki root directory, defaulting to the user's Documents folder when not overridden | Managed by `LocalWikiStore`; test mode uses isolated storage |
-| Agent memory packages | Optional package-level memory implementations, including SQLite-backed storage | Distinct from the user-facing memo store |
+| Semantic memory | SQLite database under the runtime root unless `ST_MEMORY_DB_PATH` is set | Powers recall, audit UI, reflection, and core pinned memory |
 | Runtime state sync | `RuntimeStateMachine`, `StateSnapshot`, `EventBus`, `WebSocketBroadcaster`, `ChatTurnPublisher` | Used to synchronize UI state and turn streaming |
 
 ## Security, Trust, And Failure Model

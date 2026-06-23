@@ -187,8 +187,8 @@ YOUTUBE_SUMMARY_BASE_URL = (
 YOUTUBE_SUMMARY_MODEL = (
     os.environ.get("ST_YOUTUBE_SUMMARY_MODEL")
     or os.environ.get("ST_LLM_MODEL")
-    or "local-model"
-).strip() or "local-model"
+    or "auto"
+).strip() or "auto"
 YOUTUBE_SUMMARY_TEMPERATURE = _safe_float_env(
     "ST_YOUTUBE_SUMMARY_TEMPERATURE",
     default=0.2,

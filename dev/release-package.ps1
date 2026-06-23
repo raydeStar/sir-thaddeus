@@ -326,6 +326,14 @@ foreach ($project in $projects) {
         $publishArgs += @("-p:Version=$assemblyVersion")
     }
 
+    if ($effectiveSelfContained) {
+        $publishArgs += @(
+            "-p:PublishSingleFile=true",
+            "-p:IncludeNativeLibrariesForSelfExtract=true",
+            "-p:EnableCompressionInSingleFile=true"
+        )
+    }
+
     $nativePreference = $null
     $hasNativePreference = $false
     try {
@@ -403,7 +411,7 @@ foreach ($project in $projects) {
 }
 
 $searchStageDir = Join-Path $stageDir "search"
-$searchPayloadRequired = $Configuration -eq "Release"
+$searchPayloadRequired = $Configuration -eq "Release" -and -not $LiteBundle.IsPresent
 $searchSidecarStaged = $false
 $searchStageFailures = @()
 $rawSearxngPayloadCandidates = @(
@@ -620,6 +628,16 @@ if (-not (Test-Path $firstRunReadmeSource)) {
 }
 Copy-Item -Path $firstRunReadmeSource -Destination (Join-Path $stageDir "README_FIRST_RUN.md") -Force
 
+$launchCmdPath = Join-Path $stageDir "Launch Sir Thaddeus.cmd"
+$launchCmdContent = @'
+@echo off
+setlocal
+cd /d "%~dp0"
+start "" "%~dp0Thaddeus.Runtime.exe" %*
+'@
+$launchCmdContent | Out-File -FilePath $launchCmdPath -Encoding ASCII -Force
+Write-Host "  Staged: Launch Sir Thaddeus.cmd"
+
 $disclaimerSource = Join-Path $RepoRoot "DISCLAIMER.md"
 if (Test-Path $disclaimerSource) {
     Copy-Item -Path $disclaimerSource -Destination (Join-Path $stageDir "DISCLAIMER.md") -Force
@@ -680,6 +698,29 @@ $xmlDocFiles = @(Get-ChildItem -Path $stageDir -File -Filter "*.xml")
 if ($xmlDocFiles.Count -gt 0) {
     foreach ($xml in $xmlDocFiles) { Remove-Item -Path $xml.FullName -Force }
     Write-Host "  Removed XmlDoc files: $($xmlDocFiles.Count)"
+}
+
+$nativeImportLibFiles = @(Get-ChildItem -Path $stageDir -File -Filter "*.lib")
+if ($nativeImportLibFiles.Count -gt 0) {
+    foreach ($lib in $nativeImportLibFiles) { Remove-Item -Path $lib.FullName -Force }
+    Write-Host "  Removed native import libraries: $($nativeImportLibFiles.Count)"
+}
+
+$generatedRootNoise = @(
+    "appsettings.Development.json",
+    "*.staticwebassets.endpoints.json",
+    "web.config"
+)
+$generatedRootNoiseRemoved = 0
+foreach ($pattern in $generatedRootNoise) {
+    $files = @(Get-ChildItem -Path $stageDir -File -Filter $pattern -ErrorAction SilentlyContinue)
+    foreach ($file in $files) {
+        Remove-Item -Path $file.FullName -Force
+        $generatedRootNoiseRemoved++
+    }
+}
+if ($generatedRootNoiseRemoved -gt 0) {
+    Write-Host "  Removed generated root-only support files: $generatedRootNoiseRemoved"
 }
 
 Write-Section "Archive + Checksums"

@@ -38,15 +38,18 @@ Useful variants:
 
 # Build deterministic versioned file names (recommended for releases)
 .\dev\release-package.ps1 -Version v0.1.0
+
+# Build the smaller runtime-download profile when bundled sidecars are absent
+.\dev\release-package.ps1 -Version v0.1.0 -LiteBundle
 ```
 
 Outputs:
 
 - publish directories: `.\artifacts\publish\<project>\win-x64\`
 - staged package directory: `.\artifacts\stage\win-x64\`
-- zipped package: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0.zip`
-- zip checksum: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0.zip.sha256.txt`
-- package contents checksum manifest: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-contents.sha256.txt`
+- zipped package: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-full.zip`
+- zip checksum: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-full.zip.sha256.txt`
+- package contents checksum manifest: `.\artifacts\release\sir-thaddeus-win-x64-v0.1.0-full-contents.sha256.txt`
 
 ### Voice backend assets
 
@@ -61,6 +64,11 @@ run it manually or let the build scripts handle it:
 End users get these assets automatically during the first-run onboarding wizard.
 
 Packaging smoke validation now includes an offline dependency gate that verifies bundled `uv` + Python + wheelhouse can create a venv and install voice dependencies before release publish.
+For lite packages, run smoke validation with runtime downloads allowed:
+
+```powershell
+.\dev\smoke-test.ps1 -SkipLaunch -AllowRuntimeAssetDownload
+```
 
 ### Bundled SearXNG sidecar
 
@@ -71,14 +79,17 @@ prepare or refresh the bundled `search/` payload manually:
 .\dev\build-searxng-package.ps1
 ```
 
-Release packaging now fails if a valid bundled SearXNG payload cannot be staged.
+Full release packaging fails if a valid bundled SearXNG payload cannot be staged.
+Lite packaging omits the bundled search payload and relies on configured/live
+providers when the machine has connectivity.
 
 ### Required ZIP contents
 
+- `Launch Sir Thaddeus.cmd` (friendly Windows launcher)
 - `Thaddeus.Runtime.exe` (primary app executable)
 - `SirThaddeus.McpServer.exe` (MCP sidecar process)
 - `SirThaddeus.VoiceHost.exe` (voice sidecar process)
-- required runtime DLLs and support files from publish output
+- `wwwroot/` plus bundled support directories such as `voice/`, `search/`, and `assets/`
 - `README_FIRST_RUN.md` (first-run instructions)
 
 ### Recommended ZIP contents
@@ -132,29 +143,25 @@ git push origin v0.1.0
 
 Expected release assets:
 
-- `sir-thaddeus-win-x64-v0.1.0.zip`
-- `sir-thaddeus-win-x64-v0.1.0.zip.sha256.txt`
+- `sir-thaddeus-win-x64-v0.1.0-full.zip`
+- `sir-thaddeus-win-x64-v0.1.0-full.zip.sha256.txt`
 
-Every tagged release now builds three packages in parallel:
+Every tagged release now builds full and lite packages for each platform:
 
-- `sir-thaddeus-win-x64-<ver>.zip` — Windows (hybrid runtime, voice, MCP, SearXNG)
-- `sir-thaddeus-linux-x64-<ver>.tar.gz` — Linux (hybrid runtime, MCP, optional VoiceHost)
-- `sir-thaddeus-osx-arm64-<ver>.tar.gz` — macOS Apple Silicon (same; double-click `launch.command`)
+- `sir-thaddeus-win-x64-<ver>-full.zip` and `sir-thaddeus-win-x64-<ver>-lite.zip`
+- `sir-thaddeus-linux-x64-<ver>-full.tar.gz` and `sir-thaddeus-linux-x64-<ver>-lite.tar.gz`
+- `sir-thaddeus-osx-arm64-<ver>-full.tar.gz` and `sir-thaddeus-osx-arm64-<ver>-lite.tar.gz`
 
 Rolling releases now expose the same split by platform:
 
-- `latest-dev` tracks the newest `dev` push and includes Windows/Linux/macOS artifacts
-- `latest` tracks the newest `master` push and includes Windows/Linux/macOS artifacts
+- `latest-dev` tracks the newest `dev` push and includes full Windows/Linux/macOS packages
+- `latest` tracks the newest `master` push and includes full Windows/Linux/macOS packages
+
+Lite bundles and package contents manifests are retained as CI artifacts for diagnostics, but are not promoted to the public Releases page.
 
 GitHub also shows automatic `Source code (zip)` / `Source code (tar.gz)` snapshots for each release tag; those are repository archives, not runnable packages.
 
 Use the `skip_macos=true` promotion input for emergency hotfixes to avoid macOS CI minute cost.
-
-## Optional code signing
-
-For organizations that require Authenticode-signed binaries, follow:
-
-- `project-notes/code-signing.md`
 
 ## 5) Post-deploy checks
 

@@ -1,7 +1,11 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SirThaddeus.LlmClient;
 
@@ -10,13 +14,15 @@ namespace SirThaddeus.LlmClient;
 /// Sends chat completion requests with optional tool definitions and
 /// parses tool_calls from the response.
 /// </summary>
-public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
+public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntimeDiagnostics, ILlmWarmupClient, IDisposable
 {
     private static readonly TimeSpan ModelDiscoveryTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan ModelLoadTimeout = TimeSpan.FromSeconds(10);
+    private static readonly ConcurrentDictionary<string, LlmEndpointGate> EndpointGates = new(StringComparer.OrdinalIgnoreCase);
 
     private HttpClient _http;
     private readonly object _optionsGate = new();
+    private readonly ILogger<LmStudioClient> _logger;
     private LlmClientOptions _options;
     private readonly JsonSerializerOptions _json;
     private long _promptTokensTotal;
@@ -24,21 +30,40 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
     private long _totalTokensTotal;
     private readonly HashSet<string> _confirmedLoadedModels = new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _autoLoadEnabled;
+    private LlmEndpointGate _requestGate;
+    private volatile bool _warmupCompleted;
+    private volatile bool _lastReachable;
+    private string? _lastReportedModel;
+    private string? _lastError;
+    private long _lastRequestDurationMs;
+    private long _lastQueueWaitMs;
+    private int _lastEstimatedInputTokens;
+    private int _lastRequestedOutputTokens;
+    private string _lastTaskKind = LlmTaskKind.Chat.ToString();
+    private bool _lastRequestWasBackground;
+    private DateTimeOffset? _lastWarmupAt;
+    private DateTimeOffset? _lastRequestAt;
+    private readonly AsyncLocal<LlmTaskKind> _requestTaskKind = new();
 
-    public LmStudioClient(LlmClientOptions options, HttpClient? httpClient = null)
+    public LmStudioClient(
+        LlmClientOptions options,
+        HttpClient? httpClient = null,
+        ILogger<LmStudioClient>? logger = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _logger = logger ?? NullLogger<LmStudioClient>.Instance;
         _http = httpClient ?? new HttpClient();
         _http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/'));
 
         // ── Sir Thaddeus notes: A butler must exhibit patience! ───
         // Local GPUs require time to sweep their VRAM floors. 
         // 120 seconds is too hasty; 300 seconds ensures enterprise stability.
-        _http.Timeout = TimeSpan.FromSeconds(300);
+        _http.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.RequestTimeoutSeconds));
 
         // Only auto-load models when using the internal HttpClient.
         // External clients (e.g. test mocks) don't support /v1/models/load.
         _autoLoadEnabled = httpClient is null;
+        _requestGate = GetEndpointGate(options);
 
         _json = new JsonSerializerOptions
         {
@@ -70,8 +95,10 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
                 _http = new HttpClient
                 {
                     BaseAddress = new Uri(targetBase),
-                    Timeout = TimeSpan.FromSeconds(300)
+                    Timeout = TimeSpan.FromSeconds(Math.Max(1, options.RequestTimeoutSeconds))
                 };
+                _requestGate = GetEndpointGate(options);
+                _confirmedLoadedModels.Clear();
 
                 // Dispose the old client on a background thread to avoid
                 // blocking if a request is in flight.
@@ -123,7 +150,121 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         return await ChatCoreAsync(messages, tools, maxTokensOverride: null, forcedToolName, cancellationToken);
     }
 
+    public async Task<LlmResponse> ChatAsync(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        int maxTokensOverride,
+        string? forcedToolName,
+        CancellationToken cancellationToken = default)
+    {
+        return await ChatCoreAsync(messages, tools, maxTokensOverride, forcedToolName, cancellationToken);
+    }
+
     private async Task<LlmResponse> ChatCoreAsync(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        int? maxTokensOverride,
+        string? forcedToolName,
+        CancellationToken cancellationToken)
+    {
+        return await ChatCoreAsync(
+            messages,
+            tools,
+            maxTokensOverride,
+            forcedToolName,
+            new LlmRequestContext(),
+            cancellationToken);
+    }
+
+    public async Task<LlmResponse> ChatAsync(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        int? maxTokensOverride,
+        string? forcedToolName,
+        LlmRequestContext requestContext,
+        CancellationToken cancellationToken = default)
+    {
+        return await ChatCoreAsync(
+            messages,
+            tools,
+            maxTokensOverride,
+            forcedToolName,
+            requestContext,
+            cancellationToken);
+    }
+
+    private async Task<LlmResponse> ChatCoreAsync(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        int? maxTokensOverride,
+        string? forcedToolName,
+        LlmRequestContext requestContext,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        requestContext ??= new LlmRequestContext();
+
+        var queuedAt = Stopwatch.GetTimestamp();
+        _requestGate.IncrementQueued();
+        try
+        {
+            await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _requestGate.DecrementQueued();
+        }
+
+        var queueWaitMs = Stopwatch.GetElapsedTime(queuedAt).TotalMilliseconds;
+        _requestGate.IncrementActive();
+        var requestStarted = Stopwatch.GetTimestamp();
+        var requestStartedAt = DateTimeOffset.UtcNow;
+
+        IReadOnlyList<ChatMessage> budgetedMessages = messages;
+        try
+        {
+            budgetedMessages = ApplyPromptBudget(messages, requestContext);
+            var estimatedTokens = EstimateTokens(budgetedMessages);
+            var requestedOutputTokens = GetOptionsSnapshot().EffectiveMaxTokens(maxTokensOverride);
+            TrackRequestStart(requestContext, estimatedTokens, requestedOutputTokens, queueWaitMs, requestStartedAt);
+
+            using var requestCts = CreateRequestCancellationTokenSource(cancellationToken);
+            _requestTaskKind.Value = requestContext.TaskKind;
+            var response = await ChatCoreLegacyAsync(
+                    budgetedMessages,
+                    tools,
+                    maxTokensOverride,
+                    forcedToolName,
+                    requestCts.Token)
+                .ConfigureAwait(false);
+
+            _lastReachable = true;
+            _lastError = null;
+            return response;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _lastReachable = false;
+            _lastError = ex.Message;
+            throw;
+        }
+        finally
+        {
+            _lastRequestDurationMs = (long)Math.Round(Stopwatch.GetElapsedTime(requestStarted).TotalMilliseconds);
+            _requestGate.DecrementActive();
+            _logger.LogInformation(
+                "llm.request_completed task={TaskKind} background={Background} model={Model} estimatedInputTokens={InputTokens} requestedOutputTokens={OutputTokens} queueWaitMs={QueueWaitMs} durationMs={DurationMs}",
+                _lastTaskKind,
+                _lastRequestWasBackground,
+                GetOptionsSnapshot().Model,
+                _lastEstimatedInputTokens,
+                _lastRequestedOutputTokens,
+                _lastQueueWaitMs,
+                _lastRequestDurationMs);
+        }
+    }
+
+    private async Task<LlmResponse> ChatCoreLegacyAsync(
         IReadOnlyList<ChatMessage> messages,
         IReadOnlyList<ToolDefinition>? tools,
         int? maxTokensOverride,
@@ -139,12 +280,15 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         var requestMessages = tools is { Count: > 0 }
             ? messages
             : NormalizeMessagesForPlainChat(messages);
+        requestMessages = ApplyPromptBudget(
+            requestMessages,
+            new LlmRequestContext { TaskKind = _requestTaskKind.Value });
 
         // ── Attempt 1: full request with stop + repetition_penalty ───
         var body = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, includeExtras: true);
 
         var response = await _http.PostAsJsonAsync(
-            "/v1/chat/completions", body, _json, cancellationToken);
+            NormalizePath(GetOptionsSnapshot().ChatCompletionPath), body, _json, cancellationToken);
 
         if (response.IsSuccessStatusCode)
             return await ParseResponse(response, cancellationToken);
@@ -159,7 +303,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
             var bare = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, includeExtras: false);
 
             response = await _http.PostAsJsonAsync(
-                "/v1/chat/completions", bare, _json, cancellationToken);
+                NormalizePath(GetOptionsSnapshot().ChatCompletionPath), bare, _json, cancellationToken);
 
             if (response.IsSuccessStatusCode)
                 return await ParseResponse(response, cancellationToken);
@@ -295,9 +439,11 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         bool includeExtras)
     {
         var options = GetOptionsSnapshot();
+        var routedModel = new ConfiguredLlmModelRouter(options.Model, options.ModelRoutes)
+            .GetModelForTask(_requestTaskKind.Value);
         var body = new Dictionary<string, object>
         {
-            ["model"] = options.Model,
+            ["model"] = routedModel,
             ["messages"] = messages,
             ["max_tokens"] = options.EffectiveMaxTokens(maxTokensOverride),
             ["temperature"] = options.Temperature,
@@ -409,7 +555,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
     {
         try
         {
-            var response = await _http.GetAsync("/v1/models", cancellationToken);
+            var response = await _http.GetAsync(NormalizePath(GetOptionsSnapshot().ModelsPath), cancellationToken);
             if (!response.IsSuccessStatusCode)
                 return null;
 
@@ -421,9 +567,12 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
                 data.ValueKind == JsonValueKind.Array &&
                 data.GetArrayLength() > 0)
             {
-                return data[0].TryGetProperty("id", out var id)
+                var modelName = data[0].TryGetProperty("id", out var id)
                     ? id.GetString() ?? "unknown"
                     : "connected";
+                _lastReachable = true;
+                _lastReportedModel = modelName;
+                return modelName;
             }
 
             return "connected";
@@ -473,7 +622,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
             // Check what's currently loaded.
             using var discoverCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             discoverCts.CancelAfter(ModelDiscoveryTimeout);
-            var modelsResponse = await _http.GetAsync("/v1/models", discoverCts.Token);
+            var modelsResponse = await _http.GetAsync(NormalizePath(options.ModelsPath), discoverCts.Token);
             if (!modelsResponse.IsSuccessStatusCode)
             {
                 _confirmedLoadedModels.Add(modelId);
@@ -524,14 +673,17 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
             }
 
             // No models loaded at all — safe to load ours.
+            var modelKey = string.IsNullOrWhiteSpace(options.PreloadModelKey)
+                ? modelId
+                : options.PreloadModelKey.Trim();
             var loadPayload = new StringContent(
-                JsonSerializer.Serialize(new { model = modelId }),
+                JsonSerializer.Serialize(new { model = modelKey, identifier = modelId, context_length = options.ContextLength }),
                 Encoding.UTF8,
                 "application/json");
 
             using var loadCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             loadCts.CancelAfter(ModelLoadTimeout);
-            await _http.PostAsync("/v1/models/load", loadPayload, loadCts.Token);
+            await _http.PostAsync(NormalizePath(options.ModelLoadPath), loadPayload, loadCts.Token);
             _confirmedLoadedModels.Add(modelId);
         }
         catch
@@ -581,6 +733,238 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, IDisposable
         }
 
         return cleaned.Length == 0 ? null : cleaned;
+    }
+
+    public async Task<LlmWarmupResult> WarmupAsync(CancellationToken cancellationToken = default)
+    {
+        var options = GetOptionsSnapshot();
+        if (!options.EnableStartupWarmup)
+        {
+            return new LlmWarmupResult
+            {
+                Reachable = _lastReachable,
+                Completed = _warmupCompleted,
+                Model = options.Model,
+                Snapshot = GetRuntimeHealthSnapshot()
+            };
+        }
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, options.WarmupTimeoutSeconds)));
+
+            var model = await GetModelNameAsync(cts.Token).ConfigureAwait(false);
+            if (model is null)
+            {
+                _warmupCompleted = false;
+                _logger.LogWarning("llm.warmup_unreachable baseUrl={BaseUrl}", options.BaseUrl);
+                return new LlmWarmupResult
+                {
+                    Reachable = false,
+                    Completed = false,
+                    Model = options.Model,
+                    Error = _lastError,
+                    Snapshot = GetRuntimeHealthSnapshot()
+                };
+            }
+
+            await ChatCoreAsync(
+                    [ChatMessage.User("Respond with exactly: ready")],
+                    tools: null,
+                    maxTokensOverride: 8,
+                    forcedToolName: null,
+                    new LlmRequestContext
+                    {
+                        TaskKind = LlmTaskKind.Chat,
+                        Priority = LlmRequestPriority.Background,
+                        OperationName = "startup-warmup"
+                    },
+                    cts.Token)
+                .ConfigureAwait(false);
+
+            _warmupCompleted = true;
+            _lastWarmupAt = DateTimeOffset.UtcNow;
+            _logger.LogInformation("llm.warmup_completed model={Model}", options.Model);
+            return new LlmWarmupResult
+            {
+                Reachable = true,
+                Completed = true,
+                Model = model,
+                Snapshot = GetRuntimeHealthSnapshot()
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _warmupCompleted = false;
+            _lastReachable = false;
+            _lastError = ex.Message;
+            _logger.LogWarning(ex, "llm.warmup_failed model={Model}", options.Model);
+            return new LlmWarmupResult
+            {
+                Reachable = false,
+                Completed = false,
+                Model = options.Model,
+                Error = ex.Message,
+                Snapshot = GetRuntimeHealthSnapshot()
+            };
+        }
+    }
+
+    public LlmRuntimeHealthSnapshot GetRuntimeHealthSnapshot()
+    {
+        var options = GetOptionsSnapshot();
+        return new LlmRuntimeHealthSnapshot
+        {
+            LmStudioReachable = _lastReachable,
+            ModelConfigured = options.Model,
+            ModelLoadedOrReported = _lastReportedModel,
+            WarmupCompleted = _warmupCompleted,
+            ActiveRequests = _requestGate.ActiveRequests,
+            QueuedRequests = _requestGate.QueuedRequests,
+            LastRequestDurationMs = _lastRequestDurationMs,
+            LastQueueWaitMs = _lastQueueWaitMs,
+            LastEstimatedInputTokens = _lastEstimatedInputTokens,
+            LastRequestedOutputTokens = _lastRequestedOutputTokens,
+            LastTaskKind = _lastTaskKind,
+            LastRequestWasBackground = _lastRequestWasBackground,
+            LastError = _lastError,
+            LastWarmupAt = _lastWarmupAt,
+            LastRequestAt = _lastRequestAt
+        };
+    }
+
+    private IReadOnlyList<ChatMessage> ApplyPromptBudget(
+        IReadOnlyList<ChatMessage> messages,
+        LlmRequestContext requestContext)
+    {
+        var options = GetOptionsSnapshot();
+        var softCap = Math.Max(256, options.MaxInputTokensSoftCap);
+        var estimated = EstimateTokens(messages);
+        if (estimated <= softCap)
+            return messages;
+
+        var maxChars = softCap * 4;
+        var systemMessages = messages
+            .Where(m => string.Equals(m.Role, "system", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var nonSystem = messages
+            .Where(m => !string.Equals(m.Role, "system", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        var kept = new List<ChatMessage>();
+        var usedChars = systemMessages.Sum(EstimateMessageChars);
+        for (var i = nonSystem.Length - 1; i >= 0; i--)
+        {
+            var candidate = nonSystem[i];
+            var chars = EstimateMessageChars(candidate);
+            if (usedChars + chars <= maxChars || kept.Count == 0)
+            {
+                kept.Add(candidate);
+                usedChars += chars;
+                continue;
+            }
+
+            break;
+        }
+
+        kept.Reverse();
+        var result = new List<ChatMessage>(systemMessages.Length + kept.Count);
+        result.AddRange(systemMessages);
+        result.AddRange(kept);
+
+        var reduced = EstimateTokens(result);
+        _logger.LogInformation(
+            "llm.prompt_reduced task={TaskKind} originalEstimatedTokens={OriginalTokens} reducedEstimatedTokens={ReducedTokens}",
+            requestContext.TaskKind,
+            estimated,
+            reduced);
+        return result.Count == 0 ? messages : result;
+    }
+
+    private void TrackRequestStart(
+        LlmRequestContext requestContext,
+        int estimatedTokens,
+        int requestedOutputTokens,
+        double queueWaitMs,
+        DateTimeOffset startedAt)
+    {
+        _lastTaskKind = requestContext.TaskKind.ToString();
+        _lastRequestWasBackground = requestContext.Priority == LlmRequestPriority.Background;
+        _lastEstimatedInputTokens = estimatedTokens;
+        _lastRequestedOutputTokens = requestedOutputTokens;
+        _lastQueueWaitMs = (long)Math.Round(queueWaitMs);
+        _lastRequestAt = startedAt;
+    }
+
+    private CancellationTokenSource CreateRequestCancellationTokenSource(CancellationToken cancellationToken)
+    {
+        var options = GetOptionsSnapshot();
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, options.RequestTimeoutSeconds)));
+        return cts;
+    }
+
+    private static int EstimateTokens(IReadOnlyList<ChatMessage> messages)
+        => Math.Max(1, messages.Sum(EstimateMessageChars) / 4);
+
+    private static int EstimateMessageChars(ChatMessage message)
+    {
+        var chars = (message.Role?.Length ?? 0) + (message.Content?.Length ?? 0);
+        if (message.ToolCalls is { Count: > 0 })
+        {
+            foreach (var call in message.ToolCalls)
+                chars += call.Function.Name.Length + call.Function.Arguments.Length;
+        }
+
+        return chars;
+    }
+
+    private static string NormalizePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return "/";
+        var trimmed = path.Trim();
+        return trimmed.StartsWith('/') ? trimmed : "/" + trimmed;
+    }
+
+    private static LlmEndpointGate GetEndpointGate(LlmClientOptions options)
+    {
+        var key = string.IsNullOrWhiteSpace(options.BaseUrl)
+            ? "default"
+            : options.BaseUrl.Trim().TrimEnd('/');
+        return EndpointGates.GetOrAdd(key, _ => new LlmEndpointGate(Math.Max(1, options.MaxConcurrentLlmRequests)));
+    }
+
+    private sealed class LlmEndpointGate
+    {
+        private readonly SemaphoreSlim _semaphore;
+        private int _activeRequests;
+        private int _queuedRequests;
+
+        public LlmEndpointGate(int maxConcurrency)
+        {
+            _semaphore = new SemaphoreSlim(Math.Max(1, maxConcurrency), Math.Max(1, maxConcurrency));
+        }
+
+        public int ActiveRequests => Volatile.Read(ref _activeRequests);
+        public int QueuedRequests => Volatile.Read(ref _queuedRequests);
+
+        public Task WaitAsync(CancellationToken cancellationToken) => _semaphore.WaitAsync(cancellationToken);
+        public void IncrementActive() => Interlocked.Increment(ref _activeRequests);
+        public void DecrementActive()
+        {
+            var remaining = Interlocked.Decrement(ref _activeRequests);
+            if (remaining < 0)
+            {
+                Interlocked.Increment(ref _activeRequests);
+                return;
+            }
+
+            _semaphore.Release();
+        }
+        public void IncrementQueued() => Interlocked.Increment(ref _queuedRequests);
+        public void DecrementQueued() => Interlocked.Decrement(ref _queuedRequests);
     }
 
     private LlmClientOptions GetOptionsSnapshot()

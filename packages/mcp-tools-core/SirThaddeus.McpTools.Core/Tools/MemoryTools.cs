@@ -563,10 +563,8 @@ public static class MemoryTools
             if (!string.IsNullOrEmpty(baseUrl))
             {
                 var model = Environment.GetEnvironmentVariable("ST_LLM_EMBEDDINGS_MODEL");
-                if (string.IsNullOrEmpty(model))
-                    model = "local-model";
-
-                embeddings = new OpenAiEmbeddingClient(baseUrl, model);
+                if (!string.IsNullOrWhiteSpace(model))
+                    embeddings = new OpenAiEmbeddingClient(baseUrl, model);
             }
 
             return (store, new MemoryRetriever(store, embeddings));

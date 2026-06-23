@@ -13,6 +13,17 @@ test('user can complete the onboarding wizard', async ({ page, context }) => {
   await expect(page.getByTestId('onboarding-step-privacy')).toBeVisible();
 
   await page.getByTestId('onboarding-next').click();
+  await expect(page.getByTestId('onboarding-step-folders')).toBeVisible();
+  // The folder step shows an explicit, read-only-only notice so users
+  // don't conflate "the assistant can see this folder" with "the
+  // assistant can modify files here". Asserting the copy here keeps the
+  // contract honest if anyone later tries to soften it.
+  await expect(page.getByTestId('onboarding-folders-write-notice')).toContainText(
+    /still in development/i,
+  );
+  await expect(page.getByTestId('onboarding-folders-suggestions')).toBeVisible();
+
+  await page.getByTestId('onboarding-next').click();
   await expect(page.getByTestId('onboarding-step-voice')).toBeVisible();
 
   await page.getByTestId('onboarding-next').click();

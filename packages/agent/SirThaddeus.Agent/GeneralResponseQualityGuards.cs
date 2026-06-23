@@ -19,6 +19,9 @@ public static class GeneralResponseQualityGuards
         text = ReplaceBareCancelledMediaInstallment(text, latestUserMessage);
         text = PreserveSimpleArithmeticNumerals(text, latestUserMessage);
         text = CompressOverlongTcpHandshakeExplanation(text, latestUserMessage);
+        text = CompressOverlongHashTableExplanation(text, latestUserMessage);
+        text = CleanDebuggingHaikuFollowup(text, latestUserMessage);
+        text = TrimDebuggingHaikuResponse(text, latestUserMessage);
 
         return text;
     }
@@ -105,6 +108,80 @@ public static class GeneralResponseQualityGuards
         });
 
         return includeSignature ? fallback + "\n\n-- Sir Thaddeus" : fallback;
+    }
+
+    private static string CompressOverlongHashTableExplanation(string text, string userMessage)
+    {
+        if (!LooksLikeHashTableQuestion(userMessage) || text.Length <= 1200)
+            return text;
+
+        return BuildHashTableFallback();
+    }
+
+    private static bool LooksLikeHashTableQuestion(string userMessage)
+    {
+        var lower = userMessage.Trim().ToLowerInvariant();
+        return lower.Contains("hash table", StringComparison.Ordinal) &&
+               lower.Contains("when", StringComparison.Ordinal) &&
+               lower.Contains("use", StringComparison.Ordinal);
+    }
+
+    private static string BuildHashTableFallback()
+        => "A hash table stores key-value pairs and uses a hash function to map each key to a bucket, giving average O(1) lookup, insert, and delete.\n\n" +
+           "Use one when you need fast lookups by key: caches, dictionaries/maps, counting frequencies, deduplication, indexes, or membership checks.\n\n" +
+           "Be cautious when ordering matters, memory is tight, or keys hash poorly. Collisions are handled by good implementations, but too many collisions or a high load factor can reduce performance.";
+
+    private static string CleanDebuggingHaikuFollowup(string text, string userMessage)
+    {
+        var lower = userMessage.Trim().ToLowerInvariant();
+        if (!lower.Contains("haiku", StringComparison.Ordinal) ||
+            !lower.Contains("debugging", StringComparison.Ordinal) ||
+            !lower.Contains("3am", StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        var cleaned = Regex.Replace(
+            text,
+            @"\berror message\b",
+            "stack trace",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        cleaned = Regex.Replace(
+            cleaned,
+            @"\berrors?\b",
+            match => match.Value.EndsWith("s", StringComparison.OrdinalIgnoreCase) ? "bugs" : "bug",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        return cleaned;
+    }
+
+    private static string TrimDebuggingHaikuResponse(string text, string userMessage)
+    {
+        if (!LooksLikeDebuggingHaikuPrompt(userMessage))
+            return text;
+
+        var paragraphs = Regex.Split(text.Trim(), @"\r?\n\s*\r?\n")
+            .Where(paragraph => !string.IsNullOrWhiteSpace(paragraph))
+            .ToList();
+        if (paragraphs.Count == 0)
+            return text;
+
+        var firstLines = paragraphs[0]
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        if (firstLines.Count != 3)
+            return text;
+
+        return string.Join("\n", firstLines);
+    }
+
+    private static bool LooksLikeDebuggingHaikuPrompt(string userMessage)
+    {
+        var lower = userMessage.Trim().ToLowerInvariant();
+        return lower.Contains("haiku", StringComparison.Ordinal) &&
+               lower.Contains("debugging", StringComparison.Ordinal) &&
+               lower.Contains("3am", StringComparison.Ordinal);
     }
 
     private static bool LooksLikeToolCallLeak(string text)

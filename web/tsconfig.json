@@ -15,6 +15,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
+      "@tanstack/react-router": ["./src/lib/routerShim.tsx"],
       "@thaddeus/shared-types": ["../packages/shared-types/ts/src/index.ts"]
     }
   },

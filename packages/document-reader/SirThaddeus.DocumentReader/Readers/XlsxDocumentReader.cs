@@ -22,13 +22,13 @@ public sealed class XlsxDocumentReader : IDocumentReader
         }
 
         var sb = new StringBuilder();
-        var sheets = workbookPart.Workbook.Sheets?.Elements<Sheet>() ?? Enumerable.Empty<Sheet>();
+        var sheets = workbookPart.Workbook?.Sheets?.Elements<Sheet>() ?? Enumerable.Empty<Sheet>();
 
         foreach (var sheet in sheets)
         {
             sb.AppendLine($"# Sheet: {sheet.Name}");
             var worksheetPart = workbookPart.GetPartById(sheet.Id!) as WorksheetPart;
-            var rows = worksheetPart?.Worksheet.Descendants<Row>() ?? Enumerable.Empty<Row>();
+            var rows = worksheetPart?.Worksheet?.Descendants<Row>() ?? Enumerable.Empty<Row>();
 
             foreach (var row in rows)
             {

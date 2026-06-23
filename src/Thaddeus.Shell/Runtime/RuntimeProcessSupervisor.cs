@@ -15,6 +15,7 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
 {
     private readonly ILogger<RuntimeProcessSupervisor> _logger;
     private readonly string _lockFilePath;
+    private readonly bool _testMode;
     private Process? _process;
 
     /// <summary>
@@ -26,10 +27,14 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
     public event EventHandler? RuntimeExited;
 
     /// <summary>Wires the supervisor.</summary>
-    public RuntimeProcessSupervisor(ILogger<RuntimeProcessSupervisor> logger)
+    public RuntimeProcessSupervisor(
+        ILogger<RuntimeProcessSupervisor> logger,
+        string? lockFilePath = null,
+        bool testMode = false)
     {
         _logger = logger;
-        _lockFilePath = RuntimeLockFileReader.GetDefaultPath();
+        _lockFilePath = lockFilePath ?? RuntimeLockFileReader.GetDefaultPath();
+        _testMode = testMode;
     }
 
     /// <summary>Spawns or attaches and returns the resolved lock-file contents.</summary>
@@ -61,6 +66,11 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
         };
         foreach (var arg in runtimePath.args) psi.ArgumentList.Add(arg);
         psi.ArgumentList.Add($"--parent-pid={Environment.ProcessId}");
+        psi.ArgumentList.Add($"--lock-file={_lockFilePath}");
+        if (_testMode)
+        {
+            psi.ArgumentList.Add("--test-mode");
+        }
 
         _logger.LogInformation(
             "runtime.spawning command={Cmd} workingDir={WorkingDirectory} args={Args}",

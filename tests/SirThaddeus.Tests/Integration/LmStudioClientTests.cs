@@ -323,6 +323,88 @@ public class LmStudioClientSelfHealingTests : IDisposable
 
     // ── Response Builders ──────────────────────────────────────────────
 
+    [Fact]
+    public async Task PromptBudget_TrimsOldestConversationMessages()
+    {
+        string? capturedBody = null;
+        var handler = new SequenceHttpHandler([
+            MakeSuccessResponse("Budgeted")
+        ], onRequest: body => capturedBody = body);
+
+        var opts = DefaultOptions with
+        {
+            MaxInputTokensSoftCap = 40
+        };
+
+        using var client = new LmStudioClient(opts, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(opts.BaseUrl)
+        });
+
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.System("You are concise."),
+            ChatMessage.User(new string('a', 2_000)),
+            ChatMessage.Assistant("old answer"),
+            ChatMessage.User("latest question")
+        };
+
+        await client.ChatAsync(messages);
+
+        Assert.NotNull(capturedBody);
+        using var doc = JsonDocument.Parse(capturedBody);
+        var sentMessages = doc.RootElement.GetProperty("messages").EnumerateArray().ToList();
+        Assert.Contains(sentMessages, m => m.GetProperty("content").GetString() == "You are concise.");
+        Assert.Contains(sentMessages, m => m.GetProperty("content").GetString() == "latest question");
+        Assert.DoesNotContain(sentMessages, m => (m.GetProperty("content").GetString() ?? "").Contains(new string('a', 80)));
+    }
+
+    [Fact]
+    public async Task WarmupAsync_ReturnsDegraded_WhenEndpointUnavailable()
+    {
+        var handler = new SequenceHttpHandler([
+            MakeErrorResponse(HttpStatusCode.ServiceUnavailable, "offline")
+        ]);
+
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        var result = await client.WarmupAsync();
+
+        Assert.False(result.Completed);
+        Assert.False(result.Reachable);
+        Assert.Equal(1, handler.CallCount);
+        Assert.False(client.GetRuntimeHealthSnapshot().WarmupCompleted);
+    }
+
+    [Fact]
+    public async Task SequentialRequests_ReleaseEndpointGate()
+    {
+        var handler = new SequenceHttpHandler([
+            MakeSuccessResponse("first"),
+            MakeSuccessResponse("second")
+        ]);
+
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        var first = await client.ChatAsync(SimpleMessages);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var second = await client.ChatAsync(SimpleMessages, cancellationToken: cts.Token);
+
+        var health = client.GetRuntimeHealthSnapshot();
+        Assert.Equal("first", first.Content);
+        Assert.Equal("second", second.Content);
+        Assert.Equal(2, handler.CallCount);
+        Assert.Equal(0, health.ActiveRequests);
+        Assert.Equal(0, health.QueuedRequests);
+    }
+
     private static (HttpStatusCode, string) MakeSuccessResponse(string content) =>
         (HttpStatusCode.OK, JsonSerializer.Serialize(new
         {

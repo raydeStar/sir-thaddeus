@@ -97,7 +97,7 @@ in parentheses.
 
 - `dotnet build SirThaddeus.sln` (Release): 0 errors, 0 warnings.
 - `dev/test.ps1 -Configuration Release -SkipScreenObserveHarness`:
-  **2,457 / 2,457 unit tests passing**.
+  passing with 0 failures; the exact test count changes as the suite evolves.
 - `cd web && npm run lint`: 0 errors, 0 warnings.
 - `cd web && npm run typecheck`: clean.
 - `cd web && npm run build`: clean (one chunk-size warning on the main

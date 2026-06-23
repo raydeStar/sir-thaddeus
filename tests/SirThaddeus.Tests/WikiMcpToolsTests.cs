@@ -4,7 +4,9 @@ using SirThaddeus.McpServer.Tools;
 
 namespace SirThaddeus.Tests;
 
-[Collection(KnowledgeStoreMcpEnvironmentCollection.Name)]
+// Previously joined a serialised collection with the retired parallel
+// knowledge tests because both mutated the same env vars (ST_SETTINGS_PATH /
+// ST_AUDIT_PATH). The wiki MCP tests now stand alone.
 public sealed class WikiMcpToolsTests : IDisposable
 {
     private readonly string _tempDir;

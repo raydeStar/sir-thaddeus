@@ -51,10 +51,10 @@ auto-update channel).
 
 - `src/Thaddeus.Runtime/` — ASP.NET Core minimal-API host.
 - `src/Thaddeus.Runtime/wwwroot/` — built React bundle (synced from `web/dist/`).
-- `web/` — React + TanStack Router source. `npm run build` then sync.
+- `web/` — React source with the local router compatibility shim. `npm run build` then sync.
 - `packages/shared-types/` — cs+ts shared DTOs (Settings, Memo, Routine, Activity, Voice, Wiki).
-- `tests/runtime/` — runtime xUnit tests (84/84 green at Phase 8.1).
-- `web/tests/e2e/` — Playwright smoke tests (9/9 green at Phase 8.1).
+- `tests/runtime/` — runtime xUnit tests.
+- `web/tests/e2e/` — Playwright smoke tests.
 
 ## Security notes
 

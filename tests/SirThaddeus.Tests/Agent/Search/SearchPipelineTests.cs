@@ -320,6 +320,51 @@ public class UtilityRouterTests
     }
 
     [Fact]
+    public void EnumerableSetCount_ReturnsProgrammaticWeekdayAnswer()
+    {
+        var result = UtilityRouter.TryHandle("how many days of the week have the letter D in them?");
+
+        Assert.NotNull(result);
+        Assert.Equal("enumeration_count", result!.Category);
+        Assert.Contains("**7**", result.Answer, StringComparison.Ordinal);
+        Assert.Contains("Monday", result.Answer, StringComparison.Ordinal);
+        Assert.Contains("Tuesday", result.Answer, StringComparison.Ordinal);
+        Assert.Contains("Wednesday", result.Answer, StringComparison.Ordinal);
+        Assert.Contains("Friday", result.Answer, StringComparison.Ordinal);
+        Assert.Contains("Sunday", result.Answer, StringComparison.Ordinal);
+        Assert.Null(result.McpToolName);
+    }
+
+    [Fact]
+    public void EnumerableSetExpansion_ReturnsCanonicalClosedSet()
+    {
+        var result = UtilityRouter.TryHandle("Extrapolate the data 'days in the week'");
+
+        Assert.NotNull(result);
+        Assert.Equal("enumeration", result!.Category);
+        Assert.Contains("canonical", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("**7**", result.Answer, StringComparison.Ordinal);
+        Assert.Contains("Monday", result.Answer, StringComparison.Ordinal);
+        Assert.Contains("Sunday", result.Answer, StringComparison.Ordinal);
+        Assert.Null(result.McpToolName);
+    }
+
+    [Fact]
+    public void EnumerableSetExpansion_ReturnsRepresentativeOpenSet()
+    {
+        var result = UtilityRouter.TryHandle("extrapolate kitchenware");
+
+        Assert.NotNull(result);
+        Assert.Equal("enumeration", result!.Category);
+        Assert.Contains("representative common set", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not exhaustive", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("**30**", result.Answer, StringComparison.Ordinal);
+        Assert.Contains("fork", result.Answer, StringComparison.Ordinal);
+        Assert.Contains("blender", result.Answer, StringComparison.Ordinal);
+        Assert.Null(result.McpToolName);
+    }
+
+    [Fact]
     public void MoonDistance_ReturnsDeterministicFactAnswer()
     {
         var result = UtilityRouter.TryHandle("how many meters is it to the moon?");
@@ -507,6 +552,41 @@ public class DeterministicUtilityEngineTests
         {
             Assert.NotEqual("calculator", result.Result.Category);
         }
+    }
+
+    [Theory]
+    [InlineData("how many days of the week have the letter D in them?", "**7**", "Monday", "Sunday")]
+    [InlineData("Which months of the year contain the letter r?", "**8**", "January", "December")]
+    [InlineData("count months of the year that start with J", "**3**", "January", "July")]
+    [InlineData("Which common kitchenware items contain the letter k?", "**6**", "fork", "kettle")]
+    [InlineData("which car parts start with b", "**5**", "battery", "belt")]
+    public void EnumerableSetQuestions_RouteDeterministically(
+        string input,
+        string expectedCount,
+        string expectedFirstItem,
+        string expectedLastItem)
+    {
+        var result = DeterministicPreRouter.TryRoute(input);
+
+        Assert.NotNull(result);
+        Assert.Equal(DeterministicMatchConfidence.High, result!.Confidence);
+        Assert.Equal("enumeration_count", result.Result.Category);
+        Assert.Contains(expectedCount, result.Result.Answer, StringComparison.Ordinal);
+        Assert.Contains(expectedFirstItem, result.Result.Answer, StringComparison.Ordinal);
+        Assert.Contains(expectedLastItem, result.Result.Answer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnumerableSetExpansion_RoutesDeterministically()
+    {
+        var result = DeterministicPreRouter.TryRoute("Extrapolate the data 'computer parts'");
+
+        Assert.NotNull(result);
+        Assert.Equal(DeterministicMatchConfidence.High, result!.Confidence);
+        Assert.Equal("enumeration", result.Result.Category);
+        Assert.Contains("representative common set", result.Result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("processor", result.Result.Answer, StringComparison.Ordinal);
+        Assert.Contains("screen", result.Result.Answer, StringComparison.Ordinal);
     }
 }
 
@@ -879,6 +959,30 @@ public class QueryBuilderFallbackTests
     }
 
     [Fact]
+    public async Task FactFind_DirectQuery_BroadensLatestStableVersionPrompt()
+    {
+        var builder = new QueryBuilder(
+            new FakeLlmClient((_, _) => new LlmResponse
+            {
+                IsComplete = true,
+                Content = "unused",
+                FinishReason = "stop"
+            }),
+            new TestAuditLogger());
+
+        var result = await builder.BuildAsync(
+            SearchMode.WebFactFind,
+            "What is the latest stable version of QuantaScript as of 2025?",
+            entity: null,
+            new SearchSession(),
+            recentHistory: [],
+            ct: CancellationToken.None);
+
+        Assert.Equal("latest stable version of QuantaScript official documentation release notes", result.Query);
+        Assert.False(result.UsedFallback);
+    }
+
+    [Fact]
     public async Task FactFind_DirectQuery_DoesNotRewriteNonMediaStructuredComparisonPrompt()
     {
         var builder = new QueryBuilder(
@@ -892,13 +996,13 @@ public class QueryBuilderFallbackTests
 
         var entity = new EntityResolver.ResolvedEntity
         {
-            CanonicalName = ".NET Aspire",
+            CanonicalName = "Orion Mesh",
             Type = "Technology"
         };
 
         var result = await builder.BuildAsync(
             SearchMode.WebFactFind,
-            "Search for recent updates and developments in .NET Aspire from the last year. " +
+            "Search for recent updates and developments in Orion Mesh from the last year. " +
             "Synthesize information from multiple sources, compare what overlaps and what differs. " +
             "Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
             entity,
@@ -906,7 +1010,7 @@ public class QueryBuilderFallbackTests
             recentHistory: [],
             ct: CancellationToken.None);
 
-        Assert.Contains(".NET Aspire", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Orion Mesh", result.Query, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("update", result.Query, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("original adaptation", result.Query, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("live action", result.Query, StringComparison.OrdinalIgnoreCase);
@@ -4562,6 +4666,42 @@ public class AuditedMcpToolClientBudgetTests
         // Now web call should succeed again
         var r3 = await client.CallToolAsync("web_search", "{}", default);
         Assert.Equal("ok", r3);
+    }
+
+    [Fact]
+    public async Task ResetBudgets_ClearsSessionBudget()
+    {
+        var callCount = 0;
+        var inner = new FakeMcpClient((_, _) => { callCount++; return "ok"; });
+        var audit = new TestAuditLogger();
+        var gate = new AllowAllGate();
+
+        var settings = new SirThaddeus.Config.ToolBudgetSettings
+        {
+            Enabled = true,
+            MaxToolCallsPerTurn = 10,
+            MaxToolCallsPerSession = 1,
+            MaxWebPullsPerTurn = 10,
+            MaxFileOpsPerMinute = 30
+        };
+        var controls = new RuntimeControlState
+        {
+            ToolBudgets = settings
+        };
+
+        var client = new AuditedMcpToolClient(
+            inner, audit, gate, "test-session",
+            () => controls);
+
+        Assert.Equal("ok", await client.CallToolAsync("tool_ping", "{}", default));
+
+        var blocked = await client.CallToolAsync("tool_ping", "{}", default);
+        Assert.Contains("max_tool_calls_per_session", blocked, StringComparison.OrdinalIgnoreCase);
+
+        client.ResetBudgets();
+
+        Assert.Equal("ok", await client.CallToolAsync("tool_ping", "{}", default));
+        Assert.Equal(2, callCount);
     }
 
     private sealed class AllowAllGate : IToolPermissionGate

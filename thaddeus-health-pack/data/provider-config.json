@@ -1,0 +1,23 @@
+{
+  "selectedProvider": "mock",
+  "googleHealth": {
+    "scopes": [
+      "sleep.read",
+      "heart_rate.read",
+      "hrv.read",
+      "activity.read"
+    ]
+  },
+  "sync": {
+    "lastSyncAt": "2026-06-03T23:13:08.024Z",
+    "lastSyncRange": {
+      "startDate": "2026-06-01",
+      "endDate": "2026-06-03"
+    },
+    "snapshotCount": 31,
+    "warnings": [
+      "Mock data for local development and tests."
+    ]
+  },
+  "updatedAt": "2026-06-03T23:13:08.024Z"
+}

@@ -469,6 +469,35 @@ public sealed partial class SearchOrchestrator
                 Result = ex.Message
             });
 
+            if (toolCallsMade.Count > 0)
+            {
+                var fallbackText =
+                    ToolBackedResponseQualityGuards.TryBuildToolEvidenceFallback(userMessage, toolCallsMade) ??
+                    BuildCapabilityClaimFallback(
+                        "",
+                        SummaryFallbackKind.FactFind,
+                        MergeSourcesFromToolResults(toolCallsMade
+                            .Where(call => call.Success && !string.IsNullOrWhiteSpace(call.Result))
+                            .Select(call => call.Result!)
+                            .ToList()),
+                        userMessage);
+                var fallbackSources = MergeSourcesFromToolResults(toolCallsMade
+                    .Where(call => call.Success && !string.IsNullOrWhiteSpace(call.Result))
+                    .Select(call => call.Result!)
+                    .ToList());
+
+                if (!string.IsNullOrWhiteSpace(fallbackText))
+                {
+                    return new AgentResponse
+                    {
+                        Text = fallbackText,
+                        Success = true,
+                        ToolCallsMade = toolCallsMade.ToList(),
+                        Sources = ToAgentSources(fallbackSources)
+                    };
+                }
+            }
+
             return AgentResponse.FromError(
                 "Something went sideways with the search pipeline — " +
                 $"try rephrasing? ({ex.GetType().Name})");
@@ -1525,8 +1554,8 @@ public sealed partial class SearchOrchestrator
                 url = s.Url,
                 domain = s.Domain,
                 excerpt = s.Snippet,
-                favicon = "",
-                thumbnail = "",
+                favicon = s.Favicon,
+                thumbnail = s.Thumbnail,
                 publishedAt = s.PublishedAt?.ToString("o")
             }),
             new JsonSerializerOptions { WriteIndented = false });
@@ -2581,10 +2610,13 @@ public sealed partial class SearchOrchestrator
             {
                 return new AgentResponse
                 {
-                    Text = BuildExtractiveFallback(summaryInput, originalRequest),
+                    Text = sources is { Count: > 0 }
+                        ? BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources, originalRequest)
+                        : BuildExtractiveFallback(summaryInput, originalRequest),
                     Success       = true,
                     ToolCallsMade = toolCallsMade,
-                    LlmRoundTrips = Math.Max(1, llmRoundTrips)
+                    LlmRoundTrips = Math.Max(1, llmRoundTrips),
+                    Sources = ToAgentSources(sources)
                 };
             }
         }
@@ -2687,8 +2719,8 @@ public sealed partial class SearchOrchestrator
         }
 
         // ── Irrelevant results recovery ──────────────────────────────
-        // When search results are off-topic (e.g. "Aspire Fiber" telecom
-        // instead of ".NET Aspire" framework), the LLM may honestly admit
+        // When search results are off-topic (for example, a similarly named
+        // company instead of the requested framework), the LLM may honestly admit
         // the sources are irrelevant.  Detect this and retry with an
         // instruction to use general training knowledge instead of the
         // poor search results.
@@ -2830,7 +2862,8 @@ public sealed partial class SearchOrchestrator
             Text          = text,
             Success       = true,
             ToolCallsMade = toolCallsMade,
-            LlmRoundTrips = Math.Max(1, llmRoundTrips)
+            LlmRoundTrips = Math.Max(1, llmRoundTrips),
+            Sources = ToAgentSources(sources)
         };
     }
 
@@ -3007,6 +3040,8 @@ public sealed partial class SearchOrchestrator
                     : item.TryGetProperty("snippet", out var sn)
                         ? sn.GetString()
                         : "";
+                var favicon = item.TryGetProperty("favicon", out var fav) ? fav.GetString() : "";
+                var thumbnail = item.TryGetProperty("thumbnail", out var thumb) ? thumb.GetString() : "";
                 DateTimeOffset? publishedAt = null;
                 if (item.TryGetProperty("publishedAt", out var p) &&
                     p.ValueKind == JsonValueKind.String &&
@@ -3025,6 +3060,8 @@ public sealed partial class SearchOrchestrator
                     Title    = title ?? "",
                     Domain   = domain ?? "",
                     Snippet  = snippet ?? "",
+                    Favicon  = favicon ?? "",
+                    Thumbnail = thumbnail ?? "",
                     PublishedAt = publishedAt
                 });
             }
@@ -3496,16 +3533,10 @@ public sealed partial class SearchOrchestrator
 
         if (!string.IsNullOrWhiteSpace(seriesTitle))
         {
-            if (seriesTitle.Equals("Stargate Universe", StringComparison.OrdinalIgnoreCase) &&
-                parsed is { Season: 3 })
-            {
-                return $"Stargate Universe was cancelled after Season 2 and does not have an official {installmentLabel} to summarize, so there is no real episode plot to give.";
-            }
-
-            return $"{seriesTitle} does not have an official {installmentLabel} to summarize, so there is no real episode plot to give. If you want, I can summarize the ending or cancellation status instead.";
+            return $"I could not verify an official {installmentLabel} for {seriesTitle} from the available evidence, so I should not invent a plot. If you want, I can summarize the actual ending or cancellation status instead.";
         }
 
-        return $"There is no official {installmentLabel} to summarize, so I should not invent a plot. If you want, I can summarize the ending or cancellation status instead.";
+        return $"I could not verify an official {installmentLabel} from the available evidence, so I should not invent a plot. If you want, I can summarize the actual ending or cancellation status instead.";
     }
 
     private static bool LooksLikeBareCancelledResponse(string? text)
@@ -4030,7 +4061,7 @@ public sealed partial class SearchOrchestrator
     /// Detects when the LLM's summary response admits the search results
     /// are irrelevant or unrelated to the user's actual query.
     /// This happens when the search engine returns results for a different
-    /// topic (e.g. "Aspire Fiber" telecom instead of ".NET Aspire" framework).
+    /// topic (for example, a similarly named company instead of the requested framework).
     /// </summary>
     private static bool LooksLikeIrrelevantResultsAdmission(string text)
     {
@@ -4197,11 +4228,10 @@ public sealed partial class SearchOrchestrator
         if (evidence.Count == 0)
             return null;
 
-        var subject = lowerUserMessage.Contains(".net aspire", StringComparison.Ordinal)
-            ? ".NET Aspire"
-            : !string.IsNullOrWhiteSpace(evidence[0].Title)
+        var subject = TryInferStructuredComparisonSubject(userMessage)
+            ?? (!string.IsNullOrWhiteSpace(evidence[0].Title)
                 ? StripTitleSuffix(evidence[0].Title)
-                : "the topic";
+                : "the topic");
 
         var firstDetail = evidence[0];
         var secondDetail = evidence.Count > 1 ? evidence[1] : firstDetail;
@@ -4241,6 +4271,25 @@ public sealed partial class SearchOrchestrator
         sb.Append(", the consistent signal is continued expansion across the platform. Prioritize the release notes or posts that line up with your immediate workflow needs, because different sources emphasize different parts of the stack.");
 
         return sb.ToString().TrimEnd();
+    }
+
+    private static string? TryInferStructuredComparisonSubject(string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return null;
+
+        var match = Regex.Match(
+            userMessage,
+            @"\b(?:updates?|developments?|details?|changes?)\s+(?:and\s+(?:updates?|developments?|details?|changes?)\s+)?(?:in|on|about|for)\s+(?<subject>.+?)(?:\s+from\s+the\s+last\s+year|\s+over\s+the\s+last\s+year|\s+in\s+the\s+last\s+year|[.?!]|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success)
+            return null;
+
+        var subject = match.Groups["subject"].Value.Trim().Trim('"', '\'', ':', ';', ',', '.');
+        if (subject.Length is < 2 or > 80)
+            return null;
+
+        return subject;
     }
 
     private static string? TryBuildComparisonSourceFallback(

@@ -13,6 +13,7 @@ public sealed record SingleRunResult
     public required ArtifactPaths ArtifactPaths { get; init; }
     public required IReadOnlyList<TraceStep> Steps { get; init; }
     public required string? ModelName { get; init; }
+    internal HarnessTiming Timing { get; init; } = HarnessTiming.Empty;
 }
 
 public sealed record RecordedToolTurn

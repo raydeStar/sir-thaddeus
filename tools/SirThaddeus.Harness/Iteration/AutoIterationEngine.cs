@@ -1,5 +1,6 @@
 using SirThaddeus.Harness.Cli;
 using SirThaddeus.Harness.Models;
+using SirThaddeus.Harness.Scoring;
 
 namespace SirThaddeus.Harness.Iteration;
 
@@ -24,8 +25,9 @@ public sealed class AutoIterationEngine
         attempts.Add(baseline);
 
         var best = baseline;
-        var minScore = options.MinScoreOverride ?? test.MinScore;
-        if (baseline.Score.FinalScore >= minScore || options.MaxIterations <= 1)
+        var minScore = ScoringEngine.ResolveThreshold(options.MinScoreOverride ?? test.MinScore);
+        if ((baseline.Score.HardPass && baseline.Score.FinalScore >= minScore) ||
+            options.MaxIterations <= 1)
             return attempts;
         if (!options.AllowWorkspaceEdits)
             return attempts;
@@ -132,4 +134,5 @@ public sealed record TestAttemptResult
     public required string ArtifactDirectory { get; init; }
     public required CursorJudgeResult? JudgeResult { get; init; }
     public IReadOnlyList<string> AppliedPatches { get; init; } = [];
+    internal Execution.HarnessTiming Timing { get; init; } = Execution.HarnessTiming.Empty;
 }

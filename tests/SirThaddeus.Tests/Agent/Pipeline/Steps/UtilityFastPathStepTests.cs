@@ -40,6 +40,37 @@ public class UtilityFastPathStepTests
     }
 
     [Fact]
+    public async Task Terminates_on_inferred_enumerable_set_count()
+    {
+        var step = new UtilityFastPathStep();
+        var ctx = NewContext("how many days of the week have the letter D in them?");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.True(term.Response.Success);
+        Assert.Contains("**7**", term.Response.Text, StringComparison.Ordinal);
+        Assert.Contains("Monday", term.Response.Text, StringComparison.Ordinal);
+        Assert.Contains("Sunday", term.Response.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Terminates_on_collection_extrapolation()
+    {
+        var step = new UtilityFastPathStep();
+        var ctx = NewContext("Extrapolate the data 'days in the week'");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.True(term.Response.Success);
+        Assert.Contains("canonical", term.Response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("**7**", term.Response.Text, StringComparison.Ordinal);
+        Assert.Contains("Monday", term.Response.Text, StringComparison.Ordinal);
+        Assert.Contains("Sunday", term.Response.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Continues_when_no_deterministic_match()
     {
         // Pure chat — nothing for the engine to evaluate. The step must

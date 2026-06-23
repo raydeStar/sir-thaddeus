@@ -105,7 +105,7 @@ public class AuditedMcpToolClientTests
         Assert.Equal("Denied before exposure", result.DenialReason);
         Assert.Empty(inner.Calls);
 
-        var preflight = Assert.Single(audit.Events.Where(e => e.Action == "MCP_TOOL_PERMISSION_PREFLIGHT"));
+        var preflight = Assert.Single(audit.Events, e => e.Action == "MCP_TOOL_PERMISSION_PREFLIGHT");
         Assert.Equal("file_read", preflight.Target);
         Assert.Equal("blocked", preflight.Result);
     }
@@ -256,6 +256,35 @@ public class AuditedMcpToolClientTests
     // ─────────────────────────────────────────────────────────────────
     // ListToolsAsync — delegates without audit
     // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CallToolAsync_HarnessStubOverride_ReturnsStructuredErrorWithoutCallingInner()
+    {
+        var previous = Environment.GetEnvironmentVariable("ST_STUB_WEB_SEARCH");
+        Environment.SetEnvironmentVariable("ST_STUB_WEB_SEARCH", "timeout");
+        try
+        {
+            var inner = new FakeMcpClient("should not reach this");
+            var audit = new TestAuditLogger();
+            var gate = new AlwaysGrantGate();
+            var sut = new AuditedMcpToolClient(inner, audit, gate, SessionId);
+
+            var result = await sut.CallToolAsync("web_search", "{\"query\":\"ai policy\"}");
+
+            Assert.Contains("\"error\"", result, StringComparison.Ordinal);
+            Assert.Contains("\"code\":\"timeout\"", result, StringComparison.Ordinal);
+            Assert.Contains("timed out", result, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(inner.Calls);
+
+            var end = audit.Events.Last(e => e.Action == "MCP_TOOL_CALL_END");
+            Assert.Equal("error", end.Result);
+            Assert.Contains("Harness stub: timeout", end.Details!["error_message"].ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ST_STUB_WEB_SEARCH", previous);
+        }
+    }
 
     [Fact]
     public async Task ListToolsAsync_DelegatesToInner_NoAuditEvents()

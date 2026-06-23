@@ -1,4 +1,5 @@
 using SirThaddeus.Agent.Routing;
+using System.Text.Json;
 
 namespace SirThaddeus.Agent;
 
@@ -20,12 +21,12 @@ public static class ExplicitWebNoResultsContractNormalizer
             return null;
 
         var lower = userMessage.Trim().ToLowerInvariant();
-        var isExplicitLookupRequest = string.Equals(
+        var hasExplicitWebLookup = string.Equals(
             IntentFeatureExtractor.TryGetExplicitToolInvocationIntent(lower),
             Intents.LookupSearch,
             StringComparison.OrdinalIgnoreCase);
-        var isLatestStableVersionRequest = LooksLikeLatestStableVersionRequest(lower);
-        if (!isExplicitLookupRequest && !isLatestStableVersionRequest)
+        var requiresLiveVersionLookup = LooksLikeLatestVersionLookup(lower);
+        if (!hasExplicitWebLookup && !requiresLiveVersionLookup)
         {
             return null;
         }
@@ -33,16 +34,30 @@ public static class ExplicitWebNoResultsContractNormalizer
         var successfulWebCalls = toolCallsMade
             .Where(call => IsRelevantWebTool(call.ToolName) && !string.IsNullOrWhiteSpace(call.Result))
             .ToList();
-        if (successfulWebCalls.Count == 0 ||
-            successfulWebCalls.Any(call => !LooksLikeWebNoResultsPayload(call.Result)))
+        if (successfulWebCalls.Count == 0)
         {
             return null;
         }
 
-        if (lower.Contains("timeout", StringComparison.Ordinal))
-            return TimeoutMessage;
+        var structuredFailures = successfulWebCalls
+            .Select(call => ParseStructuredFailureKind(call.Result))
+            .ToList();
+        if (structuredFailures.All(kind => kind is not null))
+        {
+            if (structuredFailures.Any(kind => kind == "timeout"))
+                return TimeoutMessage;
 
-        return UnavailableMessage;
+            if (structuredFailures.Any(kind => kind == "unavailable"))
+                return UnavailableMessage;
+        }
+
+        if (successfulWebCalls.Any(call => !LooksLikeWebNoResultsPayload(call.Result)))
+            return null;
+
+        if (lower.Contains("timeout", StringComparison.Ordinal))
+            return BuildUnavailableResponse(lower, timeout: true);
+
+        return BuildUnavailableResponse(lower, timeout: false);
     }
 
     public static bool ShouldPreserveResponse(
@@ -99,15 +114,40 @@ public static class ExplicitWebNoResultsContractNormalizer
             lowerResponse.Contains("timeout", StringComparison.Ordinal) ||
             lowerResponse.Contains("timed out", StringComparison.Ordinal))
         {
-            return TimeoutMessage;
+            return BuildUnavailableResponse(lowerUser, timeout: true);
         }
 
-        return UnavailableMessage;
+        return BuildUnavailableResponse(lowerUser, timeout: false);
     }
 
-    private static bool LooksLikeLatestStableVersionRequest(string lowerUserMessage)
-        => lowerUserMessage.Contains("latest stable version", StringComparison.Ordinal);
+    private static string BuildUnavailableResponse(string lowerUserMessage, bool timeout)
+    {
+        if (!LooksLikeStrictTwoLineContract(lowerUserMessage))
+            return timeout ? TimeoutMessage : UnavailableMessage;
 
+        return timeout
+            ? "Answer: Live lookup hit a timeout for this request, so I do not have confirmed results.\n" +
+              "Commentary: Please retry in a moment or narrow the query."
+            : "Answer: Live lookup is unavailable for this request, so I do not have confirmed results.\n" +
+              "Commentary: Please retry in a moment.";
+    }
+
+    private static bool LooksLikeLatestVersionLookup(string lowerUserMessage)
+    {
+        return lowerUserMessage.Contains("latest", StringComparison.Ordinal) &&
+               lowerUserMessage.Contains("version", StringComparison.Ordinal) &&
+               (lowerUserMessage.Contains("stable", StringComparison.Ordinal) ||
+                lowerUserMessage.Contains("current", StringComparison.Ordinal));
+    }
+
+    private static bool LooksLikeStrictTwoLineContract(string lowerUserMessage)
+    {
+        return lowerUserMessage.Contains("exactly two lines", StringComparison.Ordinal) &&
+               lowerUserMessage.Contains("line 1 starts with", StringComparison.Ordinal) &&
+               lowerUserMessage.Contains("line 2 starts with", StringComparison.Ordinal) &&
+               lowerUserMessage.Contains("answer:", StringComparison.Ordinal) &&
+               lowerUserMessage.Contains("commentary:", StringComparison.Ordinal);
+    }
     private static bool IsRelevantWebTool(string toolName)
     {
         return toolName.Equals("web_search", StringComparison.OrdinalIgnoreCase) ||
@@ -123,6 +163,64 @@ public static class ExplicitWebNoResultsContractNormalizer
         return lower.Contains("0 result(s) returned", StringComparison.Ordinal) ||
                lower.Contains("no results", StringComparison.Ordinal) ||
                lower.Contains("no matching", StringComparison.Ordinal);
+    }
+
+    private static string? ParseStructuredFailureKind(string? result)
+    {
+        if (string.IsNullOrWhiteSpace(result))
+            return null;
+
+        var lower = result.Trim().ToLowerInvariant();
+        if (lower.StartsWith("error:", StringComparison.Ordinal))
+            return ClassifyFailureText(lower);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(result);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("error", out var errorEl))
+            {
+                return null;
+            }
+
+            if (errorEl.ValueKind == JsonValueKind.String)
+                return ClassifyFailureText(errorEl.GetString() ?? "");
+
+            if (errorEl.ValueKind != JsonValueKind.Object)
+                return null;
+
+            var code = errorEl.TryGetProperty("code", out var codeEl) && codeEl.ValueKind == JsonValueKind.String
+                ? codeEl.GetString() ?? ""
+                : "";
+            var message = errorEl.TryGetProperty("message", out var messageEl) && messageEl.ValueKind == JsonValueKind.String
+                ? messageEl.GetString() ?? ""
+                : "";
+            return ClassifyFailureText(code + " " + message);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? ClassifyFailureText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        if (text.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("timed out", StringComparison.OrdinalIgnoreCase))
+        {
+            return "timeout";
+        }
+
+        if (text.Contains("unavailable", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("tool_unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "unavailable";
+        }
+
+        return null;
     }
 
 }

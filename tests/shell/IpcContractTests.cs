@@ -16,12 +16,17 @@ public sealed class IpcContractTests : IAsyncLifetime
 {
     private RuntimeProcessSupervisor? _supervisor;
     private RuntimeLockFile? _lockFile;
+    private string? _lockDir;
+    private string? _lockFilePath;
 
     public async Task InitializeAsync()
     {
+        _lockDir = Path.Combine(Path.GetTempPath(), "sir-thaddeus-ipc-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_lockDir);
+        _lockFilePath = Path.Combine(_lockDir, "runtime.lock");
+
         // Pre-clean any stale lock file so we get a fresh runtime each test run.
-        var lockPath = RuntimeLockFileReader.GetDefaultPath();
-        var existing = RuntimeLockFileReader.TryRead(lockPath);
+        var existing = RuntimeLockFileReader.TryRead(_lockFilePath);
         if (existing is not null)
         {
             try
@@ -30,10 +35,13 @@ public sealed class IpcContractTests : IAsyncLifetime
                 if (!p.HasExited) p.Kill(entireProcessTree: true);
             }
             catch { /* ignore */ }
-            RuntimeLockFileReader.TryDelete(lockPath);
+            RuntimeLockFileReader.TryDelete(_lockFilePath);
         }
 
-        _supervisor = new RuntimeProcessSupervisor(NullLogger<RuntimeProcessSupervisor>.Instance);
+        _supervisor = new RuntimeProcessSupervisor(
+            NullLogger<RuntimeProcessSupervisor>.Instance,
+            _lockFilePath,
+            testMode: true);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         _lockFile = await _supervisor.EnsureRunningAsync(cts.Token);
     }
@@ -41,6 +49,10 @@ public sealed class IpcContractTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         if (_supervisor is not null) await _supervisor.DisposeAsync();
+        if (_lockDir is not null)
+        {
+            try { Directory.Delete(_lockDir, recursive: true); } catch { /* best effort */ }
+        }
     }
 
     [Fact]
@@ -78,7 +90,7 @@ public sealed class IpcContractTests : IAsyncLifetime
         var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
         while (DateTimeOffset.UtcNow < deadline)
         {
-            if (RuntimeLockFileReader.TryRead(RuntimeLockFileReader.GetDefaultPath()) is null) return;
+            if (RuntimeLockFileReader.TryRead(_lockFilePath!) is null) return;
             await Task.Delay(100);
         }
         Assert.Fail("Runtime did not delete its lock file within 10s of shutdown.");

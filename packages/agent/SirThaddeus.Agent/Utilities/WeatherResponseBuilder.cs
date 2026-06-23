@@ -35,19 +35,18 @@ public static partial class WeatherResponseBuilder
                 return null;
             }
 
-            var location = fallbackLocation;
+            var fromMessage = ExtractLocationFromMessage(userMessage);
+            var location = !string.IsNullOrWhiteSpace(fromMessage) ? fromMessage! : fallbackLocation;
             if (root.TryGetProperty("location", out var loc) &&
                 loc.ValueKind == JsonValueKind.Object &&
                 loc.TryGetProperty("name", out var ln) &&
-                !string.IsNullOrWhiteSpace(ln.GetString()))
+                !string.IsNullOrWhiteSpace(ln.GetString()) &&
+                string.IsNullOrWhiteSpace(fromMessage))
             {
-                location = ln.GetString()!;
-            }
-            else
-            {
-                var fromMessage = ExtractLocationFromMessage(userMessage);
-                if (!string.IsNullOrWhiteSpace(fromMessage))
-                    location = fromMessage!;
+                var providerLocation = ln.GetString()!;
+                location = LooksLikeCoordinateLabel(providerLocation) && !string.IsNullOrWhiteSpace(fromMessage)
+                    ? fromMessage!
+                    : providerLocation;
             }
 
             int? currentTemp = null;
@@ -148,6 +147,35 @@ public static partial class WeatherResponseBuilder
         {
             return null;
         }
+    }
+
+    public static string? TryBuildBriefFromForecastSummary(
+        string forecastSummary,
+        string userMessage,
+        string fallbackLocation)
+    {
+        if (string.IsNullOrWhiteSpace(forecastSummary))
+            return null;
+
+        var current = Regex.Match(
+            forecastSummary,
+            @"\bcurrent\s*=\s*(?<temp>-?\d{1,3})\s*(?<unit>[FC])\s+(?<condition>[^\]\r\n]+)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!current.Success)
+            return null;
+
+        var fromMessage = ExtractLocationFromMessage(userMessage);
+        var location = !string.IsNullOrWhiteSpace(fromMessage) ? fromMessage! : fallbackLocation;
+        if (string.IsNullOrWhiteSpace(location))
+            location = "there";
+
+        var temp = current.Groups["temp"].Value;
+        var unit = NormalizeTemperatureUnit(current.Groups["unit"].Value);
+        var condition = current.Groups["condition"].Value.Trim().TrimEnd('.', ';', ',');
+        if (string.IsNullOrWhiteSpace(condition))
+            return $"Today in {location}, it's about **{temp}{unit}** right now.";
+
+        return $"Today in {location}, it's about **{temp}{unit}** and **{condition}** right now.";
     }
 
     public static string BuildActivityAdvice(
@@ -351,6 +379,18 @@ public static partial class WeatherResponseBuilder
         };
     }
 
-    [GeneratedRegex(@"\b(?:in|for|at|near)\s+(?<location>.+)$", RegexOptions.IgnoreCase)]
+    private static bool LooksLikeCoordinateLabel(string value)
+    {
+        var trimmed = value.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return false;
+
+        return Regex.IsMatch(
+            trimmed,
+            @"^-?\d{1,3}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?$",
+            RegexOptions.CultureInvariant);
+    }
+
+    [GeneratedRegex(@"\b(?:in|for|at|near)\s+(?<location>[A-Za-z][A-Za-z0-9 .'-]{1,60}?)(?:\s+and\b|\s+to\b|[?.!,]|$)", RegexOptions.IgnoreCase)]
     internal static partial Regex LocationRegex();
 }

@@ -100,10 +100,24 @@ export interface ChatFootmanDecision {
   decidedAt: string;
 }
 
+export interface ChatMemoryRecalled {
+  threadId: string;
+  messageId: string;
+  factsCount: number;
+  eventsCount: number;
+  chunksCount: number;
+  nuggetsCount: number;
+  /** Truncated preview of the assembled memory pack — first ~200 chars. */
+  preview: string;
+  durationMs: number;
+  recalledAt: string;
+}
+
 export const ChatTurnEventTypes = {
   Start: "chat.turn.start",
   Delta: "chat.turn.delta",
   Complete: "chat.turn.complete",
   UserMessageAppended: "chat.user.message",
   FootmanDecision: "chat.footman.decision",
+  MemoryRecalled: "chat.memory.recalled",
 } as const;

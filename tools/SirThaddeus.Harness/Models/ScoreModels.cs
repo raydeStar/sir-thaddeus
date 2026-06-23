@@ -4,20 +4,67 @@ namespace SirThaddeus.Harness.Models;
 
 public sealed record ScoreCard
 {
+    [JsonPropertyName("testId")]
+    public string TestId { get; init; } = "";
+
+    [JsonPropertyName("passed")]
+    public bool Passed { get; init; }
+
+    [JsonPropertyName("overallScore")]
+    public double OverallScore { get; init; }
+
+    [JsonPropertyName("profile")]
+    public string Profile { get; init; } = "general";
+
+    [JsonPropertyName("hardGateFailures")]
+    public IReadOnlyList<string> HardGateFailures { get; init; } = [];
+
+    [JsonPropertyName("scores")]
+    public IReadOnlyDictionary<string, int> Scores { get; init; } =
+        new Dictionary<string, int>(StringComparer.Ordinal);
+
+    [JsonPropertyName("strengths")]
+    public IReadOnlyList<string> Strengths { get; init; } = [];
+
+    [JsonPropertyName("problems")]
+    public IReadOnlyList<string> Problems { get; init; } = [];
+
+    [JsonPropertyName("requiredFixes")]
+    public IReadOnlyList<string> RequiredFixes { get; init; } = [];
+
+    [JsonPropertyName("latencyMs")]
+    public long LatencyMs { get; init; }
+
+    [JsonPropertyName("tokensIn")]
+    public int? TokensIn { get; init; }
+
+    [JsonPropertyName("tokensOut")]
+    public int? TokensOut { get; init; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; init; } = "fail";
+
+    [JsonPropertyName("threshold")]
+    public double Threshold { get; init; } = 0.85;
+
+    [JsonPropertyName("deterministicChecks")]
+    public IReadOnlyList<RubricCheckResult> DeterministicChecks { get; init; } = [];
+
+    // Backward-compatible fields retained for older harness scripts.
     [JsonPropertyName("hard_pass")]
-    public bool HardPass { get; init; }
+    public bool HardPass => HardGateFailures.Count == 0;
 
     [JsonPropertyName("hard_failures")]
-    public IReadOnlyList<string> HardFailures { get; init; } = [];
+    public IReadOnlyList<string> HardFailures => HardGateFailures;
 
     [JsonPropertyName("soft_score")]
-    public double SoftScore { get; init; }
+    public double SoftScore => OverallScore;
 
     [JsonPropertyName("judge_score")]
     public double? JudgeScore { get; init; }
 
     [JsonPropertyName("final_score")]
-    public double FinalScore { get; init; }
+    public double FinalScore => OverallScore;
 
     [JsonPropertyName("judge_reasons")]
     public IReadOnlyList<string> JudgeReasons { get; init; } = [];
@@ -25,7 +72,6 @@ public sealed record ScoreCard
     [JsonPropertyName("judge_suggestions")]
     public IReadOnlyList<string> JudgeSuggestions { get; init; } = [];
 
-    // Granular breakdown for reporting
     [JsonPropertyName("keyword_penalty")]
     public double KeywordPenalty { get; init; }
 
@@ -60,6 +106,21 @@ public sealed record ScoreCard
     public int RequiredKeywordsTotal { get; init; }
 }
 
+public sealed record RubricCheckResult
+{
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+
+    [JsonPropertyName("passed")]
+    public bool Passed { get; init; }
+
+    [JsonPropertyName("severity")]
+    public string Severity { get; init; } = "info";
+
+    [JsonPropertyName("message")]
+    public string Message { get; init; } = "";
+}
+
 public sealed record CursorJudgePacket
 {
     [JsonPropertyName("test_id")]
@@ -67,6 +128,9 @@ public sealed record CursorJudgePacket
 
     [JsonPropertyName("test_name")]
     public string TestName { get; init; } = "";
+
+    [JsonPropertyName("profile")]
+    public string Profile { get; init; } = "general";
 
     [JsonPropertyName("user_message")]
     public string UserMessage { get; init; } = "";
@@ -80,20 +144,50 @@ public sealed record CursorJudgePacket
     [JsonPropertyName("tool_calls")]
     public IReadOnlyList<ToolCallSnapshot> ToolCalls { get; init; } = [];
 
-    [JsonPropertyName("hard_failures")]
-    public IReadOnlyList<string> HardFailures { get; init; } = [];
+    [JsonPropertyName("hard_gate_failures")]
+    public IReadOnlyList<string> HardGateFailures { get; init; } = [];
 
-    [JsonPropertyName("soft_score")]
-    public double SoftScore { get; init; }
+    [JsonPropertyName("deterministic_checks")]
+    public IReadOnlyList<RubricCheckResult> DeterministicChecks { get; init; } = [];
+
+    [JsonPropertyName("scores")]
+    public IReadOnlyDictionary<string, int> Scores { get; init; } =
+        new Dictionary<string, int>(StringComparer.Ordinal);
+
+    [JsonPropertyName("overall_score")]
+    public double OverallScore { get; init; }
 
     [JsonPropertyName("min_score")]
     public double MinScore { get; init; }
+
+    // Legacy aliases for older external judge handoffs.
+    [JsonPropertyName("hard_failures")]
+    public IReadOnlyList<string> HardFailures => HardGateFailures;
+
+    [JsonPropertyName("soft_score")]
+    public double SoftScore => OverallScore;
 }
 
 public sealed record CursorJudgeResult
 {
     [JsonPropertyName("score")]
     public double Score { get; init; }
+
+    [JsonPropertyName("scores")]
+    public IReadOnlyDictionary<string, int> Scores { get; init; } =
+        new Dictionary<string, int>(StringComparer.Ordinal);
+
+    [JsonPropertyName("hardGateFailures")]
+    public IReadOnlyList<string> HardGateFailures { get; init; } = [];
+
+    [JsonPropertyName("strengths")]
+    public IReadOnlyList<string> Strengths { get; init; } = [];
+
+    [JsonPropertyName("problems")]
+    public IReadOnlyList<string> Problems { get; init; } = [];
+
+    [JsonPropertyName("requiredFixes")]
+    public IReadOnlyList<string> RequiredFixes { get; init; } = [];
 
     [JsonPropertyName("reasons")]
     public IReadOnlyList<string> Reasons { get; init; } = [];

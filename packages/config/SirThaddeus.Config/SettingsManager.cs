@@ -316,7 +316,15 @@ public static class SettingsManager
             Llm = llm with
             {
                 BaseUrl = StringOrFallback(llm.BaseUrl, defaults.Llm.BaseUrl),
+                ChatCompletionPath = EnsureSlashPath(StringOrFallback(llm.ChatCompletionPath, defaults.Llm.ChatCompletionPath)),
                 Model = StringOrFallback(llm.Model, defaults.Llm.Model),
+                PreloadModelKey = OptionalString(llm.PreloadModelKey),
+                ContextLength = IntOrFallback(llm.ContextLength, defaults.Llm.ContextLength, min: 1024, max: 131_072),
+                MaxConcurrentLlmRequests = IntOrFallback(llm.MaxConcurrentLlmRequests, defaults.Llm.MaxConcurrentLlmRequests, min: 1, max: 4),
+                WarmupTimeoutSeconds = IntOrFallback(llm.WarmupTimeoutSeconds, defaults.Llm.WarmupTimeoutSeconds, min: 5, max: 600),
+                KeepWarmIntervalMinutes = IntOrFallback(llm.KeepWarmIntervalMinutes, defaults.Llm.KeepWarmIntervalMinutes, min: 1, max: 240),
+                MaxInputTokensSoftCap = IntOrFallback(llm.MaxInputTokensSoftCap, defaults.Llm.MaxInputTokensSoftCap, min: 256, max: 128_000),
+                MaxOutputTokensDefault = IntOrFallback(llm.MaxOutputTokensDefault, defaults.Llm.MaxOutputTokensDefault, min: 64, max: 16_384),
                 MaxTokens = IntOrFallback(llm.MaxTokens, defaults.Llm.MaxTokens, min: 128, max: 65_536),
                 ContextWindowTokens = IntOrFallback(llm.ContextWindowTokens, defaults.Llm.ContextWindowTokens, min: 1024, max: 1_000_000),
                 Temperature = DoubleOrFallback(llm.Temperature, defaults.Llm.Temperature, min: 0.0, max: 2.0),

@@ -57,7 +57,7 @@ Compare the hash with the value in the accompanying `.zip.sha256.txt` file.
 - **Visual C++ Redistributable 2015-2022** — required by the speech-to-text engine.
   Most PCs already have this. If Whisper crashes, install it from [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 - **LM Studio** (or any OpenAI-compatible local LLM server)
-  - Default expected base URL: `http://localhost:1234`
+   - Default expected base URL: `http://localhost:1234` or `http://localhost:1234/v1`
   - Tip: A known good model to start with is `qwen2.5-coder-7b-instruct` or similar instruction-tuned models.
 - **Internet connection** on first run (for voice asset download)
 
@@ -74,14 +74,18 @@ The bundled SearXNG source and license notice are included under `search\source\
 
 ## Local data paths
 
-- Settings: `%LOCALAPPDATA%\SirThaddeus\settings.json`
-- Memory DB: `%LOCALAPPDATA%\SirThaddeus\memory.db`
-- Audit log: `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`
+- Runtime settings: `%USERPROFILE%\.thaddeus\runtime-settings.json`
+- Runtime lock and turn traces: `%USERPROFILE%\.thaddeus\runtime.lock`, `%USERPROFILE%\.thaddeus\turns\`
+- Runtime memory DB: `%USERPROFILE%\.thaddeus\memory.sqlite`
+- Legacy settings and audit log: `%LOCALAPPDATA%\SirThaddeus\settings.json`, `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`
 
 ## Reset / delete local data
 
 Close the app first, then remove any of these files for a clean reset:
 
+- `%USERPROFILE%\.thaddeus\runtime-settings.json`
+- `%USERPROFILE%\.thaddeus\memory.sqlite`
+- `%USERPROFILE%\.thaddeus\turns\`
 - `%LOCALAPPDATA%\SirThaddeus\settings.json`
 - `%LOCALAPPDATA%\SirThaddeus\memory.db`
 - `%LOCALAPPDATA%\SirThaddeus\audit.jsonl`

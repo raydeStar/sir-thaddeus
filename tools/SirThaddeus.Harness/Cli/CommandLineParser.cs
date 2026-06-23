@@ -43,6 +43,7 @@ Options:
   --judge <cursor|none|model>    Judge mode for score enrichment (default: none)
   --judge-timeout-ms <N>         Cursor judge wait timeout in milliseconds (default: 60000)
   --judge-required <true|false>  Hard-fail if judge output missing/invalid (default: true)
+  --target <v1|v2>               Runtime to drive: v1 (legacy headless, default) or v2 (hybrid Thaddeus.Runtime). Same agent pipeline either way.
     --suites-root <path>           Override suites root directory for run or stage mode
   --artifacts-root <path>        Override artifacts root directory
     --run-id <id>                  Inspect a specific harness run id instead of the latest run
@@ -101,6 +102,7 @@ Options:
         var patchBudgetLines = ParseInt(GetValue(values, "patch-budget-lines"), 200, 1, "patch-budget-lines");
         var judgeTimeoutMs = ParseInt(GetValue(values, "judge-timeout-ms"), 60_000, 1, "judge-timeout-ms");
         var judgeRequired = ParseBool(GetValue(values, "judge-required"), defaultValue: true, key: "judge-required");
+        var hostTarget = ParseHostTarget(GetValue(values, "target")) ?? HarnessHostTarget.HeadlessV1;
 
         var defaultSuitesRoot = command == HarnessCommandKind.Stage
             ? Path.Combine("tools", "SirThaddeus.Harness", "StageSuites")
@@ -111,6 +113,7 @@ Options:
             Command = command,
             Mode = HarnessExecutionMode.Headless,
             JudgeMode = judgeMode,
+            HostTarget = hostTarget,
             RunAllSuites = HasFlag(values, "all"),
             SuiteName = suite,
             TestId = testId,
@@ -256,6 +259,20 @@ Options:
             "cursor" => HarnessJudgeMode.Cursor,
             "model" => HarnessJudgeMode.Model,
             _ => throw new CommandLineException($"Invalid --judge value '{raw}'.")
+        };
+    }
+
+    private static HarnessHostTarget? ParseHostTarget(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "v1" or "headless" or "headless-v1" => HarnessHostTarget.HeadlessV1,
+            "v2" or "hybrid" or "hybrid-v2" => HarnessHostTarget.HybridV2,
+            _ => throw new CommandLineException(
+                $"Invalid --target value '{raw}'. Use v1 (default, legacy headless) or v2 (hybrid runtime).")
         };
     }
 

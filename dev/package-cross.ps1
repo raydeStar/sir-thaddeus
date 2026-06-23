@@ -183,6 +183,14 @@ foreach ($kvp in $projects.GetEnumerator()) {
         $publishArgs += @("-p:Version=$assemblyVersion")
     }
 
+    if ($effectiveSelfContained) {
+        $publishArgs += @(
+            "-p:PublishSingleFile=true",
+            "-p:IncludeNativeLibrariesForSelfExtract=true",
+            "-p:EnableCompressionInSingleFile=true"
+        )
+    }
+
     & dotnet @publishArgs
     if ($LASTEXITCODE -ne 0) {
         Fail "dotnet publish failed for $projName (exit code $LASTEXITCODE)." $LASTEXITCODE

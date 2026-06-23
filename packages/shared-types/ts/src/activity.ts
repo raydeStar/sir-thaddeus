@@ -39,8 +39,56 @@ export interface DiagnosticsResponse {
   threadCount: number;
   threadStoreRoot: string;
   logsRoot: string;
+  /** Directory containing per-turn JSONL trace files keyed by messageId. */
+  turnsRoot: string;
   voiceAvailable: boolean;
   voice: VoiceRuntimeStatus;
   pid: number;
   buildVersion: string;
+}
+
+/** One entry in GET /api/turns. */
+export interface TurnTraceSummary {
+  messageId: string;
+  threadId?: string | null;
+  modifiedAt: string;
+  sizeBytes: number;
+  eventCount: number;
+  lastEventType?: string | null;
+}
+
+/** Response for GET /api/turns. */
+export interface TurnTraceListResponse {
+  turns: TurnTraceSummary[];
+}
+
+/** Response for GET /api/turns/{messageId}/trace. Events are raw RuntimeEvent envelopes. */
+export interface TurnTraceResponse {
+  messageId: string;
+  events: Array<Record<string, unknown> | null>;
+}
+
+/** One entry in GET /api/logs. */
+export interface RuntimeLogSummary {
+  fileName: string;
+  modifiedAt: string;
+  sizeBytes: number;
+  lineCount: number;
+  lastLine?: string | null;
+}
+
+/** Response for GET /api/logs. */
+export interface RuntimeLogListResponse {
+  logs: RuntimeLogSummary[];
+}
+
+export interface RuntimeLogLine {
+  number: number;
+  text: string;
+}
+
+/** Response for GET /api/logs/{fileName}. */
+export interface RuntimeLogResponse {
+  fileName: string;
+  lines: RuntimeLogLine[];
 }
