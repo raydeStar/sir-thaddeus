@@ -8,11 +8,12 @@ namespace Thaddeus.Runtime.Voice;
 public sealed class VoiceHostProcessSupervisor : IDisposable
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan PositiveProbeCacheTtl = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan DefaultPositiveProbeCacheTtl = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan DefaultStartupTimeout = TimeSpan.FromSeconds(120);
 
     private readonly ILogger<VoiceHostProcessSupervisor> _logger;
     private readonly HttpClient _http;
+    private readonly TimeSpan _positiveProbeCacheTtl;
     private readonly SemaphoreSlim _startLock = new(1, 1);
     private readonly object _healthCacheGate = new();
     private Process? _process;
@@ -20,9 +21,12 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
     private DateTimeOffset _lastHealthyUntil = DateTimeOffset.MinValue;
     private bool _disposed;
 
-    public VoiceHostProcessSupervisor(ILogger<VoiceHostProcessSupervisor> logger)
+    public VoiceHostProcessSupervisor(
+        ILogger<VoiceHostProcessSupervisor> logger,
+        TimeSpan? positiveProbeCacheTtl = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _positiveProbeCacheTtl = positiveProbeCacheTtl ?? DefaultPositiveProbeCacheTtl;
         _http = new HttpClient { Timeout = ProbeTimeout };
     }
 
@@ -208,7 +212,7 @@ public sealed class VoiceHostProcessSupervisor : IDisposable
         lock (_healthCacheGate)
         {
             _lastHealthyUri = healthUri;
-            _lastHealthyUntil = DateTimeOffset.UtcNow + PositiveProbeCacheTtl;
+            _lastHealthyUntil = DateTimeOffset.UtcNow + _positiveProbeCacheTtl;
         }
     }
 

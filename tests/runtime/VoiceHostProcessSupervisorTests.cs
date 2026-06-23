@@ -12,7 +12,9 @@ public sealed class VoiceHostProcessSupervisorTests
     public async Task EnsureResponsiveAsync_reuses_recent_successful_health_probe()
     {
         using var server = new CountingHealthServer();
-        using var supervisor = new VoiceHostProcessSupervisor(NullLogger<VoiceHostProcessSupervisor>.Instance);
+        using var supervisor = new VoiceHostProcessSupervisor(
+            NullLogger<VoiceHostProcessSupervisor>.Instance,
+            positiveProbeCacheTtl: TimeSpan.FromMinutes(1));
         var settings = SettingsDocument.Defaults().Voice with
         {
             VoiceHostBaseUrl = server.BaseUrl,
