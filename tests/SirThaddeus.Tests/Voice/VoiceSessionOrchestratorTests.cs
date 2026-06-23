@@ -138,6 +138,7 @@ public sealed class VoiceSessionOrchestratorTests
         asr.Release("stale transcript");
 
         await WaitForStateAsync(orchestrator, VoiceState.Listening, TimeSpan.FromSeconds(5));
+        await WaitForAsync(() => capture.StartCalls >= 2, TimeSpan.FromSeconds(1));
 
         Assert.Equal(2, capture.StartCalls);
         Assert.Equal(0, agent.CallCount);
