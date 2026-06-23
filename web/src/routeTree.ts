@@ -13,6 +13,7 @@ import { Route as WikiRouteImport } from './routes/wiki'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RoutinesRouteImport } from './routes/routines'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as ModulesRouteImport } from './routes/modules'
 import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as DiagnosticsRouteImport } from './routes/diagnostics'
@@ -48,6 +49,11 @@ const RoutinesRoute = RoutinesRouteImport.update({
 const OnboardingRoute = OnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModulesRoute = ModulesRouteImport.update({
+  id: '/modules',
+  path: '/modules',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MemoryRoute = MemoryRouteImport.update({
@@ -139,6 +145,7 @@ export interface FileRoutesByFullPath {
   '/diagnostics': typeof DiagnosticsRoute
   '/history': typeof HistoryRoute
   '/memory': typeof MemoryRoute
+  '/modules': typeof ModulesRoute
   '/onboarding': typeof OnboardingRoute
   '/routines': typeof RoutinesRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
@@ -159,6 +166,7 @@ export interface FileRoutesByTo {
   '/diagnostics': typeof DiagnosticsRoute
   '/history': typeof HistoryRoute
   '/memory': typeof MemoryRoute
+  '/modules': typeof ModulesRoute
   '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRouteWithChildren
   '/wiki': typeof WikiRoute
@@ -181,6 +189,7 @@ export interface FileRoutesById {
   '/diagnostics': typeof DiagnosticsRoute
   '/history': typeof HistoryRoute
   '/memory': typeof MemoryRoute
+  '/modules': typeof ModulesRoute
   '/onboarding': typeof OnboardingRoute
   '/routines': typeof RoutinesRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
@@ -205,6 +214,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/history'
     | '/memory'
+    | '/modules'
     | '/onboarding'
     | '/routines'
     | '/settings'
@@ -225,6 +235,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/history'
     | '/memory'
+    | '/modules'
     | '/onboarding'
     | '/settings'
     | '/wiki'
@@ -246,6 +257,7 @@ export interface FileRouteTypes {
     | '/diagnostics'
     | '/history'
     | '/memory'
+    | '/modules'
     | '/onboarding'
     | '/routines'
     | '/settings'
@@ -269,6 +281,7 @@ export interface RootRouteChildren {
   DiagnosticsRoute: typeof DiagnosticsRoute
   HistoryRoute: typeof HistoryRoute
   MemoryRoute: typeof MemoryRoute
+  ModulesRoute: typeof ModulesRoute
   OnboardingRoute: typeof OnboardingRoute
   RoutinesRoute: typeof RoutinesRouteWithChildren
   SettingsRoute: typeof SettingsRouteWithChildren
@@ -310,6 +323,13 @@ declare module '@tanstack/react-router' {
       path: '/memory'
       fullPath: '/memory'
       preLoaderRoute: typeof MemoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/modules': {
+      id: '/modules'
+      path: '/modules'
+      fullPath: '/modules'
+      preLoaderRoute: typeof ModulesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/history': {
@@ -484,6 +504,7 @@ const rootRouteChildren: RootRouteChildren = {
   DiagnosticsRoute: DiagnosticsRoute,
   HistoryRoute: HistoryRoute,
   MemoryRoute: MemoryRoute,
+  ModulesRoute: ModulesRoute,
   OnboardingRoute: OnboardingRoute,
   RoutinesRoute: RoutinesRouteWithChildren,
   SettingsRoute: SettingsRouteWithChildren,

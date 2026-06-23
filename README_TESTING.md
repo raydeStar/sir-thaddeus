@@ -30,6 +30,7 @@ Most common commands:
 
 ```powershell
 ./dev/test.ps1
+./dev/verify-harness.ps1
 ./dev/harness.ps1 --suite quality --judge none
 ./dev/harness.ps1 --suite web-search --test web_local_business_deli --judge none
 ./dev/harness.ps1 stage --suite continuity --test local_business_followup_anchor
@@ -55,6 +56,7 @@ Short version for AI-assisted work:
 - Use stage suites under `tools/SirThaddeus.Harness/StageSuites/` for deterministic preprocess/classify/query regressions.
 - Use `followup_anchor` in stage suite `context` when a vague follow-up needs a deterministic resolved topic.
 - Do not modify harness scoring or suite expectations to make failures disappear.
+- Harness scoring uses rubric profiles with a 0..1 `overallScore` and 0..4 metric scores. Legacy fixture `min_score` values such as `7` are normalized to `0.7`.
 
 ## One-time setup
 
@@ -209,6 +211,22 @@ Recommended policy:
 - Keep `--max-iters 1` for PR runs.
 - Use `--judge none` for PR runs; reserve judge modes for nightly.
 - Use `--all` before merges when you want one full headless pass.
+
+### Harness rubric reports
+
+Each harness iteration writes `score.json` with:
+
+- `passed`, `status`, `overallScore`, and normalized `threshold`
+- `profile`
+- per-metric `scores` from 0..4
+- `hardGateFailures`
+- deterministic check results
+- `strengths`, `problems`, and `requiredFixes`
+- latency and token counts when available
+
+Run-level `summary.json` and `summary.md` include failing tests sorted by
+severity, top recurring failure reasons, average score by rubric profile, and
+hard-gate failure counts.
 
 ### Overnight harness runs
 

@@ -31,6 +31,7 @@ public sealed class CursorJudgeClient
         if (judgeMode == HarnessJudgeMode.Model)
         {
             return await _localModelJudge.EvaluateAsync(
+                packet.Profile,
                 packet.UserMessage,
                 steps ?? [],
                 packet.FinalResponse,
@@ -65,7 +66,12 @@ public sealed class CursorJudgeClient
         if (result is null)
             throw new InvalidOperationException($"Judge result is null: {path}");
         if (result.Score < 0 || result.Score > 10)
-            throw new InvalidOperationException($"Judge score must be 0..10: {path}");
+            throw new InvalidOperationException($"Judge score must be 0..1 or 0..10: {path}");
+        foreach (var (metric, score) in result.Scores)
+        {
+            if (score < 0 || score > 4)
+                throw new InvalidOperationException($"Judge metric '{metric}' must be 0..4: {path}");
+        }
         if (result.Patches.Any(p => string.IsNullOrWhiteSpace(p.File)))
             throw new InvalidOperationException($"Judge patches must include file paths: {path}");
     }

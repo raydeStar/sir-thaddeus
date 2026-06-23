@@ -184,8 +184,44 @@ public sealed record LlmSettings
     [JsonPropertyName("baseUrl")]
     public string BaseUrl { get; init; } = "http://localhost:1234";
 
+    [JsonPropertyName("chatCompletionPath")]
+    public string ChatCompletionPath { get; init; } = "/v1/chat/completions";
+
     [JsonPropertyName("model")]
     public string Model { get; init; } = "";
+
+    [JsonPropertyName("preloadModelKey")]
+    public string? PreloadModelKey { get; init; }
+
+    [JsonPropertyName("enableStartupWarmup")]
+    public bool EnableStartupWarmup { get; init; } = true;
+
+    [JsonPropertyName("enableKeepWarm")]
+    public bool EnableKeepWarm { get; init; } = true;
+
+    [JsonPropertyName("contextLength")]
+    public int ContextLength { get; init; } = 4096;
+
+    [JsonPropertyName("flashAttention")]
+    public bool FlashAttention { get; init; } = true;
+
+    [JsonPropertyName("offloadKvCacheToGpu")]
+    public bool OffloadKvCacheToGpu { get; init; } = true;
+
+    [JsonPropertyName("maxConcurrentLlmRequests")]
+    public int MaxConcurrentLlmRequests { get; init; } = 1;
+
+    [JsonPropertyName("warmupTimeoutSeconds")]
+    public int WarmupTimeoutSeconds { get; init; } = 120;
+
+    [JsonPropertyName("keepWarmIntervalMinutes")]
+    public int KeepWarmIntervalMinutes { get; init; } = 30;
+
+    [JsonPropertyName("maxInputTokensSoftCap")]
+    public int MaxInputTokensSoftCap { get; init; } = 4000;
+
+    [JsonPropertyName("maxOutputTokensDefault")]
+    public int MaxOutputTokensDefault { get; init; } = 700;
 
     /// <summary>
     /// Base URL for the gatekeeper LLM endpoint. When blank or null,
@@ -202,7 +238,7 @@ public sealed record LlmSettings
     /// is linguistically necessary for the current query.
     /// </summary>
     [JsonPropertyName("gatekeeperModelId")]
-    public string GatekeeperModelId { get; init; } = "qwen3.5-2b";
+    public string GatekeeperModelId { get; init; } = "liquid/lfm2.5-1.2b";
 
     /// <summary>
     /// When true, and the gatekeeper shares the same endpoint as the primary
@@ -210,7 +246,7 @@ public sealed record LlmSettings
     /// This avoids LM Studio load/offload churn on single-GPU setups.
     /// </summary>
     [JsonPropertyName("reusePrimaryModelForGatekeeperOnSharedEndpoint")]
-    public bool ReusePrimaryModelForGatekeeperOnSharedEndpoint { get; init; } = true;
+    public bool ReusePrimaryModelForGatekeeperOnSharedEndpoint { get; init; } = false;
 
     [JsonPropertyName("maxTokens")]
     public int MaxTokens { get; init; } = 2048;

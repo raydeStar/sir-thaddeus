@@ -5,6 +5,7 @@ import {
   BookOpenText,
   ClipboardList,
   Cog,
+  Database,
   Gauge,
   History,
   Home,
@@ -36,6 +37,7 @@ const primaryNav: ReadonlyArray<NavEntry> = [
   { to: '/wiki', label: 'Wiki', icon: Library },
   { to: '/history', label: 'History', icon: History },
   { to: '/activity', label: 'Activity', icon: Activity },
+  { to: '/modules', label: 'Data', icon: Database },
 ];
 
 const secondaryNav: ReadonlyArray<NavEntry> = [

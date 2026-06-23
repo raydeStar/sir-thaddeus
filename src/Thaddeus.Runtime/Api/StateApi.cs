@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Hosting;
+using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.Hosting;
 using Thaddeus.Runtime.State;
@@ -32,6 +33,35 @@ public static class StateApi
             startedAt = opts.StartedAt,
         }))
             .WithName("GetHealth");
+
+        IResult LlmHealth(LlmRuntimeRegistry registry)
+        {
+            var snapshot = registry.GetSnapshot();
+            return Results.Json(new
+            {
+                lmStudioReachable = snapshot.LmStudioReachable,
+                modelConfigured = snapshot.ModelConfigured,
+                modelLoadedOrReported = snapshot.ModelLoadedOrReported,
+                warmupCompleted = snapshot.WarmupCompleted,
+                activeRequests = snapshot.ActiveRequests,
+                queuedRequests = snapshot.QueuedRequests,
+                lastRequestDurationMs = snapshot.LastRequestDurationMs,
+                lastQueueWaitMs = snapshot.LastQueueWaitMs,
+                lastEstimatedInputTokens = snapshot.LastEstimatedInputTokens,
+                lastRequestedOutputTokens = snapshot.LastRequestedOutputTokens,
+                lastTaskKind = snapshot.LastTaskKind,
+                lastRequestWasBackground = snapshot.LastRequestWasBackground,
+                lastError = snapshot.LastError,
+                lastWarmupAt = snapshot.LastWarmupAt,
+                lastRequestAt = snapshot.LastRequestAt,
+            });
+        }
+
+        app.MapGet("/health/llm", LlmHealth)
+            .WithName("GetLlmHealth");
+
+        app.MapGet("/api/health/llm", LlmHealth)
+            .WithName("GetApiLlmHealth");
 
         // Enriched info for the Settings > General "System Status" card. Tells the
         // UI whether this runtime was spawned by a managing shell (ParentPid != null)

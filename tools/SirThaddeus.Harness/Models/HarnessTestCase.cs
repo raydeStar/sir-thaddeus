@@ -31,6 +31,14 @@ public sealed record HarnessTestCase
     [YamlMember(Alias = "mode")]
     public string Mode { get; init; } = "headless";
 
+    [JsonPropertyName("category")]
+    [YamlMember(Alias = "category")]
+    public string? Category { get; init; }
+
+    [JsonPropertyName("rubric_profile")]
+    [YamlMember(Alias = "rubric_profile")]
+    public string? RubricProfile { get; init; }
+
     /// <summary>
     /// Optional per-test personality override. When set, the runner uses this
     /// profile instead of the global setting, enabling cross-profile comparison
@@ -107,6 +115,18 @@ public sealed record HarnessExpectations
     [JsonPropertyName("max_response_chars")]
     [YamlMember(Alias = "max_response_chars")]
     public int? MaxResponseChars { get; init; }
+
+    [JsonPropertyName("require_json")]
+    [YamlMember(Alias = "require_json")]
+    public bool RequireJson { get; init; }
+
+    [JsonPropertyName("required_json_fields")]
+    [YamlMember(Alias = "required_json_fields")]
+    public List<string> RequiredJsonFields { get; init; } = [];
+
+    [JsonPropertyName("forbidden_phrases")]
+    [YamlMember(Alias = "forbidden_phrases")]
+    public List<string> ForbiddenPhrases { get; init; } = [];
 
     // ── Personality-specific scoring dimensions ──────────────────────
 

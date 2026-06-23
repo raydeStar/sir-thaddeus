@@ -15,9 +15,6 @@ internal static class WebToolFailureMapper
         if (!TryParseStructuredError(toolResult, out var code, out var message))
             return null;
 
-        if (ContainsUnavailable(code) || ContainsUnavailable(message))
-            return null;
-
         var text = BuildMessage(code, message);
         return new AgentResponse
         {
@@ -40,6 +37,12 @@ internal static class WebToolFailureMapper
         {
             return "Web search hit a timeout before results were retrieved. " +
                    "Please retry in a moment or narrow the query.";
+        }
+
+        if (ContainsUnavailable(code) || ContainsUnavailable(message))
+        {
+            return "Web search is currently unavailable for this request. " +
+                   "Please verify MCP server connectivity and try again.";
         }
 
         if (ContainsPolicyBlock(code) || ContainsPolicyBlock(message))

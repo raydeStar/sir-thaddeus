@@ -469,6 +469,35 @@ public sealed partial class SearchOrchestrator
                 Result = ex.Message
             });
 
+            if (toolCallsMade.Count > 0)
+            {
+                var fallbackText =
+                    ToolBackedResponseQualityGuards.TryBuildToolEvidenceFallback(userMessage, toolCallsMade) ??
+                    BuildCapabilityClaimFallback(
+                        "",
+                        SummaryFallbackKind.FactFind,
+                        MergeSourcesFromToolResults(toolCallsMade
+                            .Where(call => call.Success && !string.IsNullOrWhiteSpace(call.Result))
+                            .Select(call => call.Result!)
+                            .ToList()),
+                        userMessage);
+                var fallbackSources = MergeSourcesFromToolResults(toolCallsMade
+                    .Where(call => call.Success && !string.IsNullOrWhiteSpace(call.Result))
+                    .Select(call => call.Result!)
+                    .ToList());
+
+                if (!string.IsNullOrWhiteSpace(fallbackText))
+                {
+                    return new AgentResponse
+                    {
+                        Text = fallbackText,
+                        Success = true,
+                        ToolCallsMade = toolCallsMade.ToList(),
+                        Sources = ToAgentSources(fallbackSources)
+                    };
+                }
+            }
+
             return AgentResponse.FromError(
                 "Something went sideways with the search pipeline — " +
                 $"try rephrasing? ({ex.GetType().Name})");
@@ -2581,10 +2610,13 @@ public sealed partial class SearchOrchestrator
             {
                 return new AgentResponse
                 {
-                    Text = BuildExtractiveFallback(summaryInput, originalRequest),
+                    Text = sources is { Count: > 0 }
+                        ? BuildCapabilityClaimFallback(summaryInput, fallbackKind, sources, originalRequest)
+                        : BuildExtractiveFallback(summaryInput, originalRequest),
                     Success       = true,
                     ToolCallsMade = toolCallsMade,
-                    LlmRoundTrips = Math.Max(1, llmRoundTrips)
+                    LlmRoundTrips = Math.Max(1, llmRoundTrips),
+                    Sources = ToAgentSources(sources)
                 };
             }
         }
@@ -2830,7 +2862,8 @@ public sealed partial class SearchOrchestrator
             Text          = text,
             Success       = true,
             ToolCallsMade = toolCallsMade,
-            LlmRoundTrips = Math.Max(1, llmRoundTrips)
+            LlmRoundTrips = Math.Max(1, llmRoundTrips),
+            Sources = ToAgentSources(sources)
         };
     }
 

@@ -37,6 +37,8 @@ namespace SirThaddeus.Agent.Pipeline.Steps;
 /// </summary>
 public sealed class ToolLoopStep : ITurnStep
 {
+    private const int ToolLoopMaxOutputTokens = 1024;
+
     private readonly ILlmClient _llm;
     private readonly IMcpToolClient _mcp;
     private readonly IChatEventSink _sink;
@@ -91,6 +93,20 @@ public sealed class ToolLoopStep : ITurnStep
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            if (round > 0 &&
+                TryBuildPlacesDiscoverDraftFromRecords(toolCallsMade, context.UserText) is { Text.Length: > 0 } existingPlacesDraft)
+            {
+                var placesResponse = new AgentResponse
+                {
+                    Text = existingPlacesDraft.Text,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade,
+                    LlmRoundTrips = round,
+                    Sources = existingPlacesDraft.Sources,
+                };
+                return new StepResult.Terminate(placesResponse);
+            }
+
             // Force the user-requested tool only on the FIRST round. After
             // the tool fires and returns results, subsequent rounds must be
             // free to synthesize prose or chain follow-up tools — otherwise
@@ -103,21 +119,50 @@ public sealed class ToolLoopStep : ITurnStep
                 forcedTool = ResolveMemoryRetrieveForPersonalContext(context, tools);
             }
 
+            // Tool-loop turns should be concise: either choose a tool or
+            // synthesize the already gathered evidence. Leaving the global
+            // output budget here lets local models burn the whole harness
+            // timeout on a single overlong generation.
+            var forcedToolChoice = tools is not null ? forcedTool : null;
             LlmResponse response;
-            if (!string.IsNullOrWhiteSpace(forcedTool) && tools is not null)
+            try
             {
-                // Router-directed call: pass tool_choice through so the
-                // model cannot answer from stale training memory before the
-                // lookup runs.
                 response = await _llm
-                    .ChatAsync(messages, tools, forcedTool, cancellationToken)
+                    .ChatAsync(messages, tools, ToolLoopMaxOutputTokens, forcedToolChoice, cancellationToken)
                     .ConfigureAwait(false);
             }
-            else
+            catch (OperationCanceledException)
+                when (TryBuildPlacesDiscoverDraftFromRecords(toolCallsMade, context.UserText) is { Text.Length: > 0 })
             {
-                response = await _llm
-                    .ChatAsync(messages, tools, cancellationToken)
-                    .ConfigureAwait(false);
+                var placesDraft = TryBuildPlacesDiscoverDraftFromRecords(toolCallsMade, context.UserText)!;
+                var deterministicResponse = new AgentResponse
+                {
+                    Text = placesDraft.Text,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade,
+                    LlmRoundTrips = round,
+                    Sources = placesDraft.Sources,
+                };
+                return new StepResult.Terminate(deterministicResponse);
+            }
+            catch (HttpRequestException) when (toolCallsMade.Count > 0)
+            {
+                var fallback = ToolBackedResponseQualityGuards.TryBuildToolEvidenceFallback(
+                    context.UserText ?? string.Empty,
+                    toolCallsMade);
+                if (!string.IsNullOrWhiteSpace(fallback))
+                {
+                    return new StepResult.Terminate(new AgentResponse
+                    {
+                        Text = fallback,
+                        Success = true,
+                        ToolCallsMade = toolCallsMade,
+                        LlmRoundTrips = round,
+                        Sources = SourceCardExtractor.ExtractMerged(toolCallsMade.Select(call => call.Result))
+                    });
+                }
+
+                throw;
             }
 
             if (response.ToolCalls is null || response.ToolCalls.Count == 0)
@@ -219,6 +264,20 @@ public sealed class ToolLoopStep : ITurnStep
                         AssistantDraft = BuildMissingLocationPlacesReply(context.UserText)
                     };
                     return new StepResult.Continue(updated);
+                }
+
+                if (outcome.Ok &&
+                    TryBuildPlacesDiscoverDraft(toolName, outcome.ResultText, context.UserText) is { Text.Length: > 0 } placesDraft)
+                {
+                    var placesResponse = new AgentResponse
+                    {
+                        Text = placesDraft.Text,
+                        Success = true,
+                        ToolCallsMade = toolCallsMade,
+                        LlmRoundTrips = round + 1,
+                        Sources = placesDraft.Sources,
+                    };
+                    return new StepResult.Terminate(placesResponse);
                 }
 
                 if (LooksLikeTimeNowTool(toolName) &&
@@ -589,6 +648,168 @@ public sealed class ToolLoopStep : ITurnStep
         return "local business";
     }
 
+    private sealed record PlacesDiscoverDraft(string Text, IReadOnlyList<AgentSource> Sources);
+
+    private static PlacesDiscoverDraft? TryBuildPlacesDiscoverDraft(string toolName, string resultText, string? userText)
+    {
+        if (!string.Equals(toolName, ToolNames.PlacesDiscover, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(toolName, ToolNames.PlacesDiscoverAlt, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(resultText))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(resultText);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("results", out var results) ||
+                results.ValueKind != JsonValueKind.Array ||
+                results.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            var label = PluralizeLocalBusinessLabel(InferLocalBusinessLabel(userText));
+            var resolvedLocation = root.TryGetProperty("resolvedLocation", out var resolvedEl)
+                ? resolvedEl.GetString()
+                : null;
+            var provider = root.TryGetProperty("provider", out var providerEl)
+                ? providerEl.GetString()
+                : null;
+
+            var lines = new List<string>();
+            foreach (var item in results.EnumerateArray().Take(3))
+            {
+                var name = ReadJsonString(item, "name");
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                var details = new List<string>();
+                var address = ReadJsonString(item, "address");
+                if (!string.IsNullOrWhiteSpace(address))
+                    details.Add(address!);
+                if (item.TryGetProperty("distanceMeters", out var distanceEl) &&
+                    distanceEl.TryGetInt32(out var distanceMeters) &&
+                    distanceMeters >= 0)
+                {
+                    details.Add(FormatDistance(distanceMeters));
+                }
+
+                lines.Add(details.Count == 0
+                    ? $"- **{name}**"
+                    : $"- **{name}** — {string.Join(" · ", details)}");
+            }
+
+            if (lines.Count == 0)
+                return null;
+
+            var locationText = string.IsNullOrWhiteSpace(resolvedLocation)
+                ? "nearby"
+                : $"near {resolvedLocation}";
+            var providerText = string.IsNullOrWhiteSpace(provider) ? "Open Places" : provider;
+
+            var text = $"I found these {label} {locationText} via places_discover/{providerText}:\n" +
+                       string.Join("\n", lines) +
+                       "\n\nOpen Places can miss hours, inventory, and recent closures, so confirm details before heading over.";
+            return new PlacesDiscoverDraft(text, BuildPlacesDiscoverSources(results));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static PlacesDiscoverDraft? TryBuildPlacesDiscoverDraftFromRecords(
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        string? userText)
+    {
+        foreach (var call in toolCallsMade.Reverse())
+        {
+            if (!call.Success)
+                continue;
+
+            var draft = TryBuildPlacesDiscoverDraft(call.ToolName, call.Result ?? string.Empty, userText);
+            if (!string.IsNullOrWhiteSpace(draft?.Text))
+                return draft;
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<AgentSource> BuildPlacesDiscoverSources(JsonElement results)
+    {
+        var sources = new List<AgentSource>();
+        foreach (var item in results.EnumerateArray().Take(3))
+        {
+            var name = ReadJsonString(item, "name");
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+
+            var url = ReadJsonString(item, "osmUrl");
+            if (string.IsNullOrWhiteSpace(url) &&
+                item.TryGetProperty("latitude", out var latitudeEl) &&
+                item.TryGetProperty("longitude", out var longitudeEl) &&
+                latitudeEl.TryGetDouble(out var latitude) &&
+                longitudeEl.TryGetDouble(out var longitude))
+            {
+                url = "https://www.openstreetmap.org/?" +
+                      $"mlat={latitude.ToString("F6", CultureInfo.InvariantCulture)}&" +
+                      $"mlon={longitude.ToString("F6", CultureInfo.InvariantCulture)}";
+            }
+
+            if (string.IsNullOrWhiteSpace(url))
+                continue;
+
+            var excerptParts = new List<string>();
+            var address = ReadJsonString(item, "address");
+            if (!string.IsNullOrWhiteSpace(address))
+                excerptParts.Add(address!);
+            var category = ReadJsonString(item, "category");
+            if (!string.IsNullOrWhiteSpace(category))
+                excerptParts.Add(category!);
+            if (item.TryGetProperty("distanceMeters", out var distanceEl) &&
+                distanceEl.TryGetInt32(out var distanceMeters) &&
+                distanceMeters >= 0)
+            {
+                excerptParts.Add(FormatDistance(distanceMeters));
+            }
+
+            sources.Add(new AgentSource
+            {
+                Url = url!,
+                Title = name,
+                Domain = "openstreetmap.org",
+                Excerpt = string.Join(" · ", excerptParts)
+            });
+        }
+
+        return sources;
+    }
+
+    private static string PluralizeLocalBusinessLabel(string label)
+        => label.Equals("deli", StringComparison.OrdinalIgnoreCase)
+            ? "delis"
+            : label.EndsWith("s", StringComparison.OrdinalIgnoreCase) ? label : label + "s";
+
+    private static string? ReadJsonString(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static string FormatDistance(int distanceMeters)
+    {
+        if (distanceMeters < 1_000)
+            return $"{distanceMeters.ToString(CultureInfo.InvariantCulture)} m away";
+
+        var miles = distanceMeters / 1609.344;
+        return $"{miles.ToString("0.0", CultureInfo.InvariantCulture)} mi away";
+    }
+
     private static bool HasSatisfiedWeatherAndNewsRequest(string? userText, IReadOnlyList<ToolCallRecord> toolCallsMade)
     {
         if (string.IsNullOrWhiteSpace(userText))
@@ -899,6 +1120,9 @@ public sealed class ToolLoopStep : ITurnStep
         try
         {
             var result = await _mcp.CallToolAsync(toolName, args, ct).ConfigureAwait(false);
+            if (TryExtractStructuredToolError(result, out var error))
+                return new ToolCallOutcome(result, Ok: false, Error: error);
+
             return new ToolCallOutcome(result, Ok: true, Error: null);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -908,6 +1132,60 @@ public sealed class ToolLoopStep : ITurnStep
         catch (Exception ex)
         {
             return new ToolCallOutcome($"Error: {ex.Message}", Ok: false, Error: ex.Message);
+        }
+    }
+
+    private static bool TryExtractStructuredToolError(string payload, out string error)
+    {
+        error = "";
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        var trimmed = payload.TrimStart();
+        if (trimmed.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+        {
+            error = trimmed["Error:".Length..].Trim();
+            return !string.IsNullOrWhiteSpace(error);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("error", out var errorEl))
+            {
+                return false;
+            }
+
+            if (errorEl.ValueKind == JsonValueKind.String)
+            {
+                error = errorEl.GetString() ?? "";
+                return !string.IsNullOrWhiteSpace(error);
+            }
+
+            if (errorEl.ValueKind != JsonValueKind.Object)
+                return false;
+
+            var code = "";
+            var message = "";
+            if (errorEl.TryGetProperty("code", out var codeEl) &&
+                codeEl.ValueKind == JsonValueKind.String)
+            {
+                code = codeEl.GetString() ?? "";
+            }
+
+            if (errorEl.TryGetProperty("message", out var messageEl) &&
+                messageEl.ValueKind == JsonValueKind.String)
+            {
+                message = messageEl.GetString() ?? "";
+            }
+
+            error = string.Join(": ", new[] { code, message }.Where(value => !string.IsNullOrWhiteSpace(value)));
+            return !string.IsNullOrWhiteSpace(error);
+        }
+        catch
+        {
+            return false;
         }
     }
 

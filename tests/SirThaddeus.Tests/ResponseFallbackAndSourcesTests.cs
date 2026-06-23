@@ -169,6 +169,18 @@ public class SearchOfflineFallbackTests
     }
 
     [Fact]
+    public void TryBuildMediaInstallmentFallback_ForStargateUniverseSeason3Episode1_ReturnsSpecificNonexistenceAnswer()
+    {
+        var response = SearchOrchestrator.TryBuildMediaInstallmentFallback(
+            "What would be the plot of Episode 1 of Season 3 of Stargate Universe about?");
+
+        Assert.NotNull(response);
+        Assert.Contains("Stargate Universe Season 3 Episode 1", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("before Season 3 was produced", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("should not invent a plot", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenWebSearchUnavailable_UsesBestEffortReasoning()
     {
         var llm = new StubLlmClient(
@@ -433,8 +445,11 @@ public class SearchOfflineFallbackTests
 
         Assert.True(response.Success);
         // Live search returned no results, so the agent must not invent any answer string.
-        // The only acceptable response is the generic unavailable status.
-        Assert.Equal(ExplicitWebNoResultsContractNormalizer.UnavailableMessage, response.Text);
+        // It still honors the user's explicit two-line response contract.
+        Assert.Equal(
+            "Answer: Live lookup is unavailable for this request, so I do not have confirmed results.\n" +
+            "Commentary: Please retry in a moment.",
+            response.Text);
         Assert.Contains(mcp.Calls, call =>
             call.ToolName.Equals("web_search", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(mcp.Calls, call =>
@@ -507,6 +522,7 @@ public class SearchOfflineFallbackTests
         Assert.True(response.Success);
         Assert.StartsWith("No", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("word for word", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("original", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("difference", response.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("strongest evidence I found", response.Text, StringComparison.OrdinalIgnoreCase);
     }
@@ -1519,6 +1535,143 @@ public class BareResponseEnrichmentTests
 
 public class ChatPostProcessorReasoningBehaviorTests
 {
+    [Fact]
+    public void SanitizeFinalResponse_ConciseWeatherPlan_UsesForecastJsonOverDraftText()
+    {
+        var processor = new DeterministicChatPostProcessor();
+        const string forecastJson = """
+            {
+              "location": { "name": "39.7392, -104.9849" },
+              "current": {
+                "temperature": 88,
+                "unit": "F",
+                "condition": "Slight Chance Showers And Thunderstorms"
+              },
+              "daily": [
+                { "avgTemp": 75 }
+              ]
+            }
+            """;
+
+        var output = processor.SanitizeFinalResponse(
+            text: "Denver today: showers, temperature about 91°F now. Plan: bring a layer.",
+            toolCallsMade:
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WeatherForecast,
+                    Arguments = "{}",
+                    Result = forecastJson,
+                    Success = true
+                }
+            ],
+            latestUserMessage: "Use weather tools for Denver and provide a concise, useful plan for the day.");
+
+        Assert.Contains("88F", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Denver", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("thunderstorms", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("provide a concise", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("91", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_ConciseWeatherResult_UsesForecastJsonOverDraftText()
+    {
+        var processor = new DeterministicChatPostProcessor();
+        const string forecastJson = """
+            {
+              "location": { "name": "Austin, TX" },
+              "current": {
+                "temperature": 82,
+                "unit": "F",
+                "condition": "Partly Cloudy"
+              },
+              "daily": [
+                { "avgTemp": 79 }
+              ]
+            }
+            """;
+
+        var output = processor.SanitizeFinalResponse(
+            text: "Austin weather: 91F and rainy. Plan: stay indoors.",
+            toolCallsMade:
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WeatherForecast,
+                    Arguments = "{}",
+                    Result = forecastJson,
+                    Success = true
+                }
+            ],
+            latestUserMessage: "Use weather tools for Austin, TX and give a concise result.");
+
+        Assert.Contains("Austin", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("82F", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Partly Cloudy", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("91", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Plan:", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_ShortWeatherOutlook_UsesCompactForecastSummary()
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.SanitizeFinalResponse(
+            text: "Looking ahead, Seattle should be around 70F with a broader weekly outlook.",
+            toolCallsMade:
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WeatherForecast,
+                    Arguments = "{}",
+                    Result = "[Weather forecast: provider=nws, current=56F Sunny]",
+                    Success = true
+                }
+            ],
+            latestUserMessage: "Use weather tools to provide a short weather outlook for Seattle, WA.");
+
+        Assert.Contains("Seattle", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("56F", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Sunny", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("70", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(
+        "Use web_search for AI policy news and handle timeout gracefully.",
+        "{\"error\":{\"code\":\"timeout\",\"message\":\"web_search timed out.\"},\"tool\":\"web_search\",\"stub\":true}",
+        "timeout")]
+    [InlineData(
+        "Use web_search to find the latest Rust language release notes.",
+        "{\"error\":{\"code\":\"tool_unavailable\",\"message\":\"web_search is currently unavailable.\"},\"tool\":\"web_search\",\"stub\":true}",
+        "unavailable")]
+    public void SanitizeFinalResponse_ExplicitWebStructuredFailure_PreservesFailureKeyword(
+        string userMessage,
+        string toolResult,
+        string expectedKeyword)
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.SanitizeFinalResponse(
+            text: "I reached the tool budget before I could finish.",
+            toolCallsMade:
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "web_search",
+                    Arguments = "{\"query\":\"test\"}",
+                    Result = toolResult,
+                    Success = false
+                }
+            ],
+            latestUserMessage: userMessage);
+
+        Assert.Contains(expectedKeyword, output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("budget", output, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void ProcessChatOnlyDraft_DoesNotApplyCarWashHardcodedOverride()
     {

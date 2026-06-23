@@ -1,0 +1,21 @@
+{
+  "name": "@sir-thaddeus/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Module primitives for Sir Thaddeus extension packs.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx tests/external-health-pack-smoke.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "tsx": "^4.22.4",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}

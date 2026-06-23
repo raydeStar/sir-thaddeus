@@ -16,8 +16,20 @@ public sealed record LlmSettings(
     double Temperature,
     string? GatekeeperBaseUrl = null,
     string? GatekeeperModelId = null,
-    bool ReusePrimaryForGatekeeperOnSharedEndpoint = true,
-    bool GatekeeperEnabled = true);
+    bool ReusePrimaryForGatekeeperOnSharedEndpoint = false,
+    bool GatekeeperEnabled = true,
+    string ChatCompletionPath = "/v1/chat/completions",
+    string? PreloadModelKey = null,
+    bool EnableStartupWarmup = true,
+    bool EnableKeepWarm = true,
+    int ContextLength = 4096,
+    bool FlashAttention = true,
+    bool OffloadKvCacheToGpu = true,
+    int MaxConcurrentLlmRequests = 1,
+    int WarmupTimeoutSeconds = 120,
+    int KeepWarmIntervalMinutes = 30,
+    int MaxInputTokensSoftCap = 4000,
+    int MaxOutputTokensDefault = 700);
 
 /// <summary>Voice provider configuration.</summary>
 public sealed record VoiceSettings(
@@ -187,8 +199,16 @@ public sealed record SettingsDocument(
             ContextWindowTokens: 16384,
             Temperature: 0.7,
             GatekeeperBaseUrl: null,
-            GatekeeperModelId: "qwen3.5-2b",
-            ReusePrimaryForGatekeeperOnSharedEndpoint: true),
+            GatekeeperModelId: "liquid/lfm2.5-1.2b",
+            ReusePrimaryForGatekeeperOnSharedEndpoint: false,
+            EnableStartupWarmup: true,
+            EnableKeepWarm: true,
+            ContextLength: 4096,
+            MaxConcurrentLlmRequests: 1,
+            WarmupTimeoutSeconds: 120,
+            KeepWarmIntervalMinutes: 30,
+            MaxInputTokensSoftCap: 4000,
+            MaxOutputTokensDefault: 700),
         Voice: new VoiceSettings(
             SttProvider: "whisper-cpp",
             TtsProvider: "kokoro-sharp",

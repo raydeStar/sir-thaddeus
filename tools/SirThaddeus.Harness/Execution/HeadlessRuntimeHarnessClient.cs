@@ -149,7 +149,8 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
             Success = runOutcome.Success,
             Error = runOutcome.Success ? null : runOutcome.Error,
             ToolCallsMade = toolCalls,
-            LlmRoundTrips = 0
+            LlmRoundTrips = 0,
+            Sources = runOutcome.Sources
         };
 
         totalStopwatch.Stop();
@@ -244,6 +245,15 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
     /// </summary>
     private async Task PrewarmAgentPipelineAsync(CancellationToken cancellationToken)
     {
+        if (ShouldSkipPrewarm())
+        {
+            Console.Error.WriteLine("[harness] Headless runtime prewarm skipped by ST_HARNESS_SKIP_PREWARM.");
+            return;
+        }
+
+        using var warmupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        warmupCts.CancelAfter(GetPrewarmTimeout());
+
         try
         {
             var resetRequest = new HarnessResetRequest(
@@ -252,7 +262,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
                 ClearMemoryData: true,
                 ClearChatHistory: true);
             using (var resetResponse = await _http.PostAsJsonAsync(
-                "api/harness/reset", resetRequest, JsonOptions, cancellationToken))
+                "api/harness/reset", resetRequest, JsonOptions, warmupCts.Token))
             {
                 resetResponse.EnsureSuccessStatusCode();
             }
@@ -260,14 +270,36 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
             // Short, literal prompt the LLM can answer in <= 1 token. Cuts
             // generation time during warmup vs an open-ended "ping" that
             // might produce a paragraph-long preamble.
-            var startResponse = await PostChatAsync("Reply with only the word ok.", cancellationToken);
-            await ReadRunToCompletionAsync(startResponse.RunId, cancellationToken);
+            var startResponse = await PostChatAsync("Reply with only the word ok.", warmupCts.Token);
+            await ReadRunToCompletionAsync(startResponse.RunId, warmupCts.Token);
         }
-        catch
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            Console.Error.WriteLine($"[harness] Headless runtime prewarm timed out after {GetPrewarmTimeout().TotalSeconds:0}s; proceeding.");
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            Console.Error.WriteLine($"[harness] Headless runtime prewarm failed: {ex.Message}");
             // Warmup is best-effort. If it fails, the first real test will
             // simply pay the cold-start cost — not worth aborting the run.
         }
+    }
+
+    private static bool ShouldSkipPrewarm()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_SKIP_PREWARM");
+        return raw is not null &&
+               (raw.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                raw.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                raw.Equals("yes", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static TimeSpan GetPrewarmTimeout()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_PREWARM_TIMEOUT_SECONDS");
+        return int.TryParse(raw, out var seconds)
+            ? TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 60))
+            : TimeSpan.FromSeconds(10);
     }
 
     private async Task ApplyHarnessResetAsync(HarnessTestCase test, CancellationToken cancellationToken)
@@ -345,7 +377,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
         return payload ?? throw new InvalidOperationException("Headless runtime returned an empty chat start response.");
     }
 
-    private async Task<(bool Success, string FinalText, string? Error)> ReadRunToCompletionAsync(
+    private async Task<(bool Success, string FinalText, string? Error, IReadOnlyList<AgentSource> Sources)> ReadRunToCompletionAsync(
         string runId,
         CancellationToken cancellationToken)
     {
@@ -358,6 +390,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
 
         string? finalText = null;
         string? error = null;
+        IReadOnlyList<AgentSource> sources = [];
 
         while (true)
         {
@@ -399,17 +432,53 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
                     finalText = payload.TryGetProperty("finalText", out var finalTextProp)
                         ? finalTextProp.GetString()
                         : null;
-                    return (true, finalText ?? string.Empty, null);
+                    sources = TryReadSourceCards(payload);
+                    return (true, finalText ?? string.Empty, null, sources);
                 case RuntimeEventTypes.RunFailed:
                     error = payload.TryGetProperty("error", out var errorProp)
                         ? errorProp.GetString()
                         : "Unknown headless runtime failure.";
-                    return (false, error ?? "Unknown headless runtime failure.", error);
+                    return (false, error ?? "Unknown headless runtime failure.", error, sources);
             }
         }
 
-        return (false, finalText ?? "Headless runtime event stream ended before completion.", "event_stream_incomplete");
+        return (false, finalText ?? "Headless runtime event stream ended before completion.", "event_stream_incomplete", sources);
     }
+
+    private static IReadOnlyList<AgentSource> TryReadSourceCards(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("sourceCards", out var sourceCards) ||
+            sourceCards.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var sources = new List<AgentSource>();
+        foreach (var item in sourceCards.EnumerateArray())
+        {
+            var url = TryReadString(item, "url");
+            if (string.IsNullOrWhiteSpace(url))
+                continue;
+
+            sources.Add(new AgentSource
+            {
+                Url = url!,
+                Title = TryReadString(item, "title"),
+                Domain = TryReadString(item, "domain"),
+                Excerpt = TryReadString(item, "excerpt"),
+                Favicon = TryReadString(item, "favicon"),
+                Thumbnail = TryReadString(item, "thumbnail"),
+                PublishedAt = TryReadString(item, "publishedAt")
+            });
+        }
+
+        return sources;
+    }
+
+    private static string? TryReadString(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     private async Task<IReadOnlyList<AuditEntryDto>> GetAuditEntriesAsync(CancellationToken cancellationToken)
     {

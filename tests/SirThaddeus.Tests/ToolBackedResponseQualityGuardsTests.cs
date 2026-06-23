@@ -573,6 +573,69 @@ public sealed class ToolBackedResponseQualityGuardsTests
     }
 
     [Fact]
+    public void Apply_WhenLatestVersionNoResultsGenericFallback_PreservesSubject()
+    {
+        var response = ToolBackedResponseQualityGuards.Apply(
+            ExplicitWebNoResultsContractNormalizer.UnavailableMessage,
+            "What is the latest stable version of Python?",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "web_search",
+                    Arguments = "{\"query\":\"latest stable version of Python\"}",
+                    Result = "[search: 0 result(s) returned]",
+                    Success = true
+                }
+            ]);
+
+        Assert.Contains("Python", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cannot verify the latest stable version", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Apply_WhenStrictTwoLineLatestVersionPromptDrifts_RebuildsContract()
+    {
+        var response = ToolBackedResponseQualityGuards.Apply(
+            "Sir Thaddeus here. I have consulted the web, but the search results are not providing a definitive answer regarding the latest stable version of .NET as of 2025 with sufficient detail to meet your strict two-line format requirement.",
+            "What is the latest stable version of .NET as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "web_search",
+                    Arguments = "{\"query\":\"latest stable version of .NET\"}",
+                    Result = "[search: 0 result(s) returned]",
+                    Success = true
+                }
+            ]);
+
+        Assert.StartsWith("Answer:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\nCommentary:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".NET", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Apply_WhenStrictTwoLineLatestVersionSearchIsInconclusive_RebuildsContract()
+    {
+        var response = ToolBackedResponseQualityGuards.Apply(
+            "Sir Thaddeus here. It appears my initial query did not yield a precise, definitive answer regarding the latest stable .NET version for 2025. Since the search results were inconclusive, I will attempt a more targeted web search. May I proceed with that second query?",
+            "What is the latest stable version of .NET as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "web_search",
+                    Arguments = "{\"query\":\"latest stable version of .NET\"}",
+                    Result = "[search: 0 result(s) returned]",
+                    Success = true
+                }
+            ]);
+
+        Assert.StartsWith("Answer:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\nCommentary:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".NET", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("May I proceed", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Apply_WhenMediaInstallmentAnswerSummarizesReboot_ReplacesWithNonexistenceAnswer()
     {
         const string weakResponse = "I dont have information regarding the specific plot details for Episode 2 of Season 7 of Meridian Drift. The search results only confirm a new Meridian Drift reboot ordered by a streaming service.";
@@ -781,6 +844,27 @@ public sealed class ToolBackedResponseQualityGuardsTests
     }
 
     [Fact]
+    public void Apply_WhenMovieComparisonMentionsAnimatedAndLiveActionAdaptations_InsertsOriginal()
+    {
+        const string weakResponse = "My previous search indicated that it is not word for word identical; rather, it shares the core story while featuring changes. The sources suggested differences exist between the animated and live-action adaptations.";
+
+        var response = ToolBackedResponseQualityGuards.Apply(
+            weakResponse,
+            "Can you tell me if the new live-action How to Train Your Dragon is word for word like the original movies?",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\"How to Train Your Dragon live action word for word original\"}",
+                    Result = "[search: 3 result(s) returned]",
+                    Success = true
+                }
+            ]);
+
+        Assert.Contains("original animated and live-action adaptations", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Apply_WhenStructuredSearchGetsNoResults_DoesNotAskPermission()
     {
         const string weakResponse = "Since I must gather live evidence before synthesizing this information, I shall broaden my approach. Would you permit me to execute a broader search? Once we have gathered sufficient material, I shall structure it precisely as requested.";
@@ -842,6 +926,40 @@ public sealed class ToolBackedResponseQualityGuardsTests
         Assert.DoesNotContain("only have one snippet", response, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Let me know", response, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("The available source points", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Apply_WhenStructuredSearchFindsIrrelevantResults_ReplacesWithDeterministicStructure()
+    {
+        const string weakResponse = """
+            Overview: Zero relevant information was retrieved regarding .NET Aspire developments.
+            Common Points, Differences, Practical Takeaway: These sections cannot be populated as no factual basis for them exists.
+            Should I attempt another web search using different keywords?
+            """;
+
+        var response = ToolBackedResponseQualityGuards.Apply(
+            weakResponse,
+            "Search for recent updates and developments in .NET Aspire from the last year. Synthesize information from multiple sources, compare what overlaps and what differs. Provide a structured response with: Overview, Common Points, Differences, Practical Takeaway.",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\".NET Aspire recent updates and developments last year\"}",
+                    Result = """
+                        [search: 1 result(s) returned]
+
+                        <!-- SOURCES_JSON -->
+                        {"sources":[{"url":"https://example.com/aspire-release","title":".NET Aspire 9.4 release notes","domain":"example.com","snippet":"The release improves dashboard diagnostics, app-host workflow, and integrations for distributed application development."}]}
+                        """,
+                    Success = true
+                }
+            ]);
+
+        Assert.Contains("Overview:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Common Points:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Differences:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Practical Takeaway:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Should I attempt", response, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1158,6 +1276,44 @@ public sealed class ToolBackedResponseQualityGuardsTests
         Assert.Contains("release/model-list evidence", response, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Evidence checked", response, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("consulting official announcements", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Apply_WhenRawLlmContextErrorAfterLocalBusinessTools_UsesToolEvidenceFallback()
+    {
+        const string rawError = "LLM returned 400 (Bad Request): {\"error\":\"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 31669>= n_ctx: 4096).\"}";
+
+        var response = ToolBackedResponseQualityGuards.Apply(
+            rawError,
+            "Can you find a good florist in Hillsboro, OR?",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.PlacesLookup,
+                    Arguments = "{\"query\":\"florist in Hillsboro, OR\"}",
+                    Result = "[Places lookup error: Google Places API key is not configured.]",
+                    Success = true
+                },
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\"best florist in Hillsboro, OR reviews\"}",
+                    Result = """
+                        [search: 2 result(s) returned]
+
+                        <!-- SOURCES_JSON -->
+                        {"sources":[
+                          {"url":"https://example.test/hillsboro-florist","title":"Hillsboro Florist Reviews","domain":"example.test","snippet":"Local florist reviews in Hillsboro, Oregon."}
+                        ]}
+                        """,
+                    Success = true
+                }
+            ]);
+
+        Assert.DoesNotContain("LLM returned", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("florist", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Hillsboro", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Sources checked", response, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class ThrowingHandler : HttpMessageHandler

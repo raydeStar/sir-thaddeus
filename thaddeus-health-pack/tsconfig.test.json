@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": false,
+    "outDir": ".tmp/health-pack-tests"
+  },
+  "include": ["src", "smoke", "tests"]
+}

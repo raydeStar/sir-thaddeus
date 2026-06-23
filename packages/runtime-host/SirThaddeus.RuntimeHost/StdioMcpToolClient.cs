@@ -9,6 +9,8 @@ namespace SirThaddeus.RuntimeHost;
 public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
 {
     private readonly string _serverPath;
+    private readonly IReadOnlyList<string> _args;
+    private readonly string? _workingDirectory;
     private readonly IReadOnlyDictionary<string, string> _env;
     private readonly string _clientName;
     private readonly string _clientVersion;
@@ -28,9 +30,13 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
         IReadOnlyDictionary<string, string> env,
         string clientName,
         string clientVersion,
-        IAuditLogger audit)
+        IAuditLogger audit,
+        IReadOnlyList<string>? args = null,
+        string? workingDirectory = null)
     {
         _serverPath = serverPath ?? throw new ArgumentNullException(nameof(serverPath));
+        _args = args ?? Array.Empty<string>();
+        _workingDirectory = string.IsNullOrWhiteSpace(workingDirectory) ? null : workingDirectory;
         _env = env ?? throw new ArgumentNullException(nameof(env));
         _clientName = clientName ?? throw new ArgumentNullException(nameof(clientName));
         _clientVersion = clientVersion ?? throw new ArgumentNullException(nameof(clientVersion));
@@ -171,15 +177,23 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
     {
         DisposeTransportLocked(killProcess: true);
 
+        var executable = ResolveExecutable(_serverPath);
+        var processArgs = ResolveArguments(_serverPath, _args);
         var startInfo = new ProcessStartInfo
         {
-            FileName = _serverPath,
+            FileName = executable,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = false,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+
+        foreach (var arg in processArgs)
+            startInfo.ArgumentList.Add(arg);
+
+        if (!string.IsNullOrWhiteSpace(_workingDirectory))
+            startInfo.WorkingDirectory = _workingDirectory;
 
         foreach (var pair in _env)
             startInfo.Environment[pair.Key] = pair.Value;
@@ -198,6 +212,8 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
             Details = new Dictionary<string, object>
             {
                 ["path"] = _serverPath,
+                ["args"] = _args,
+                ["cwd"] = _workingDirectory ?? "",
                 ["pid"] = _process.Id,
                 ["reason"] = reason
             }
@@ -241,7 +257,17 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
-            using var doc = JsonDocument.Parse(line);
+            JsonDocument doc;
+            try
+            {
+                doc = JsonDocument.Parse(line);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+            using (doc)
+            {
             var root = doc.RootElement;
             if (!root.TryGetProperty("id", out var idProp) || idProp.GetInt32() != id)
                 continue;
@@ -257,6 +283,7 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
 
             return JsonSerializer.Deserialize<T>(result.GetRawText(), _json)
                 ?? throw new InvalidOperationException("Failed to deserialize MCP response.");
+            }
         }
     }
 
@@ -321,6 +348,44 @@ public sealed class StdioMcpToolClient : IMcpToolClient, IAsyncDisposable
                message.Contains("transport is unavailable", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("stream closed", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("MCP client is not initialized", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveExecutable(string command)
+    {
+        if (!OperatingSystem.IsWindows())
+            return command;
+
+        if (string.Equals(command, "npm", StringComparison.OrdinalIgnoreCase))
+            return "cmd.exe";
+
+        if (string.Equals(command, "npx", StringComparison.OrdinalIgnoreCase))
+            return "cmd.exe";
+
+        return command;
+    }
+
+    private static IReadOnlyList<string> ResolveArguments(string command, IReadOnlyList<string> args)
+    {
+        if (!OperatingSystem.IsWindows())
+            return args;
+
+        if (!string.Equals(command, "npm", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(command, "npx", StringComparison.OrdinalIgnoreCase))
+        {
+            return args;
+        }
+
+        var line = command + " " + string.Join(" ", args.Select(QuoteForCmd));
+        return ["/d", "/s", "/c", line];
+    }
+
+    private static string QuoteForCmd(string arg)
+    {
+        if (arg.Length == 0)
+            return "\"\"";
+        return arg.Any(char.IsWhiteSpace) || arg.Contains('"')
+            ? "\"" + arg.Replace("\"", "\\\"") + "\""
+            : arg;
     }
 
     private void DisposeTransportLocked(bool killProcess)

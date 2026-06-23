@@ -12,6 +12,7 @@ using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Pipeline.Steps;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.Utilities;
 using SirThaddeus.Agent.Validation;
 using SirThaddeus.PersonalityEngine;
 using SirThaddeus.AuditLog;
@@ -145,6 +146,7 @@ var mcp = await RuntimeMcpClientFactory.CreateAsync(
 await using var mcpScope = mcp.Scope;
 ConsolePermissionGate? permissionGate = null;
 ApiPermissionGate? apiPermissionGate = null;
+AuditedMcpToolClient? auditedAgentMcp = null;
 
 var toolsAvailable = mcp.ToolsAvailable;
 if (options.EnableTools && !toolsAvailable)
@@ -176,12 +178,13 @@ if (toolsAvailable)
         toolPermissionGate = permissionGate;
     }
 
-    agentMcp = new AuditedMcpToolClient(
+    auditedAgentMcp = new AuditedMcpToolClient(
         mcp.Client,
         audit,
         toolPermissionGate,
         sessionId: Guid.NewGuid().ToString("N")[..12],
         runtimeControls: () => RuntimeControlState.FromSettings(settings));
+    agentMcp = auditedAgentMcp;
 }
 
 AutoMemoryExtractor? autoMemoryExtractor = null;
@@ -304,8 +307,9 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
     var completionValidator = new CompletionValidator(llm);
     var repairLoop = new RepairLoop(llm, completionValidator);
 
-    var pipeline = new ChatPipeline(new ITurnStep[]
-    {
+    var pipeline = new ChatPipeline(
+        new ITurnStep[]
+        {
         // Safety boundary runs FIRST. High-risk illicit-instruction
         // prompts short-circuit to a canned safe-redirect response
         // before memory, personality, LLM, or tools are touched.
@@ -430,8 +434,18 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
             autoMemoryExtractor,
             activeProfileIdGetter: _ => currentSettings.ActiveProfileId),
 
-        new ResponseComposerStep(),
-    });
+            new ResponseComposerStep(),
+        },
+        logEvent: (action, message) => audit.Append(new AuditEvent
+        {
+            Actor = "agent",
+            Action = action,
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["message"] = message
+            }
+        }));
 
     // The CLI's system prompt gets a location block prepended — matches
     // the UI runtime's BuildLocationBlock so the LLM sees "your home is
@@ -557,9 +571,12 @@ static string? TryBuildConciseWeatherPlan(string text, TurnContext context)
         return null;
 
     var lowerPrompt = context.UserText.ToLowerInvariant();
+    var wantsBriefWeather =
+        lowerPrompt.Contains("concise", StringComparison.Ordinal) ||
+        lowerPrompt.Contains("short", StringComparison.Ordinal) ||
+        lowerPrompt.Contains("outlook", StringComparison.Ordinal);
     if (!lowerPrompt.Contains("weather", StringComparison.Ordinal) ||
-        !lowerPrompt.Contains("concise", StringComparison.Ordinal) ||
-        !lowerPrompt.Contains("plan", StringComparison.Ordinal))
+        !wantsBriefWeather)
     {
         return null;
     }
@@ -569,6 +586,29 @@ static string? TryBuildConciseWeatherPlan(string text, TurnContext context)
             string.Equals(call.ToolName, ToolNames.WeatherForecastAlt, StringComparison.OrdinalIgnoreCase)))
     {
         return null;
+    }
+
+    var forecast = context.ToolCallsMade.LastOrDefault(call =>
+        call.Success &&
+        (string.Equals(call.ToolName, ToolNames.WeatherForecast, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(call.ToolName, ToolNames.WeatherForecastAlt, StringComparison.OrdinalIgnoreCase)) &&
+        !string.IsNullOrWhiteSpace(call.Result));
+    if (forecast is not null &&
+        WeatherResponseBuilder.TryBuildBriefFromForecastJson(
+            forecast.Result,
+            context.UserText,
+            ExtractWeatherLocation(context.UserText) ?? "Weather",
+            preferredUnits: null) is { Length: > 0 } deterministicPlan)
+    {
+        return deterministicPlan;
+    }
+    if (forecast is not null &&
+        WeatherResponseBuilder.TryBuildBriefFromForecastSummary(
+            forecast.Result,
+            context.UserText,
+            ExtractWeatherLocation(context.UserText) ?? "Weather") is { Length: > 0 } deterministicSummary)
+    {
+        return deterministicSummary;
     }
 
     var condition = ExtractWeatherCondition(text) ?? "conditions returned by the weather service";
@@ -907,6 +947,7 @@ if (options.ServerMode)
         BuildSearchStatusAsync,
         audit,
         apiPermissionGate,
+        () => auditedAgentMcp?.ResetBudgets(),
         serverCancellation.Token);
     return;
 }
@@ -951,6 +992,7 @@ while (!cancellation.IsCancellationRequested)
     {
         orchestrator.ResetConversation();
         permissionGate?.ClearSessionGrants();
+        auditedAgentMcp?.ResetBudgets();
         Console.WriteLine("Session reset.");
         continue;
     }

@@ -96,6 +96,20 @@ function Get-ValidationFlags {
     return $flags
 }
 
+function ConvertTo-RubricThreshold {
+    param([double]$MinScore)
+
+    if ($MinScore -le 0) {
+        return 0.85
+    }
+
+    if ($MinScore -gt 1) {
+        return [Math]::Min([Math]::Max($MinScore / 10.0, 0.0), 1.0)
+    }
+
+    return [Math]::Min([Math]::Max($MinScore, 0.0), 1.0)
+}
+
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $harnessRoot = Join-Path $repoRoot "artifacts/harness"
 
@@ -149,8 +163,10 @@ foreach ($scoreFile in $scoreFiles) {
     $finalPath = Join-Path $iterDir "final.txt"
     $preview = Get-Preview -FinalPath $finalPath
 
-    $hardPass = [bool]$score.hard_pass
-    $finalScore = [double]$score.final_score
+    $minScore = ConvertTo-RubricThreshold -MinScore $minScore
+
+    $hardPass = if ($null -ne $score.hard_pass) { [bool]$score.hard_pass } else { ($score.hardGateFailures.Count -eq 0) }
+    $finalScore = if ($null -ne $score.overallScore) { [double]$score.overallScore } else { [double]$score.final_score }
     $isFail = (-not $hardPass) -or ($finalScore -lt $minScore)
 
     $flags = Get-ValidationFlags -Suite $suite -Test $test -Preview $preview -HardPass $hardPass -FinalScore $finalScore -MinScore $minScore
@@ -170,8 +186,9 @@ foreach ($scoreFile in $scoreFiles) {
         $lines.Add("  flags: $($flags -join ', ')")
     }
     $lines.Add("  preview: $preview")
-    if (-not $hardPass -and $score.hard_failures.Count -gt 0) {
-        $lines.Add("  hard_failures: $($score.hard_failures -join '; ')")
+    $hardFailures = if ($null -ne $score.hardGateFailures) { $score.hardGateFailures } else { $score.hard_failures }
+    if (-not $hardPass -and $null -ne $hardFailures -and $hardFailures.Count -gt 0) {
+        $lines.Add("  hard_failures: $($hardFailures -join '; ')")
     }
     $lines.Add("")
 }

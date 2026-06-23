@@ -6,6 +6,8 @@ Conversation-level regression harness for the real headless runtime.
 
 From repo root:
 
+- `./dev/verify-harness.ps1`
+- `./dev/verify-harness.ps1 -RunLiveHarness`
 - `./dev/harness.ps1 --all --judge none`
 - `./dev/harness.ps1 --suite smoke --judge none`
 - `./dev/harness.ps1 --category web-search --judge none`
@@ -13,6 +15,9 @@ From repo root:
 - `./dev/harness.ps1 --suite smoke --test smoke_casual_no_tools --judge none`
 
 `./dev/harness.ps1` automatically inserts `run` when you pass only options.
+`./dev/verify-harness.ps1` runs the harness build plus rubric evaluator tests.
+Use `-RunLiveHarness` only when LM Studio or another configured local model
+endpoint is running.
 
 ## Selection model
 
@@ -24,7 +29,7 @@ From repo root:
 ## Common options
 
 - `--max-iters <N>`
-- `--min-score <0..10>`
+- `--min-score <0..1>` or legacy `<0..10>`
 - `--allow-workspace-edits`
 - `--patch-budget-files <N>`
 - `--patch-budget-lines <N>`
@@ -45,6 +50,12 @@ One test file per suite entry:
   - `assertions`
   - `expectations`
   - `min_score`
+- Optional fields:
+  - `category`
+  - `rubric_profile`: `general`, `coding`, `health`, `agentTool`, or `ragGrounded`
+  - `expectations.require_json`
+  - `expectations.required_json_fields`
+  - `expectations.forbidden_phrases`
 
 The legacy `mode` field is still tolerated in YAML for older specs, but the
 harness now runs everything through headless mode.
@@ -60,6 +71,47 @@ Per iteration output:
 - `diff.md`
 - `judge_packet.json` and `judge_result.json` when judge mode is enabled
 
+## Rubric scoring
+
+Each test receives a stable `score.json` using a 0..1 overall score and 0..4
+metric scores. Legacy `min_score` values like `7` are normalized to `0.7`, so
+existing fixtures keep working.
+
+Rubric profiles:
+
+- `general`: default assistant answer quality
+- `coding`: technical correctness carries extra weight
+- `health`: safety boundaries carry extra weight
+- `agentTool`: tool choice, tool result use, and state continuity carry extra weight
+- `ragGrounded`: grounding, citation/source faithfulness, and tool use carry extra weight
+
+Core metrics:
+
+- `taskCorrectness`
+- `instructionAdherence`
+- `completeness`
+- `groundingFactuality`
+- `conversationality`
+- `personaFit`
+- `actionability`
+- `concisenessFit`
+
+Profile-specific metrics may add `technicalCorrectness`, `safetyBoundaries`,
+`toolCorrectness`, `stateContinuity`, or `citationSourceFaithfulness`.
+
+Pass/warn/fail thresholds:
+
+- `pass`: no hard gates and score >= `0.85`
+- `warn`: no hard gates and score >= `0.75` but < `0.85`
+- `fail`: hard gate failure or score < `0.75`
+- A harness test passes when hard gates are clear and score is at or above the
+  fixture threshold. `warn` remains visible in reports as a review signal.
+
+Hard gates include unsafe high-risk advice, fake tool actions, fabricated
+citations, private/internal data leaks, ignored explicit constraints, invalid
+required JSON, disallowed tools, missing required tools, and local/web fallback
+non-answers that claim grounding they do not have.
+
 ## Judge contract (`--judge cursor`)
 
 Harness writes `judge_packet.json` and waits for `judge_result.json`.
@@ -69,6 +121,20 @@ Expected judge schema:
 ```json
 {
   "score": 0.0,
+  "scores": {
+    "taskCorrectness": 4,
+    "instructionAdherence": 4,
+    "completeness": 4,
+    "groundingFactuality": 4,
+    "conversationality": 4,
+    "personaFit": 4,
+    "actionability": 4,
+    "concisenessFit": 4
+  },
+  "hardGateFailures": [],
+  "strengths": ["..."],
+  "problems": ["..."],
+  "requiredFixes": ["..."],
   "reasons": ["..."],
   "suggestions": ["..."],
   "patches": [
@@ -81,6 +147,7 @@ Expected judge schema:
 }
 ```
 
+`score` may be either `0..1` or legacy `0..10`; metric values must be `0..4`.
 If `--judge-required true`, missing or invalid judge output is a hard failure.
 
 ---
@@ -218,15 +285,10 @@ headless runtime against a live LM Studio instance and live MCP tools.
 
 **Scoring quick reference (no judge):**
 
-The harness starts at 10.0 and deducts for:
-- Missing required keywords: up to -5.0
-- Forbidden keyword hits: -1.5 each
-- Response over max chars: -1.0
-- Response under 40 chars despite tool usage: -1.5
-- "As an AI" phrasing: -0.5
-- Hard assertion failures (wrong tools, missing tools): score forced to 0.0
-
-Tests pass when `final_score >= min_score` (default 7.0) AND all hard assertions pass.
+The harness runs deterministic checks first, applies hard gates, then scores the
+selected rubric profile on 0..4 metrics. `overallScore` is the weighted 0..1
+result. Tests pass only when the response clears hard gates and meets the
+normalized `min_score`; `status` is a quality band for triage.
 
 ### 4) Manual UI Smoke Test
 

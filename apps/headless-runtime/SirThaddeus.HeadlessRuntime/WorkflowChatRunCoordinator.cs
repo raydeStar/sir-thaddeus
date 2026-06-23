@@ -114,6 +114,16 @@ internal sealed class WorkflowChatRunCoordinator
                 ShouldRetry = false
             };
         }
+        else if (IsSuccessfulPlacesDiscoverAnswer(firstResponse))
+        {
+            firstConfidence = new ConfidenceSnapshot
+            {
+                Score = Math.Max(firstConfidence.Score, 0.86),
+                Band = "High",
+                Summary = "Deterministic places_discover answer used successful local-business evidence.",
+                ShouldRetry = false
+            };
+        }
         workflowState.LatestConfidence = firstConfidence;
         var selectedConfidence = firstConfidence;
 
@@ -382,6 +392,20 @@ internal sealed class WorkflowChatRunCoordinator
         }
     }
 
+    private static bool IsSuccessfulPlacesDiscoverAnswer(AgentResponse response)
+    {
+        if (string.IsNullOrWhiteSpace(response.Text) ||
+            !response.Text.Contains("places_discover/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return response.ToolCallsMade.Any(call =>
+            call.Success &&
+            (string.Equals(call.ToolName, ToolNames.PlacesDiscover, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(call.ToolName, ToolNames.PlacesDiscoverAlt, StringComparison.OrdinalIgnoreCase)));
+    }
+
     private static double TrustScoreForTool(string toolName)
     {
         var lower = (toolName ?? string.Empty).ToLowerInvariant();
@@ -412,13 +436,39 @@ internal sealed class WorkflowChatRunCoordinator
 
     private static IReadOnlyList<AssistantSourceCardPayload> ExtractAssistantSourceCards(AgentResponse response)
     {
-        if (response.SuppressSourceCardsUi || response.ToolCallsMade.Count == 0)
+        if (response.SuppressSourceCardsUi)
         {
             return [];
         }
 
         var cards = new List<AssistantSourceCardPayload>();
         var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var source in response.Sources)
+        {
+            if (string.IsNullOrWhiteSpace(source.Url) || !seenUrls.Add(source.Url))
+            {
+                continue;
+            }
+
+            cards.Add(new AssistantSourceCardPayload(
+                Title: source.Title ?? source.Url,
+                Url: source.Url,
+                Domain: source.Domain ?? "",
+                Excerpt: source.Excerpt ?? "",
+                Favicon: source.Favicon ?? "",
+                Thumbnail: source.Thumbnail ?? "",
+                PublishedAt: source.PublishedAt));
+            if (cards.Count >= 8)
+            {
+                return cards;
+            }
+        }
+
+        if (response.ToolCallsMade.Count == 0)
+        {
+            return cards;
+        }
 
         for (var i = response.ToolCallsMade.Count - 1; i >= 0; i--)
         {

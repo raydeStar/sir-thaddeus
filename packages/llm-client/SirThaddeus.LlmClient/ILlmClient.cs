@@ -45,6 +45,20 @@ public interface ILlmClient
         ChatAsync(messages, tools, cancellationToken);
 
     /// <summary>
+    /// Sends a chat completion request with both a max_tokens cap and an
+    /// optional forced tool choice.
+    /// </summary>
+    Task<LlmResponse> ChatAsync(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        int maxTokensOverride,
+        string? forcedToolName,
+        CancellationToken cancellationToken = default) =>
+        string.IsNullOrWhiteSpace(forcedToolName)
+            ? ChatAsync(messages, tools, maxTokensOverride, cancellationToken)
+            : ChatAsync(messages, tools, forcedToolName, cancellationToken);
+
+    /// <summary>
     /// Pings the LLM endpoint and returns the loaded model name if reachable,
     /// or null if the provider is offline / unreachable.
     /// This is transport-only — no state, no side effects.

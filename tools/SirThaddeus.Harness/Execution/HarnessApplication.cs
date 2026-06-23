@@ -99,7 +99,7 @@ public sealed class HarnessApplication
                     cancellationToken);
 
                 var best = attempts.OrderByDescending(a => a.Score.FinalScore).First();
-                var minScore = options.MinScoreOverride ?? test.MinScore;
+                var minScore = ScoringEngine.ResolveThreshold(options.MinScoreOverride ?? test.MinScore);
                 var passed = best.Score.HardPass && best.Score.FinalScore >= minScore;
 
                 if (passed)

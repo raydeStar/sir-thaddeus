@@ -1,5 +1,8 @@
+using SirThaddeus.Agent;
 using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Pipeline.Steps;
+using SirThaddeus.Agent.Validation;
+using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Tests.Agent.Pipeline.Steps;
 
@@ -49,6 +52,36 @@ public class CompletionValidationStepTests
             step.ExecuteAsync(ctx, cts.Token));
     }
 
+    [Fact]
+    public async Task Skips_llm_validation_for_deterministic_places_discover_draft()
+    {
+        var llm = new CountingLlm();
+        var step = new CompletionValidationStep(new CompletionValidator(llm), null);
+        var ctx = WithDraft(
+            "Is there a florist nearby?",
+            "I found these florists near Olympia, Washington, US via places_discover/osm_overpass:\n" +
+            "- **Fleurae** - 123 Example St - 1.2 km away");
+        ctx = ctx with
+        {
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.PlacesDiscover,
+                    Arguments = "{}",
+                    Result = "{\"results\":[{\"name\":\"Fleurae\"}]}",
+                    Success = true
+                }
+            ]
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Same(ctx, cont.Next);
+        Assert.Equal(0, llm.CallCount);
+    }
+
     // Happy-path (validation + repair round-trip) requires a real
     // CompletionValidator / RepairLoop with a fake ILlmClient. Those
     // types are `sealed` and call `llm.ChatAsync` directly, so full
@@ -65,4 +98,31 @@ public class CompletionValidationStepTests
             UserText = userText,
             AssistantDraft = draft,
         };
+
+    private sealed class CountingLlm : ILlmClient
+    {
+        public int CallCount { get; private set; }
+
+        public Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools = null,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.FromResult(new LlmResponse { IsComplete = true, Content = "{\"passed\":true}" });
+        }
+
+        public Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools,
+            int maxTokensOverride,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.FromResult(new LlmResponse { IsComplete = true, Content = "{\"passed\":true}" });
+        }
+
+        public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>("fake");
+    }
 }

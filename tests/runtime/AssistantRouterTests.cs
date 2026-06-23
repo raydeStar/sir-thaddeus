@@ -155,7 +155,7 @@ public class AssistantRouterTests : IDisposable
     }
 
     [Fact]
-    public void ResolveGatekeeperPolicy_SharedEndpointDifferentModelReuseEnabled_UsesHeuristicOnly()
+    public void ResolveGatekeeperPolicy_SharedEndpointDifferentModel_UsesSeparateLlm()
     {
         var llm = LlmWithGatekeeper(
             primaryModel: "primary-large",
@@ -165,8 +165,8 @@ public class AssistantRouterTests : IDisposable
 
         var policy = AssistantRouter.ResolveGatekeeperPolicy(llm);
 
-        Assert.Equal(AssistantRouter.GatekeeperPolicyMode.HeuristicOnly, policy.Mode);
-        Assert.False(policy.AllowsHelperLlm);
+        Assert.Equal(AssistantRouter.GatekeeperPolicyMode.SeparateLlm, policy.Mode);
+        Assert.True(policy.AllowsHelperLlm);
     }
 
     [Fact]

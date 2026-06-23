@@ -12,7 +12,19 @@ public static class RuntimeLlmOptionsFactory
         return new LlmClientOptions
         {
             BaseUrl = settings.Llm.BaseUrl,
+            ChatCompletionPath = settings.Llm.ChatCompletionPath,
             Model = settings.Llm.Model,
+            PreloadModelKey = settings.Llm.PreloadModelKey,
+            EnableStartupWarmup = settings.Llm.EnableStartupWarmup,
+            EnableKeepWarm = settings.Llm.EnableKeepWarm,
+            ContextLength = settings.Llm.ContextLength,
+            FlashAttention = settings.Llm.FlashAttention,
+            OffloadKvCacheToGpu = settings.Llm.OffloadKvCacheToGpu,
+            MaxConcurrentLlmRequests = settings.Llm.MaxConcurrentLlmRequests,
+            WarmupTimeoutSeconds = settings.Llm.WarmupTimeoutSeconds,
+            KeepWarmIntervalMinutes = settings.Llm.KeepWarmIntervalMinutes,
+            MaxInputTokensSoftCap = settings.Llm.MaxInputTokensSoftCap,
+            MaxOutputTokensDefault = settings.Llm.MaxOutputTokensDefault,
             MaxTokens = settings.Llm.MaxTokens,
             ContextWindowTokens = settings.Llm.ContextWindowTokens,
             Temperature = settings.Llm.Temperature
@@ -35,6 +47,10 @@ public static class RuntimeLlmOptionsFactory
         {
             BaseUrl = gatekeeperUrl,
             Model = gatekeeperModel,
+            EnableStartupWarmup = false,
+            EnableKeepWarm = false,
+            MaxConcurrentLlmRequests = settings.Llm.MaxConcurrentLlmRequests,
+            MaxInputTokensSoftCap = Math.Min(settings.Llm.MaxInputTokensSoftCap, 2048),
             MaxTokens = 5,
             ContextWindowTokens = 2048,
             Temperature = 0.0
@@ -48,13 +64,14 @@ public static class RuntimeLlmOptionsFactory
         if (!settings.Llm.ReusePrimaryModelForGatekeeperOnSharedEndpoint)
             return false;
 
-        if (string.IsNullOrWhiteSpace(settings.Llm.Model) || string.IsNullOrWhiteSpace(settings.Llm.GatekeeperModelId))
+        if (string.IsNullOrWhiteSpace(settings.Llm.Model))
             return false;
 
-        if (string.Equals(settings.Llm.Model, settings.Llm.GatekeeperModelId, StringComparison.OrdinalIgnoreCase))
-            return false;
+        if (string.IsNullOrWhiteSpace(settings.Llm.GatekeeperModelId))
+            return UriHostsMatch(settings.Llm.BaseUrl, gatekeeperUrl);
 
-        return UriHostsMatch(settings.Llm.BaseUrl, gatekeeperUrl);
+        return UriHostsMatch(settings.Llm.BaseUrl, gatekeeperUrl) &&
+               string.Equals(settings.Llm.Model, settings.Llm.GatekeeperModelId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool UriHostsMatch(string left, string right)

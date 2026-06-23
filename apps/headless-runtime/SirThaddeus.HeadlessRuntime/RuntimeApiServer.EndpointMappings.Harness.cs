@@ -25,7 +25,8 @@ internal static partial class RuntimeApiServer
     private static void MapHarnessEndpoints(
         WebApplication app,
         Func<AppSettings> getSettings,
-        ApiPermissionGate? permissionGate)
+        ApiPermissionGate? permissionGate,
+        Action? resetToolBudgets)
     {
         app.MapPost("/api/harness/reset", (HarnessResetRequest request) =>
         {
@@ -36,6 +37,7 @@ internal static partial class RuntimeApiServer
             var (cleared, set) = HarnessControlPlane.ApplyStubOverrides(request.StubOverrides);
 
             permissionGate?.ClearSessionGrants();
+            resetToolBudgets?.Invoke();
 
             int memoryRows = 0;
             if (request.ClearMemoryData)

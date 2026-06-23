@@ -152,8 +152,7 @@ public static class SettingsApi
             var samePrimaryModel = string.Equals(llm.ModelId, llm.GatekeeperModelId,
                 StringComparison.OrdinalIgnoreCase);
             var sameEndpoint = UriHostsMatchSafe(llm.BaseUrl ?? "", gkBaseUrl ?? "");
-            var reusingPrimary = llm.ReusePrimaryForGatekeeperOnSharedEndpoint
-                && sameEndpoint && !samePrimaryModel;
+            var reusingPrimary = sameEndpoint && samePrimaryModel;
 
             if (string.IsNullOrWhiteSpace(gkBaseUrl))
             {

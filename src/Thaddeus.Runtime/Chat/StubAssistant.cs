@@ -34,11 +34,18 @@ public sealed class StubAssistant : IAssistant
         ArgumentException.ThrowIfNullOrEmpty(threadId);
         ArgumentException.ThrowIfNullOrEmpty(userText);
 
+        return await RespondWithAsync(threadId, BuildReply(userText), ct).ConfigureAwait(false);
+    }
+
+    public async Task<ChatMessage> RespondWithAsync(string threadId, string fullReply, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(threadId);
+        ArgumentException.ThrowIfNullOrEmpty(fullReply);
+
         var messageId = "msg_" + Convert.ToHexString(Guid.NewGuid().ToByteArray().AsSpan(0, 8))
             .ToLowerInvariant();
         await _publisher.PublishStartAsync(threadId, messageId, ct).ConfigureAwait(false);
 
-        var fullReply = BuildReply(userText);
         var sentSoFar = new System.Text.StringBuilder(fullReply.Length);
         var cancelled = false;
         try

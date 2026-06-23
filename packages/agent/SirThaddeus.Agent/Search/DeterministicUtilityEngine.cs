@@ -116,6 +116,7 @@ public static class DeterministicUtilityEngine
         // date in its preamble, so the LLM answers deterministically too.
         return TryParseDateQuestion(message)
             ?? TryParseTimeQuestion(message)
+            ?? EnumerableSetCounter.TryMatch(message)
             ?? TryParseCommonGeographyFact(message)
             ?? ClassicReasoningEngine.TryMatch(message)
             ?? TryParsePercent(message)

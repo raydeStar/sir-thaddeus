@@ -74,6 +74,25 @@ public sealed class ExplicitWebNoResultsContractNormalizerTests
     }
 
     [Fact]
+    public void TryBuildResponse_WhenStrictTwoLineLatestVersionPromptHasNoResults_PreservesFormat()
+    {
+        var response = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(
+            "What is the latest stable version of .NET as of 2025? Answer in exactly two lines: Line 1 starts with 'Answer:' and Line 2 starts with 'Commentary:'. Keep it concise.",
+            [new ToolCallRecord
+            {
+                ToolName = "web_search",
+                Arguments = "{}",
+                Result = "[search: 0 result(s) returned]",
+                Success = true
+            }]);
+
+        Assert.Equal(
+            "Answer: Live lookup is unavailable for this request, so I do not have confirmed results.\n" +
+            "Commentary: Please retry in a moment.",
+            response);
+    }
+
+    [Fact]
     public void TryBuildResponse_WhenPromptIsNotExplicitToolInvocation_ReturnsNull()
     {
         var response = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(

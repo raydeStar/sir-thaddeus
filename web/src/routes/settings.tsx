@@ -74,12 +74,13 @@ import type {
   UiPreferencesSettings,
   FilesSettings,
 } from '@thaddeus/shared-types';
+import { ModuleSettingsPanel } from '../components/modules/ModuleSettingsPanel';
 
 export const Route = createFileRoute('/settings')({
   component: SettingsRoute,
 });
 
-type TabId = 'general' | 'models' | 'audio' | 'files' | 'location' | 'logs' | 'advanced';
+type TabId = 'general' | 'models' | 'audio' | 'files' | 'location' | 'modules' | 'logs' | 'advanced';
 type LogPaneId = 'traces' | 'runtime';
 type TraceViewMode = 'events' | 'raw';
 
@@ -89,6 +90,7 @@ const TABS: ReadonlyArray<{ id: TabId; label: string; icon: typeof Cog }> = [
   { id: 'audio', label: 'Audio & Voice', icon: Headphones },
   { id: 'files', label: 'Files', icon: FolderOpen },
   { id: 'location', label: 'Location', icon: MapPin },
+  { id: 'modules', label: 'Modules', icon: Plug },
   { id: 'logs', label: 'Logs', icon: FileText },
   { id: 'advanced', label: 'Advanced', icon: Globe },
 ];
@@ -182,7 +184,9 @@ function SettingsRoute() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestLlmResponse | null>(null);
   const [gatekeeperStatus, setGatekeeperStatus] = useState<GatekeeperStatusResponse | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>('general');
+  const [activeTab, setActiveTab] = useState<TabId>(() =>
+    typeof window !== 'undefined' && window.location.hash === '#modules' ? 'modules' : 'general',
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -303,6 +307,13 @@ function SettingsRoute() {
     }
   };
 
+  const changeTab = (tab: TabId) => {
+    setActiveTab(tab);
+    if (typeof window === 'undefined') return;
+    const hash = tab === 'modules' ? '#modules' : '';
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
+  };
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!doc || saving) return;
@@ -336,7 +347,7 @@ function SettingsRoute() {
         </p>
       ) : (
         <form onSubmit={onSubmit} data-testid="settings-form">
-          <TabBar active={activeTab} onChange={setActiveTab} />
+          <TabBar active={activeTab} onChange={changeTab} />
 
           <div className="mt-10 pb-32">
             {activeTab === 'general' ? (
@@ -357,6 +368,7 @@ function SettingsRoute() {
             {activeTab === 'audio' ? <AudioTab doc={doc} setDoc={setDoc} /> : null}
             {activeTab === 'files' ? <FilesTab doc={doc} setDoc={setDoc} /> : null}
             {activeTab === 'location' ? <LocationTab doc={doc} setDoc={setDoc} /> : null}
+            {activeTab === 'modules' ? <ModuleSettingsPanel /> : null}
             {activeTab === 'logs' ? <LogsTab /> : null}
             {activeTab === 'advanced' ? <AdvancedTab doc={doc} setDoc={setDoc} /> : null}
 
@@ -368,7 +380,8 @@ function SettingsRoute() {
           </div>
 
           {/* Floating save bar — uses the full-width canvas bg with a top fade. */}
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-canvas/85 backdrop-blur">
+          {activeTab !== 'modules' ? (
+            <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-canvas/85 backdrop-blur">
             <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-6 py-3 md:px-10">
               <span className="text-[11px] text-ink-subtle">
                 Saved to <code className="font-mono text-[11px]">~/.thaddeus/runtime-settings.json</code>
@@ -396,7 +409,8 @@ function SettingsRoute() {
                 </button>
               </div>
             </div>
-          </div>
+            </div>
+          ) : null}
         </form>
       )}
     </PageScaffold>
@@ -721,15 +735,15 @@ function ModelsTab({
             onChange={(v) =>
               setDoc({ ...doc, llm: { ...doc.llm, gatekeeperModelId: v || null } })
             }
-            placeholder="qwen3.5-2b"
+            placeholder="liquid/lfm2.5-1.2b"
             options={buildModelOptions(testResult?.models ?? [], doc.llm.gatekeeperModelId ?? '')}
           />
         </Field>
         <Toggle
           testId="settings-gatekeeper-reuse-primary"
           label="Reuse primary model when endpoints match"
-          description="Avoids LM Studio load/offload churn on single-GPU setups."
-          checked={doc.llm.reusePrimaryForGatekeeperOnSharedEndpoint ?? true}
+          description="Falls back to the primary model instead of using a separate gatekeeper model."
+          checked={doc.llm.reusePrimaryForGatekeeperOnSharedEndpoint ?? false}
           onChange={(v) =>
             setDoc({
               ...doc,

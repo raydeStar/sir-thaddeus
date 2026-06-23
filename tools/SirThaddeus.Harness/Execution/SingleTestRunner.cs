@@ -69,7 +69,12 @@ internal sealed class SingleTestRunner
             cancellationToken,
             steps: steps);
 
-        var score = _scoringEngine.Score(test, response, steps, judgeResult);
+        var score = _scoringEngine.Score(test, response, steps, judgeResult) with
+        {
+            LatencyMs = (long)Math.Round(headlessResult.Timing.TotalSeconds * 1000),
+            TokensIn = response.TokenUsage?.TokensIn,
+            TokensOut = response.TokenUsage?.TokensOut
+        };
 
         await _artifactWriter.WriteStepsAsync(artifacts, steps, cancellationToken);
         await _artifactWriter.WriteFinalAsync(artifacts, response.Text, cancellationToken);
@@ -104,12 +109,15 @@ internal sealed class SingleTestRunner
         {
             TestId = test.Id,
             TestName = test.Name,
+            Profile = ScoringEngine.ResolveProfile(test),
             UserMessage = test.UserMessage,
             AllowedTools = test.AllowedTools,
             FinalResponse = response.Text,
-            HardFailures = preliminary.HardFailures,
-            SoftScore = preliminary.SoftScore,
-            MinScore = test.MinScore,
+            HardGateFailures = preliminary.HardGateFailures,
+            DeterministicChecks = preliminary.DeterministicChecks,
+            Scores = preliminary.Scores,
+            OverallScore = preliminary.OverallScore,
+            MinScore = ScoringEngine.ResolveThreshold(test.MinScore),
             ToolCalls = recordedToolTurns
                 .Select(turn => new ToolCallSnapshot
                 {

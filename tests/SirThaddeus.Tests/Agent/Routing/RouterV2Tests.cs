@@ -29,6 +29,7 @@ public class RouterV2Tests
     [InlineData("give me headlines about AI this month")]
     [InlineData("find me top stories on apple today")]
     [InlineData("recent news about tesla")]
+    [InlineData("Pull up local news in Boise and summarize the key stories.")]
     [InlineData("bring me up some latest details on the iran war")]
     [InlineData("give me more info on putins message")]
     public async Task RouteAsync_NewsHeuristics_RouteWithoutLlm(string message)

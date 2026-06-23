@@ -10,6 +10,7 @@ using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.Hosting;
 using Thaddeus.Runtime.Ipc;
 using Thaddeus.Runtime.Memory;
+using Thaddeus.Runtime.Modules;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.Runtime.State;
 using Thaddeus.Runtime.Tools;
@@ -136,6 +137,7 @@ public static class Program
                     turnsDir);
             });
             builder.Services.AddSingleton<StubAssistant>();
+            builder.Services.AddSingleton<LlmRuntimeRegistry>();
             builder.Services.AddSingleton<IAssistant, AssistantRouter>();
             builder.Services.AddSingleton<IActivityLog>(_ => new InMemoryActivityLog(capacity: 500));
             // The SQLite-backed semantic memory store. Previously this was
@@ -189,6 +191,17 @@ public static class Program
                     dir,
                     sp.GetRequiredService<ILogger<JsonFileRoutineStore>>());
             });
+            builder.Services.AddSingleton<IModuleStateStore>(sp =>
+            {
+                var lockDir = Path.GetDirectoryName(options.LockFilePath)!;
+                var statePath = builder.Configuration.GetValue<string>("Modules:StateFilePath")
+                    ?? Path.Combine(lockDir, "modules", "module-state.json");
+                return new JsonFileModuleStateStore(
+                    statePath,
+                    sp.GetRequiredService<ILogger<JsonFileModuleStateStore>>());
+            });
+            builder.Services.AddSingleton<ModuleRuntimeService>();
+            builder.Services.AddHostedService<ModuleOAuthCallbackListener>();
             builder.Services.AddSingleton<IWikiStore>(sp =>
             {
                 var libraryDir = builder.Configuration.GetValue<string>("Wiki:LibraryDirectory");
@@ -249,6 +262,7 @@ public static class Program
 
             builder.Services.AddHostedService<ActivityEventBridge>();
             builder.Services.AddHostedService<StateMachineEventBridge>();
+            builder.Services.AddHostedService<LmStudioWarmupHostedService>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<WebSocketBroadcaster>());
             builder.Services.AddHostedService(sp => sp.GetRequiredService<TurnTraceWriter>());
             builder.Services.AddHostedService<IpcServer>();
@@ -330,6 +344,7 @@ public static class Program
             app.MapAudioApi();
             app.MapVoiceApi();
             app.MapPermissionsApi();
+            app.MapModulesApi();
             app.MapHarnessApi();
             app.MapWorkspaceHosting();
 

@@ -53,6 +53,9 @@ public sealed class CompletionValidationStep : ITurnStep
             return new StepResult.Continue(context with { AssistantDraft = currentTimeDraft });
         }
 
+        if (IsDeterministicLocalBusinessPlacesDraft(context))
+            return new StepResult.Continue(context);
+
         CompletionValidationResult validation;
         try
         {
@@ -111,5 +114,21 @@ public sealed class CompletionValidationStep : ITurnStep
         // Adopt the repaired text as the new draft. ResponseComposerStep
         // will pick it up as the final response.
         return new StepResult.Continue(context with { AssistantDraft = repair.FinalText });
+    }
+
+    private static bool IsDeterministicLocalBusinessPlacesDraft(TurnContext context)
+    {
+        var draft = context.AssistantDraft ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(draft) ||
+            !draft.Contains("places_discover/", StringComparison.OrdinalIgnoreCase) ||
+            !draft.Contains("I found", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return context.ToolCallsMade.Any(call =>
+            call.Success &&
+            (string.Equals(call.ToolName, ToolNames.PlacesDiscover, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(call.ToolName, ToolNames.PlacesDiscoverAlt, StringComparison.OrdinalIgnoreCase)));
     }
 }

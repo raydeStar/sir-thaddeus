@@ -49,7 +49,7 @@ public static class SuiteReporter
 
         var passCount = results.Count(r => r.Passed);
         var failCount = results.Count - passCount;
-        var avgScore = results.Average(r => r.Score.FinalScore);
+        var avgScore = results.Average(r => r.Score.OverallScore);
         var suiteNames = results.Select(r => r.SuiteName).Distinct().ToList();
         var suiteLabel = suiteNames.Count == 1 ? suiteNames[0] : $"{suiteNames.Count} suites";
         var passRate = results.Count > 0 ? (double)passCount / results.Count * 100 : 0;
@@ -147,7 +147,31 @@ public static class SuiteReporter
         string outputPath)
     {
         var passCount = results.Count(r => r.Passed);
-        var avgScore = results.Count > 0 ? results.Average(r => r.Score.FinalScore) : 0;
+        var avgScore = results.Count > 0 ? results.Average(r => r.Score.OverallScore) : 0;
+        var profileAverages = results
+            .GroupBy(r => r.Score.Profile, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => Math.Round(g.Average(r => r.Score.OverallScore), 3), StringComparer.OrdinalIgnoreCase);
+        var hardGateFailureCount = results.Sum(r => r.Score.HardGateFailures.Count);
+        var recurringFailures = TopRecurringFailureReasons(results);
+        var failingTests = results
+            .Where(r => !r.Passed)
+            .OrderByDescending(FailureSeverity)
+            .ThenBy(r => r.Score.OverallScore)
+            .Select(r => new
+            {
+                test_id = r.TestId,
+                suite = r.SuiteName,
+                profile = r.Score.Profile,
+                status = r.Score.Status,
+                overall_score = r.Score.OverallScore,
+                severity = FailureSeverityLabel(r),
+                hard_gate_failures = r.Score.HardGateFailures,
+                problems = r.Score.Problems,
+                required_fixes = r.Score.RequiredFixes,
+                artifact_directory = r.ArtifactDirectory
+            })
+            .ToList();
 
         var payload = new
         {
@@ -161,13 +185,28 @@ public static class SuiteReporter
             tests_passed = passCount,
             tests_failed = results.Count - passCount,
             pass_rate = results.Count > 0 ? Math.Round((double)passCount / results.Count, 3) : 0,
-            average_score = Math.Round(avgScore, 2),
+            average_score = Math.Round(avgScore, 3),
+            hard_gate_failure_count = hardGateFailureCount,
+            average_score_by_profile = profileAverages,
+            top_recurring_failure_reasons = recurringFailures,
+            failing_tests_by_severity = failingTests,
             results = results.Select(r => new
             {
                 test_id = r.TestId,
                 suite = r.SuiteName,
-                score = r.Score.FinalScore,
                 passed = r.Passed,
+                overallScore = r.Score.OverallScore,
+                profile = r.Score.Profile,
+                status = r.Score.Status,
+                hardGateFailures = r.Score.HardGateFailures,
+                scores = r.Score.Scores,
+                strengths = r.Score.Strengths,
+                problems = r.Score.Problems,
+                requiredFixes = r.Score.RequiredFixes,
+                latencyMs = r.Score.LatencyMs,
+                tokensIn = r.Score.TokensIn,
+                tokensOut = r.Score.TokensOut,
+                score = r.Score.FinalScore,
                 hard_pass = r.Score.HardPass,
                 attempts = r.Attempts,
                 artifact_directory = r.ArtifactDirectory,
@@ -204,7 +243,8 @@ public static class SuiteReporter
     {
         var passCount = results.Count(r => r.Passed);
         var failCount = results.Count - passCount;
-        var avgScore = results.Count > 0 ? results.Average(r => r.Score.FinalScore) : 0;
+        var avgScore = results.Count > 0 ? results.Average(r => r.Score.OverallScore) : 0;
+        var hardGateFailureCount = results.Sum(r => r.Score.HardGateFailures.Count);
 
         var builder = new StringBuilder();
         builder.AppendLine("# Harness Run Summary");
@@ -221,19 +261,37 @@ public static class SuiteReporter
         builder.AppendLine($"- Passed: {passCount}");
         builder.AppendLine($"- Failed: {failCount}");
         builder.AppendLine($"- Average score: {avgScore:F2}");
+        builder.AppendLine($"- Hard-gate failures: {hardGateFailureCount}");
+        builder.AppendLine();
+        builder.AppendLine("## Average Score By Profile");
+        builder.AppendLine();
+        foreach (var group in results.GroupBy(r => r.Score.Profile).OrderBy(g => g.Key))
+            builder.AppendLine($"- {group.Key}: {group.Average(r => r.Score.OverallScore):F3}");
+        builder.AppendLine();
+        builder.AppendLine("## Top Recurring Failure Reasons");
+        builder.AppendLine();
+        var recurring = TopRecurringFailureReasons(results);
+        if (recurring.Count == 0)
+            builder.AppendLine("- None");
+        else
+            foreach (var item in recurring)
+                builder.AppendLine($"- {item.reason}: {item.count}");
         builder.AppendLine();
         builder.AppendLine("## Results");
         builder.AppendLine();
-        builder.AppendLine("| Status | Suite | Test | Score | Min | Attempts | Artifact |");
-        builder.AppendLine("|---|---|---|---:|---:|---:|---|");
+        builder.AppendLine("| Status | Profile | Suite | Test | Score | Min | Attempts | Artifact |");
+        builder.AppendLine("|---|---|---|---|---:|---:|---:|---|");
 
         foreach (var result in results)
         {
             builder.AppendLine(
-                $"| {(result.Passed ? "PASS" : "FAIL")} | {EscapePipe(result.SuiteName)} | {EscapePipe(result.TestId)} | {result.Score.FinalScore:F2} | {result.MinScore:F2} | {result.Attempts} | {EscapePipe(result.ArtifactDirectory ?? "")} |");
+                $"| {(result.Passed ? "PASS" : result.Score.Status.ToUpperInvariant())} | {EscapePipe(result.Score.Profile)} | {EscapePipe(result.SuiteName)} | {EscapePipe(result.TestId)} | {result.Score.OverallScore:F3} | {result.MinScore:F3} | {result.Attempts} | {EscapePipe(result.ArtifactDirectory ?? "")} |");
         }
 
-        var failed = results.Where(r => !r.Passed).ToList();
+        var failed = results.Where(r => !r.Passed)
+            .OrderByDescending(FailureSeverity)
+            .ThenBy(r => r.Score.OverallScore)
+            .ToList();
         if (failed.Count > 0)
         {
             builder.AppendLine();
@@ -244,13 +302,17 @@ public static class SuiteReporter
             {
                 builder.AppendLine($"### {test.SuiteName}/{test.TestId}");
                 builder.AppendLine();
-                builder.AppendLine($"- Score: {test.Score.FinalScore:F2}");
+                builder.AppendLine($"- Severity: {FailureSeverityLabel(test)}");
+                builder.AppendLine($"- Profile: {test.Score.Profile}");
+                builder.AppendLine($"- Score: {test.Score.OverallScore:F3}");
                 builder.AppendLine($"- Hard pass: {test.Score.HardPass}");
                 builder.AppendLine($"- Artifact: {test.ArtifactDirectory}");
-                if (test.Score.HardFailures.Count > 0)
-                    builder.AppendLine($"- Hard failures: {string.Join("; ", test.Score.HardFailures)}");
-                if (test.Score.JudgeReasons.Count > 0)
-                    builder.AppendLine($"- Judge reasons: {string.Join("; ", test.Score.JudgeReasons)}");
+                if (test.Score.HardGateFailures.Count > 0)
+                    builder.AppendLine($"- Hard gates: {string.Join("; ", test.Score.HardGateFailures)}");
+                if (test.Score.Problems.Count > 0)
+                    builder.AppendLine($"- Problems: {string.Join("; ", test.Score.Problems.Take(5))}");
+                if (test.Score.RequiredFixes.Count > 0)
+                    builder.AppendLine($"- Required fixes: {string.Join("; ", test.Score.RequiredFixes.Take(5))}");
                 var preview = BuildInlineResponsePreview(test.FinalResponse, 220);
                 if (!string.IsNullOrWhiteSpace(preview))
                     builder.AppendLine($"- Response preview: {preview}");
@@ -368,6 +430,62 @@ public static class SuiteReporter
 
         return lines.Take(5).ToList();
     }
+
+    private sealed record RecurringFailureReason(string reason, int count);
+
+    private static List<RecurringFailureReason> TopRecurringFailureReasons(IReadOnlyList<TestResult> results)
+    {
+        return results
+            .Where(r => !r.Passed)
+            .SelectMany(r => FailureReasons(r.Score))
+            .Where(reason => !string.IsNullOrWhiteSpace(reason))
+            .Select(NormalizeReason)
+            .GroupBy(reason => reason, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new RecurringFailureReason(group.Key, group.Count()))
+            .OrderByDescending(item => item.count)
+            .ThenBy(item => item.reason, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+    }
+
+    private static IEnumerable<string> FailureReasons(ScoreCard score)
+    {
+        foreach (var failure in score.HardGateFailures)
+            yield return failure;
+        foreach (var check in score.DeterministicChecks.Where(check => !check.Passed))
+            yield return check.Message;
+        foreach (var problem in score.Problems)
+            yield return problem;
+    }
+
+    private static string NormalizeReason(string reason)
+    {
+        var trimmed = reason.Trim();
+        if (trimmed.Length <= 140)
+            return trimmed;
+
+        return trimmed[..140].TrimEnd() + "...";
+    }
+
+    private static int FailureSeverity(TestResult result)
+    {
+        if (result.Score.HardGateFailures.Count > 0)
+            return 4;
+        if (string.Equals(result.Score.Status, "fail", StringComparison.OrdinalIgnoreCase))
+            return 3;
+        if (result.Score.OverallScore < 0.75)
+            return 2;
+        return 1;
+    }
+
+    private static string FailureSeverityLabel(TestResult result) =>
+        FailureSeverity(result) switch
+        {
+            >= 4 => "critical",
+            3 => "high",
+            2 => "medium",
+            _ => "low"
+        };
 
     private static string EscapePipe(string value) => value.Replace("|", "\\|");
 

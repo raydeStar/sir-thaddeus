@@ -268,6 +268,60 @@ public class ToolLoopStepTests
             step.ExecuteAsync(NewContext(), cts.Token));
     }
 
+    [Fact]
+    public async Task Caps_llm_output_budget_for_tool_loop_rounds()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("web_search", "{\"q\":\"cats\"}"),
+            LlmReply.Final("cats are furry"));
+        var step = BuildStep(llm, mcp: new StubMcp(_ => "search result"));
+        var ctx = NewContext() with { ForcedTool = "web_search" };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.Equal(new[] { 1024, 1024 }, llm.MaxTokenOverrides);
+        Assert.Equal(new[] { "web_search", null }, llm.ForcedToolNames);
+    }
+
+    [Fact]
+    public async Task Places_discover_success_builds_local_business_draft_without_second_llm_round()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool(ToolNames.PlacesDiscover, "{\"query\":\"florist nearby\"}"),
+            LlmReply.Final("should not run"));
+        var mcp = new StubMcp((tool, _) => tool == ToolNames.PlacesDiscover
+            ? "{" +
+              "\"provider\":\"osm_overpass\"," +
+              "\"resolvedLocation\":\"Olympia, Washington, US\"," +
+              "\"results\":[" +
+              "{\"name\":\"Fleurae\",\"address\":\"101 Capitol Way S, Olympia, WA\",\"distanceMeters\":420,\"osmUrl\":\"https://www.openstreetmap.org/node/1\"}," +
+              "{\"name\":\"Buds and Blooms\",\"address\":\"517 Washington St SE, Olympia, WA\",\"distanceMeters\":180,\"osmUrl\":\"https://www.openstreetmap.org/node/2\"}" +
+              "]" +
+              "}"
+            : "");
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = NewContext() with
+        {
+            UserText = "Is there a florist nearby?",
+            LlmMessages = new[] { ChatMessage.System("sys"), ChatMessage.User("Is there a florist nearby?") },
+            ToolDefs = new[]
+            {
+                new ToolDefinition { Function = new FunctionDefinition { Name = ToolNames.PlacesDiscover, Description = "places", Parameters = new { } } },
+            },
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Contains("florists", term.Response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Fleurae", term.Response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Buds and Blooms", term.Response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(term.Response.ToolCallsMade);
+        Assert.Equal(2, term.Response.Sources.Count);
+        Assert.All(term.Response.Sources, source => Assert.Equal("openstreetmap.org", source.Domain));
+        Assert.Single(llm.MaxTokenOverrides);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────
 
     private static ToolLoopStep BuildStep(
@@ -305,6 +359,9 @@ public class ToolLoopStepTests
     private sealed class FakeLlm : ILlmClient
     {
         private readonly Queue<LlmReply> _replies;
+        public List<int> MaxTokenOverrides { get; } = new();
+        public List<string?> ForcedToolNames { get; } = new();
+
         public FakeLlm(params LlmReply[] replies) => _replies = new(replies);
 
         public Task<LlmResponse> ChatAsync(
@@ -321,6 +378,18 @@ public class ToolLoopStepTests
             int maxTokensOverride,
             CancellationToken cancellationToken = default)
             => ChatAsync(messages, tools, cancellationToken);
+
+        public Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools,
+            int maxTokensOverride,
+            string? forcedToolName,
+            CancellationToken cancellationToken = default)
+        {
+            MaxTokenOverrides.Add(maxTokensOverride);
+            ForcedToolNames.Add(forcedToolName);
+            return ChatAsync(messages, tools, cancellationToken);
+        }
 
         public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<string?>("fake-model");

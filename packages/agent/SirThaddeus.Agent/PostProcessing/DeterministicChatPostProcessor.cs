@@ -1,6 +1,7 @@
 using static SirThaddeus.Agent.OrchestratorMessageHelpers;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.Utilities;
 using SirThaddeus.PersonalityEngine.Formatting;
 using SirThaddeus.PersonalityEngine.Profiles;
 using System.Text.RegularExpressions;
@@ -401,9 +402,12 @@ public sealed class DeterministicChatPostProcessor
         }
 
         var lowerPrompt = latestUserMessage.ToLowerInvariant();
+        var wantsBriefWeather =
+            lowerPrompt.Contains("concise", StringComparison.Ordinal) ||
+            lowerPrompt.Contains("short", StringComparison.Ordinal) ||
+            lowerPrompt.Contains("outlook", StringComparison.Ordinal);
         if (!lowerPrompt.Contains("weather", StringComparison.Ordinal) ||
-            !lowerPrompt.Contains("concise", StringComparison.Ordinal) ||
-            !lowerPrompt.Contains("plan", StringComparison.Ordinal))
+            !wantsBriefWeather)
         {
             return null;
         }
@@ -413,6 +417,29 @@ public sealed class DeterministicChatPostProcessor
                 string.Equals(call.ToolName, ToolNames.WeatherForecastAlt, StringComparison.OrdinalIgnoreCase)))
         {
             return null;
+        }
+
+        var forecast = toolCallsMade.LastOrDefault(call =>
+            call.Success &&
+            (string.Equals(call.ToolName, ToolNames.WeatherForecast, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(call.ToolName, ToolNames.WeatherForecastAlt, StringComparison.OrdinalIgnoreCase)) &&
+            !string.IsNullOrWhiteSpace(call.Result));
+        if (forecast is not null &&
+            WeatherResponseBuilder.TryBuildBriefFromForecastJson(
+                forecast.Result,
+                latestUserMessage,
+                ExtractWeatherLocation(latestUserMessage) ?? "Weather",
+                preferredUnits: null) is { Length: > 0 } deterministicPlan)
+        {
+            return deterministicPlan;
+        }
+        if (forecast is not null &&
+            WeatherResponseBuilder.TryBuildBriefFromForecastSummary(
+                forecast.Result,
+                latestUserMessage,
+                ExtractWeatherLocation(latestUserMessage) ?? "Weather") is { Length: > 0 } deterministicSummary)
+        {
+            return deterministicSummary;
         }
 
         var condition = ExtractWeatherCondition(text) ?? "conditions returned by the weather service";
@@ -1253,14 +1280,6 @@ public sealed class DeterministicChatPostProcessor
             .ToList();
         if (webCalls.Count == 0)
             return null;
-
-        // Every executed web call must be a no-results / empty / error payload.
-        // Otherwise the response may legitimately summarize partial data.
-        foreach (var call in webCalls)
-        {
-            if (!IsNoResultsLikePayload(call.Result))
-                return null;
-        }
 
         var normalized = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(
             latestUserMessage,

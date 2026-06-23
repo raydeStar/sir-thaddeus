@@ -70,6 +70,52 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
         _getRuntimeControls = runtimeControls ?? (() => new RuntimeControlState());
     }
 
+    private static bool TryBuildHarnessStubError(
+        string canonicalToolName,
+        out string output,
+        out string reason)
+    {
+        output = "";
+        reason = "";
+
+        var key = $"ST_STUB_{canonicalToolName.Trim().ToUpperInvariant().Replace("-", "_")}";
+        var raw = Environment.GetEnvironmentVariable(key);
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        var normalized = raw.Trim().ToLowerInvariant();
+        var code = normalized switch
+        {
+            "timeout" or "timed_out" => "timeout",
+            "tool_unavailable" or "unavailable" => "tool_unavailable",
+            "permission_denied" or "permission" => "permission_denied",
+            "policy_denied" or "tool_not_allowed" => "tool_not_allowed",
+            _ => normalized.Replace(' ', '_')
+        };
+
+        var message = code switch
+        {
+            "timeout" => $"{canonicalToolName} timed out.",
+            "tool_unavailable" => $"{canonicalToolName} is currently unavailable.",
+            "permission_denied" => $"Access to {canonicalToolName} was denied.",
+            "tool_not_allowed" => $"{canonicalToolName} is not allowed for this run.",
+            _ => $"{canonicalToolName} failed: {raw.Trim()}"
+        };
+
+        output = JsonSerializer.Serialize(new
+        {
+            error = new
+            {
+                code,
+                message
+            },
+            tool = canonicalToolName,
+            stub = true
+        });
+        reason = $"Harness stub: {code}";
+        return true;
+    }
+
     /// <summary>
     /// Updates the session ID used for audit correlation so that tool call
     /// events match the UI-visible conversation/session identifier.
@@ -205,6 +251,12 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
             return "Error: Tool call blocked — panic mode blocks side-effect tools.";
         }
 
+        if (TryBuildHarnessStubError(canonical, out var stubOutput, out var stubReason))
+        {
+            LogEnd(requestId, canonical, "error", "not_required", null, 0, stubReason);
+            return stubOutput;
+        }
+
         if (!TryConsumeBudget(runtimeControls.ToolBudgets, canonical, segmentId, out var budgetErrorJson))
         {
             _audit.Append(new AuditEvent
@@ -315,6 +367,21 @@ public sealed class AuditedMcpToolClient : IMcpToolClient
             _activeTurnKey = $"turn:{Guid.NewGuid():N}";
             _turnToolCalls = 0;
             _turnWebCalls = 0;
+        }
+    }
+
+    /// <summary>
+    /// Resets all budget counters for harness/runtime session isolation.
+    /// </summary>
+    public void ResetBudgets()
+    {
+        lock (_budgetGate)
+        {
+            _sessionToolCalls = 0;
+            _activeTurnKey = $"turn:{Guid.NewGuid():N}";
+            _turnToolCalls = 0;
+            _turnWebCalls = 0;
+            _fileOpsWindow.Clear();
         }
     }
 

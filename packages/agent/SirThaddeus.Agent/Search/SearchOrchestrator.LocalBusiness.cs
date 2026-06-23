@@ -1007,6 +1007,9 @@ public sealed partial class SearchOrchestrator
         }
 
         // ── Phase 2: Look up each candidate via places_lookup ──
+        if (HarnessDisallowsPlacesTools())
+            return BuildCleanedLocalBusinessResponse(userMessage, candidateNames, locationContext, toolCallsMade);
+
         var enriched = new List<EnrichedBusiness>();
         var lookups = Math.Min(candidateNames.Count, LocalBusinessMaxPlaceLookups);
 
@@ -1141,7 +1144,8 @@ public sealed partial class SearchOrchestrator
             businesses,
             responseLocation,
             toolCallsMade,
-            includesSupplementalSpots));
+            includesSupplementalSpots,
+            sources));
     }
 
     private async Task<IReadOnlyList<string>> FetchSupplementalLocalBusinessNamesAsync(
@@ -3831,7 +3835,8 @@ public sealed partial class SearchOrchestrator
         IReadOnlyList<EnrichedBusiness> businesses,
         string? locationContext,
         IReadOnlyList<ToolCallRecord> toolCallsMade,
-        bool includesSupplementalSpots = false)
+        bool includesSupplementalSpots = false,
+        IReadOnlyList<SourceItem>? sources = null)
     {
         var businessLabel = GetRequestedLocalBusinessLabel(userMessage);
         var locText = string.IsNullOrWhiteSpace(locationContext)
@@ -3922,8 +3927,26 @@ public sealed partial class SearchOrchestrator
             Text = sb.ToString(),
             Success = true,
             ToolCallsMade = toolCallsMade.ToList(),
-            LlmRoundTrips = 0
+            LlmRoundTrips = 0,
+            Sources = ToAgentSources(sources)
         };
+    }
+
+    private static IReadOnlyList<AgentSource> ToAgentSources(IReadOnlyList<SourceItem>? sources)
+    {
+        if (sources is null || sources.Count == 0)
+            return [];
+
+        return sources
+            .Where(source => !string.IsNullOrWhiteSpace(source.Url))
+            .Select(source => new AgentSource
+            {
+                Url = source.Url,
+                Title = string.IsNullOrWhiteSpace(source.Title) ? null : source.Title,
+                Domain = string.IsNullOrWhiteSpace(source.Domain) ? null : source.Domain,
+                Excerpt = string.IsNullOrWhiteSpace(source.Snippet) ? null : source.Snippet
+            })
+            .ToList();
     }
 
     /// <summary>

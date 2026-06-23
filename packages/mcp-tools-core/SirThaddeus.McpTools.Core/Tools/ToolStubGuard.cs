@@ -19,15 +19,30 @@ internal static class ToolStubGuard
         if (string.IsNullOrWhiteSpace(stubValue))
             return null;
 
-        return stubValue.Trim().ToLowerInvariant() switch
+        var code = stubValue.Trim().ToLowerInvariant() switch
         {
-            "tool_unavailable" => $"Error: {toolName} is currently unavailable.",
-            "timeout" => $"Error: {toolName} timed out.",
-            "permission_denied" => $"Error: Access to {toolName} was denied.",
-            _ => $"Error: {toolName} failed: {stubValue}"
+            "tool_unavailable" or "unavailable" => "tool_unavailable",
+            "timeout" or "timed_out" => "timeout",
+            "permission_denied" or "permission" => "permission_denied",
+            "policy_denied" or "tool_not_allowed" => "tool_not_allowed",
+            _ => stubValue.Trim().ToLowerInvariant().Replace(' ', '_')
         };
+
+        var message = code switch
+        {
+            "tool_unavailable" => $"{toolName} is currently unavailable.",
+            "timeout" => $"{toolName} timed out.",
+            "permission_denied" => $"Access to {toolName} was denied.",
+            "tool_not_allowed" => $"{toolName} is not allowed for this run.",
+            _ => $"{toolName} failed: {stubValue.Trim()}"
+        };
+
+        return $$"""{"error":{"code":"{{code}}","message":"{{EscapeJson(message)}}"},"tool":"{{EscapeJson(toolName)}}","stub":true}""";
     }
 
     private static string NormalizeName(string toolName) =>
         (toolName ?? "").ToUpperInvariant().Replace('-', '_');
+
+    private static string EscapeJson(string value) =>
+        (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
 }

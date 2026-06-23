@@ -1,0 +1,3132 @@
+{
+  "daily_health_snapshots": [
+    {
+      "date": "2026-05-04",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 531,
+        "score": 96,
+        "startTime": "2026-05-04T22:45:00",
+        "endTime": "2026-05-04T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 55,
+        "respiratoryRate": 15,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 55,
+        "respiratoryRate": 15,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 11213,
+        "activeMinutes": 66,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2081,
+        "proteinEstimate": 76,
+        "hydrationEstimate": 66,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 5,
+        "stress": 7,
+        "soreness": 3,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.575Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-05",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 548,
+        "score": 96,
+        "startTime": "2026-05-05T22:45:00",
+        "endTime": "2026-05-05T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 34,
+        "respiratoryRate": 16,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 34,
+        "respiratoryRate": 16,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 12454,
+        "activeMinutes": 73,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2098,
+        "proteinEstimate": 93,
+        "hydrationEstimate": 83,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 8,
+        "stress": 8,
+        "soreness": 5,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.575Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-06",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 355,
+        "score": 70,
+        "startTime": "2026-05-06T22:45:00",
+        "endTime": "2026-05-06T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 51,
+        "respiratoryRate": 17,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 51,
+        "respiratoryRate": 17,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 3295,
+        "activeMinutes": 19,
+        "workoutMinutes": 62,
+        "workoutIntensity": "hard",
+        "workouts": [
+          {
+            "durationMinutes": 62,
+            "intensity": "hard",
+            "label": "Mock hard training"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2115,
+        "proteinEstimate": 110,
+        "hydrationEstimate": 55,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "low",
+        "energy": 4,
+        "stress": 9,
+        "soreness": 8,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.575Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-07",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 372,
+        "score": 73,
+        "startTime": "2026-05-07T22:45:00",
+        "endTime": "2026-05-07T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 68,
+        "respiratoryRate": 14,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 68,
+        "respiratoryRate": 14,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 4536,
+        "activeMinutes": 27,
+        "workoutMinutes": 28,
+        "workoutIntensity": "moderate",
+        "workouts": [
+          {
+            "durationMinutes": 28,
+            "intensity": "moderate",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2132,
+        "proteinEstimate": 127,
+        "hydrationEstimate": 72,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 7,
+        "stress": 2,
+        "soreness": 4,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.575Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-08",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 389,
+        "score": 76,
+        "startTime": "2026-05-08T22:45:00",
+        "endTime": "2026-05-08T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 47,
+        "respiratoryRate": 15,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 47,
+        "respiratoryRate": 15,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 5777,
+        "activeMinutes": 34,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2149,
+        "proteinEstimate": 144,
+        "hydrationEstimate": 89,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 3,
+        "stress": 3,
+        "soreness": 6,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.575Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-09",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 406,
+        "score": 80,
+        "startTime": "2026-05-09T22:45:00",
+        "endTime": "2026-05-09T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 64,
+        "respiratoryRate": 16,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 64,
+        "respiratoryRate": 16,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 7018,
+        "activeMinutes": 41,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2166,
+        "proteinEstimate": 66,
+        "hydrationEstimate": 61,
+        "caffeineAfterNoon": true
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 6,
+        "stress": 4,
+        "soreness": 3,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.575Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-10",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 480,
+        "score": 94,
+        "startTime": "2026-05-10T22:45:00",
+        "endTime": "2026-05-10T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 42,
+        "respiratoryRate": 16,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 42,
+        "respiratoryRate": 16,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 7490,
+        "activeMinutes": 44,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2030,
+        "proteinEstimate": 120,
+        "hydrationEstimate": 60,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "flat",
+        "energy": 3,
+        "stress": 4,
+        "soreness": 2,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.575Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-11",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 497,
+        "score": 96,
+        "startTime": "2026-05-11T22:45:00",
+        "endTime": "2026-05-11T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 59,
+        "respiratoryRate": 17,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 59,
+        "respiratoryRate": 17,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 8731,
+        "activeMinutes": 51,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2047,
+        "proteinEstimate": 137,
+        "hydrationEstimate": 77,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 6,
+        "stress": 5,
+        "soreness": 4,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.575Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-12",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 514,
+        "score": 96,
+        "startTime": "2026-05-12T22:45:00",
+        "endTime": "2026-05-12T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 38,
+        "respiratoryRate": 14,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 38,
+        "respiratoryRate": 14,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 9972,
+        "activeMinutes": 59,
+        "workoutMinutes": 28,
+        "workoutIntensity": "moderate",
+        "workouts": [
+          {
+            "durationMinutes": 28,
+            "intensity": "moderate",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2064,
+        "proteinEstimate": 59,
+        "hydrationEstimate": 94,
+        "caffeineAfterNoon": true
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 9,
+        "stress": 6,
+        "soreness": 6,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.575Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-13",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 531,
+        "score": 96,
+        "startTime": "2026-05-13T22:45:00",
+        "endTime": "2026-05-13T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 55,
+        "respiratoryRate": 15,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 55,
+        "respiratoryRate": 15,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 11213,
+        "activeMinutes": 66,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2081,
+        "proteinEstimate": 76,
+        "hydrationEstimate": 66,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 5,
+        "stress": 7,
+        "soreness": 3,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-14",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 548,
+        "score": 96,
+        "startTime": "2026-05-14T22:45:00",
+        "endTime": "2026-05-14T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 34,
+        "respiratoryRate": 16,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 34,
+        "respiratoryRate": 16,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 12454,
+        "activeMinutes": 73,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2098,
+        "proteinEstimate": 93,
+        "hydrationEstimate": 83,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 8,
+        "stress": 8,
+        "soreness": 5,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-15",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 355,
+        "score": 70,
+        "startTime": "2026-05-15T22:45:00",
+        "endTime": "2026-05-15T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 51,
+        "respiratoryRate": 17,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 51,
+        "respiratoryRate": 17,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 3295,
+        "activeMinutes": 19,
+        "workoutMinutes": 62,
+        "workoutIntensity": "hard",
+        "workouts": [
+          {
+            "durationMinutes": 62,
+            "intensity": "hard",
+            "label": "Mock hard training"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2115,
+        "proteinEstimate": 110,
+        "hydrationEstimate": 55,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "low",
+        "energy": 4,
+        "stress": 9,
+        "soreness": 8,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 372,
+        "score": 73,
+        "startTime": "2026-05-16T22:45:00",
+        "endTime": "2026-05-16T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 68,
+        "respiratoryRate": 14,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 68,
+        "respiratoryRate": 14,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 4536,
+        "activeMinutes": 27,
+        "workoutMinutes": 28,
+        "workoutIntensity": "moderate",
+        "workouts": [
+          {
+            "durationMinutes": 28,
+            "intensity": "moderate",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2132,
+        "proteinEstimate": 127,
+        "hydrationEstimate": 72,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 7,
+        "stress": 2,
+        "soreness": 4,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-17",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 389,
+        "score": 76,
+        "startTime": "2026-05-17T22:45:00",
+        "endTime": "2026-05-17T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 47,
+        "respiratoryRate": 15,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 47,
+        "respiratoryRate": 15,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 5777,
+        "activeMinutes": 34,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2149,
+        "proteinEstimate": 144,
+        "hydrationEstimate": 89,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 3,
+        "stress": 3,
+        "soreness": 6,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-18",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 406,
+        "score": 80,
+        "startTime": "2026-05-18T22:45:00",
+        "endTime": "2026-05-18T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 64,
+        "respiratoryRate": 16,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 64,
+        "respiratoryRate": 16,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 7018,
+        "activeMinutes": 41,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2166,
+        "proteinEstimate": 66,
+        "hydrationEstimate": 61,
+        "caffeineAfterNoon": true
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 6,
+        "stress": 4,
+        "soreness": 3,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-19",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 423,
+        "score": 83,
+        "startTime": "2026-05-19T22:45:00",
+        "endTime": "2026-05-19T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 43,
+        "respiratoryRate": 17,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 43,
+        "respiratoryRate": 17,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 8259,
+        "activeMinutes": 49,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2183,
+        "proteinEstimate": 83,
+        "hydrationEstimate": 78,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 9,
+        "stress": 5,
+        "soreness": 5,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-20",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 497,
+        "score": 96,
+        "startTime": "2026-05-20T22:45:00",
+        "endTime": "2026-05-20T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 59,
+        "respiratoryRate": 17,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 59,
+        "respiratoryRate": 17,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 8731,
+        "activeMinutes": 51,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2047,
+        "proteinEstimate": 137,
+        "hydrationEstimate": 77,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 6,
+        "stress": 5,
+        "soreness": 4,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-21",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 514,
+        "score": 96,
+        "startTime": "2026-05-21T22:45:00",
+        "endTime": "2026-05-21T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 38,
+        "respiratoryRate": 14,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 38,
+        "respiratoryRate": 14,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 9972,
+        "activeMinutes": 59,
+        "workoutMinutes": 28,
+        "workoutIntensity": "moderate",
+        "workouts": [
+          {
+            "durationMinutes": 28,
+            "intensity": "moderate",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2064,
+        "proteinEstimate": 59,
+        "hydrationEstimate": 94,
+        "caffeineAfterNoon": true
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 9,
+        "stress": 6,
+        "soreness": 6,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-22",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 531,
+        "score": 96,
+        "startTime": "2026-05-22T22:45:00",
+        "endTime": "2026-05-22T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 55,
+        "respiratoryRate": 15,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 55,
+        "respiratoryRate": 15,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 11213,
+        "activeMinutes": 66,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2081,
+        "proteinEstimate": 76,
+        "hydrationEstimate": 66,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 5,
+        "stress": 7,
+        "soreness": 3,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-23",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 548,
+        "score": 96,
+        "startTime": "2026-05-23T22:45:00",
+        "endTime": "2026-05-23T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 34,
+        "respiratoryRate": 16,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 34,
+        "respiratoryRate": 16,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 12454,
+        "activeMinutes": 73,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2098,
+        "proteinEstimate": 93,
+        "hydrationEstimate": 83,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 8,
+        "stress": 8,
+        "soreness": 5,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-24",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 355,
+        "score": 70,
+        "startTime": "2026-05-24T22:45:00",
+        "endTime": "2026-05-24T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 51,
+        "respiratoryRate": 17,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 51,
+        "respiratoryRate": 17,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 3295,
+        "activeMinutes": 19,
+        "workoutMinutes": 62,
+        "workoutIntensity": "hard",
+        "workouts": [
+          {
+            "durationMinutes": 62,
+            "intensity": "hard",
+            "label": "Mock hard training"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2115,
+        "proteinEstimate": 110,
+        "hydrationEstimate": 55,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "low",
+        "energy": 4,
+        "stress": 9,
+        "soreness": 8,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-25",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 372,
+        "score": 73,
+        "startTime": "2026-05-25T22:45:00",
+        "endTime": "2026-05-25T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 68,
+        "respiratoryRate": 14,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 68,
+        "respiratoryRate": 14,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 4536,
+        "activeMinutes": 27,
+        "workoutMinutes": 28,
+        "workoutIntensity": "moderate",
+        "workouts": [
+          {
+            "durationMinutes": 28,
+            "intensity": "moderate",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2132,
+        "proteinEstimate": 127,
+        "hydrationEstimate": 72,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 7,
+        "stress": 2,
+        "soreness": 4,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-26",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 389,
+        "score": 76,
+        "startTime": "2026-05-26T22:45:00",
+        "endTime": "2026-05-26T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 47,
+        "respiratoryRate": 15,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 47,
+        "respiratoryRate": 15,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 5777,
+        "activeMinutes": 34,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2149,
+        "proteinEstimate": 144,
+        "hydrationEstimate": 89,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 3,
+        "stress": 3,
+        "soreness": 6,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-27",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 406,
+        "score": 80,
+        "startTime": "2026-05-27T22:45:00",
+        "endTime": "2026-05-27T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 64,
+        "respiratoryRate": 16,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 64,
+        "respiratoryRate": 16,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 7018,
+        "activeMinutes": 41,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2166,
+        "proteinEstimate": 66,
+        "hydrationEstimate": 61,
+        "caffeineAfterNoon": true
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 6,
+        "stress": 4,
+        "soreness": 3,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-28",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 423,
+        "score": 83,
+        "startTime": "2026-05-28T22:45:00",
+        "endTime": "2026-05-28T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 43,
+        "respiratoryRate": 17,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 43,
+        "respiratoryRate": 17,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 8259,
+        "activeMinutes": 49,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2183,
+        "proteinEstimate": 83,
+        "hydrationEstimate": 78,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 9,
+        "stress": 5,
+        "soreness": 5,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-29",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 440,
+        "score": 86,
+        "startTime": "2026-05-29T22:45:00",
+        "endTime": "2026-05-29T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 60,
+        "respiratoryRate": 14,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 60,
+        "respiratoryRate": 14,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 9500,
+        "activeMinutes": 56,
+        "workoutMinutes": 28,
+        "workoutIntensity": "moderate",
+        "workouts": [
+          {
+            "durationMinutes": 28,
+            "intensity": "moderate",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2200,
+        "proteinEstimate": 100,
+        "hydrationEstimate": 95,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "flat",
+        "energy": 5,
+        "stress": 6,
+        "soreness": 2,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-30",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 514,
+        "score": 96,
+        "startTime": "2026-05-30T22:45:00",
+        "endTime": "2026-05-30T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 38,
+        "respiratoryRate": 14,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 38,
+        "respiratoryRate": 14,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 9972,
+        "activeMinutes": 59,
+        "workoutMinutes": 28,
+        "workoutIntensity": "moderate",
+        "workouts": [
+          {
+            "durationMinutes": 28,
+            "intensity": "moderate",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2064,
+        "proteinEstimate": 59,
+        "hydrationEstimate": 94,
+        "caffeineAfterNoon": true
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 9,
+        "stress": 6,
+        "soreness": 6,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-05-31",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 531,
+        "score": 96,
+        "startTime": "2026-05-31T22:45:00",
+        "endTime": "2026-05-31T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 55,
+        "respiratoryRate": 15,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 55,
+        "respiratoryRate": 15,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 11213,
+        "activeMinutes": 66,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2081,
+        "proteinEstimate": 76,
+        "hydrationEstimate": 66,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 5,
+        "stress": 7,
+        "soreness": 3,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-06-01",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 497,
+        "score": 96,
+        "startTime": "2026-06-01T22:45:00",
+        "endTime": "2026-06-01T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 59,
+        "respiratoryRate": 17,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 59,
+        "respiratoryRate": 17,
+        "spo2": 97,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 8731,
+        "activeMinutes": 51,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2047,
+        "proteinEstimate": 137,
+        "hydrationEstimate": 77,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 6,
+        "stress": 5,
+        "soreness": 4,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-06-02",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 514,
+        "score": 96,
+        "startTime": "2026-06-02T22:45:00",
+        "endTime": "2026-06-02T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 38,
+        "respiratoryRate": 14,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 38,
+        "respiratoryRate": 14,
+        "spo2": 96,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 9972,
+        "activeMinutes": 59,
+        "workoutMinutes": 28,
+        "workoutIntensity": "moderate",
+        "workouts": [
+          {
+            "durationMinutes": 28,
+            "intensity": "moderate",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "normal",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2064,
+        "proteinEstimate": 59,
+        "hydrationEstimate": 94,
+        "caffeineAfterNoon": true
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 9,
+        "stress": 6,
+        "soreness": 6,
+        "focus": 4
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:10.576Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    },
+    {
+      "date": "2026-06-03",
+      "provider": "mock",
+      "sleep": {
+        "durationMinutes": 531,
+        "score": 96,
+        "startTime": "2026-06-03T22:45:00",
+        "endTime": "2026-06-03T06:45:00",
+        "quality": "mock"
+      },
+      "recovery": {
+        "restingHeartRate": 55,
+        "hrv": 55,
+        "respiratoryRate": 15,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "heart": {
+        "restingHeartRate": 55,
+        "hrv": 55,
+        "respiratoryRate": 15,
+        "spo2": 98,
+        "quality": "mock"
+      },
+      "activity": {
+        "steps": 11213,
+        "activeMinutes": 66,
+        "workoutMinutes": 0,
+        "workoutIntensity": "none",
+        "workouts": [
+          {
+            "durationMinutes": 0,
+            "intensity": "none",
+            "label": "Mock daily movement"
+          }
+        ],
+        "priorDayLoad": "high",
+        "quality": "mock"
+      },
+      "nutrition": {
+        "caloriesEstimate": 2081,
+        "proteinEstimate": 76,
+        "hydrationEstimate": 66,
+        "caffeineAfterNoon": false
+      },
+      "subjective": {
+        "mood": "steady",
+        "energy": 5,
+        "stress": 7,
+        "soreness": 3,
+        "focus": 7
+      },
+      "dataQuality": {
+        "provider": "mock",
+        "quality": "mock",
+        "generatedAt": "2026-06-03T23:13:08.017Z",
+        "missing": [],
+        "warnings": [
+          "Mock data for local development and tests."
+        ]
+      }
+    }
+  ],
+  "daily_health_baselines": [
+    {
+      "date": "2026-05-04",
+      "sampleCounts": {
+        "sleep7": 0,
+        "sleep14": 0,
+        "restingHeartRate14": 0,
+        "hrv14": 0,
+        "steps7": 0,
+        "energy7": 0,
+        "stress7": 0
+      }
+    },
+    {
+      "date": "2026-05-05",
+      "sleepDuration7DayAverage": 531,
+      "sleepDuration14DayAverage": 531,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 55,
+      "steps7DayAverage": 11213,
+      "energy7DayAverage": 5,
+      "stress7DayAverage": 7,
+      "sampleCounts": {
+        "sleep7": 1,
+        "sleep14": 1,
+        "restingHeartRate14": 1,
+        "hrv14": 1,
+        "steps7": 1,
+        "energy7": 1,
+        "stress7": 1
+      }
+    },
+    {
+      "date": "2026-05-06",
+      "sleepDuration7DayAverage": 539.5,
+      "sleepDuration14DayAverage": 539.5,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 44.5,
+      "steps7DayAverage": 11833.5,
+      "energy7DayAverage": 6.5,
+      "stress7DayAverage": 7.5,
+      "sampleCounts": {
+        "sleep7": 2,
+        "sleep14": 2,
+        "restingHeartRate14": 2,
+        "hrv14": 2,
+        "steps7": 2,
+        "energy7": 2,
+        "stress7": 2
+      }
+    },
+    {
+      "date": "2026-05-07",
+      "sleepDuration7DayAverage": 478,
+      "sleepDuration14DayAverage": 478,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 46.7,
+      "steps7DayAverage": 8987.3,
+      "energy7DayAverage": 5.7,
+      "stress7DayAverage": 8,
+      "sampleCounts": {
+        "sleep7": 3,
+        "sleep14": 3,
+        "restingHeartRate14": 3,
+        "hrv14": 3,
+        "steps7": 3,
+        "energy7": 3,
+        "stress7": 3
+      }
+    },
+    {
+      "date": "2026-05-08",
+      "sleepDuration7DayAverage": 451.5,
+      "sleepDuration14DayAverage": 451.5,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 52,
+      "steps7DayAverage": 7874.5,
+      "energy7DayAverage": 6,
+      "stress7DayAverage": 6.5,
+      "sampleCounts": {
+        "sleep7": 4,
+        "sleep14": 4,
+        "restingHeartRate14": 4,
+        "hrv14": 4,
+        "steps7": 4,
+        "energy7": 4,
+        "stress7": 4
+      }
+    },
+    {
+      "date": "2026-05-09",
+      "sleepDuration7DayAverage": 439,
+      "sleepDuration14DayAverage": 439,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 51,
+      "steps7DayAverage": 7455,
+      "energy7DayAverage": 5.4,
+      "stress7DayAverage": 5.8,
+      "sampleCounts": {
+        "sleep7": 5,
+        "sleep14": 5,
+        "restingHeartRate14": 5,
+        "hrv14": 5,
+        "steps7": 5,
+        "energy7": 5,
+        "stress7": 5
+      }
+    },
+    {
+      "date": "2026-05-10",
+      "sleepDuration7DayAverage": 433.5,
+      "sleepDuration14DayAverage": 433.5,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 53.2,
+      "steps7DayAverage": 7382.2,
+      "energy7DayAverage": 5.5,
+      "stress7DayAverage": 5.5,
+      "sampleCounts": {
+        "sleep7": 6,
+        "sleep14": 6,
+        "restingHeartRate14": 6,
+        "hrv14": 6,
+        "steps7": 6,
+        "energy7": 6,
+        "stress7": 6
+      }
+    },
+    {
+      "date": "2026-05-11",
+      "sleepDuration7DayAverage": 440.1,
+      "sleepDuration14DayAverage": 440.1,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 51.6,
+      "steps7DayAverage": 7397.6,
+      "energy7DayAverage": 5.1,
+      "stress7DayAverage": 5.3,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 7,
+        "restingHeartRate14": 7,
+        "hrv14": 7,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-12",
+      "sleepDuration7DayAverage": 435.3,
+      "sleepDuration14DayAverage": 447.3,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 52.5,
+      "steps7DayAverage": 7043,
+      "energy7DayAverage": 5.3,
+      "stress7DayAverage": 5,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 8,
+        "restingHeartRate14": 8,
+        "hrv14": 8,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-13",
+      "sleepDuration7DayAverage": 430.4,
+      "sleepDuration14DayAverage": 454.7,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 50.9,
+      "steps7DayAverage": 6688.4,
+      "energy7DayAverage": 5.4,
+      "stress7DayAverage": 4.7,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 9,
+        "restingHeartRate14": 9,
+        "hrv14": 9,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-14",
+      "sleepDuration7DayAverage": 455.6,
+      "sleepDuration14DayAverage": 462.3,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 51.3,
+      "steps7DayAverage": 7819.6,
+      "energy7DayAverage": 5.6,
+      "stress7DayAverage": 4.4,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 10,
+        "restingHeartRate14": 10,
+        "hrv14": 10,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-15",
+      "sleepDuration7DayAverage": 480.7,
+      "sleepDuration14DayAverage": 470.1,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 49.7,
+      "steps7DayAverage": 8950.7,
+      "energy7DayAverage": 5.7,
+      "stress7DayAverage": 5.3,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 11,
+        "restingHeartRate14": 11,
+        "hrv14": 11,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "sleepDuration7DayAverage": 475.9,
+      "sleepDuration14DayAverage": 460.5,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 49.8,
+      "steps7DayAverage": 8596.1,
+      "energy7DayAverage": 5.9,
+      "stress7DayAverage": 6.1,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 12,
+        "restingHeartRate14": 12,
+        "hrv14": 12,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-17",
+      "sleepDuration7DayAverage": 471,
+      "sleepDuration14DayAverage": 453.7,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 51.2,
+      "steps7DayAverage": 8241.6,
+      "energy7DayAverage": 6,
+      "stress7DayAverage": 5.9,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 13,
+        "restingHeartRate14": 13,
+        "hrv14": 13,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-18",
+      "sleepDuration7DayAverage": 458,
+      "sleepDuration14DayAverage": 449.1,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 50.9,
+      "steps7DayAverage": 7996.9,
+      "energy7DayAverage": 6,
+      "stress7DayAverage": 5.7,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-19",
+      "sleepDuration7DayAverage": 445,
+      "sleepDuration14DayAverage": 440.1,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 51.6,
+      "steps7DayAverage": 7752.1,
+      "energy7DayAverage": 6,
+      "stress7DayAverage": 5.6,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-20",
+      "sleepDuration7DayAverage": 432,
+      "sleepDuration14DayAverage": 431.2,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 52.2,
+      "steps7DayAverage": 7507.4,
+      "energy7DayAverage": 6,
+      "stress7DayAverage": 5.4,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-21",
+      "sleepDuration7DayAverage": 427.1,
+      "sleepDuration14DayAverage": 441.4,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 52.8,
+      "steps7DayAverage": 7152.9,
+      "energy7DayAverage": 6.1,
+      "stress7DayAverage": 5.1,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-22",
+      "sleepDuration7DayAverage": 422.3,
+      "sleepDuration14DayAverage": 451.5,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 50.6,
+      "steps7DayAverage": 6798.3,
+      "energy7DayAverage": 6.3,
+      "stress7DayAverage": 4.9,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-23",
+      "sleepDuration7DayAverage": 447.4,
+      "sleepDuration14DayAverage": 461.6,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 51.2,
+      "steps7DayAverage": 7929.4,
+      "energy7DayAverage": 6.4,
+      "stress7DayAverage": 4.6,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-24",
+      "sleepDuration7DayAverage": 472.6,
+      "sleepDuration14DayAverage": 471.8,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 49.1,
+      "steps7DayAverage": 9060.6,
+      "energy7DayAverage": 6.6,
+      "stress7DayAverage": 5.4,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-25",
+      "sleepDuration7DayAverage": 467.7,
+      "sleepDuration14DayAverage": 462.9,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 49.7,
+      "steps7DayAverage": 8706,
+      "energy7DayAverage": 6.7,
+      "stress7DayAverage": 6.3,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-26",
+      "sleepDuration7DayAverage": 462.9,
+      "sleepDuration14DayAverage": 453.9,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 50.4,
+      "steps7DayAverage": 8351.4,
+      "energy7DayAverage": 6.9,
+      "stress7DayAverage": 6,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-27",
+      "sleepDuration7DayAverage": 458,
+      "sleepDuration14DayAverage": 445,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 51,
+      "steps7DayAverage": 7996.9,
+      "energy7DayAverage": 6,
+      "stress7DayAverage": 5.7,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-28",
+      "sleepDuration7DayAverage": 445,
+      "sleepDuration14DayAverage": 436.1,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 51.6,
+      "steps7DayAverage": 7752.1,
+      "energy7DayAverage": 6,
+      "stress7DayAverage": 5.6,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-29",
+      "sleepDuration7DayAverage": 432,
+      "sleepDuration14DayAverage": 427.1,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 52.3,
+      "steps7DayAverage": 7507.4,
+      "energy7DayAverage": 6,
+      "stress7DayAverage": 5.4,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-30",
+      "sleepDuration7DayAverage": 419,
+      "sleepDuration14DayAverage": 433.2,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 52.9,
+      "steps7DayAverage": 7262.7,
+      "energy7DayAverage": 6,
+      "stress7DayAverage": 5.3,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-05-31",
+      "sleepDuration7DayAverage": 414.1,
+      "sleepDuration14DayAverage": 443.4,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 50.8,
+      "steps7DayAverage": 6908.1,
+      "energy7DayAverage": 6.1,
+      "stress7DayAverage": 5,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-06-01",
+      "sleepDuration7DayAverage": 439.3,
+      "sleepDuration14DayAverage": 453.5,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 51.4,
+      "steps7DayAverage": 8039.3,
+      "energy7DayAverage": 6.3,
+      "stress7DayAverage": 4.7,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-06-02",
+      "sleepDuration7DayAverage": 457.1,
+      "sleepDuration14DayAverage": 460,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 51,
+      "steps7DayAverage": 8638.6,
+      "energy7DayAverage": 6.1,
+      "stress7DayAverage": 5.1,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    },
+    {
+      "date": "2026-06-03",
+      "sleepDuration7DayAverage": 475,
+      "sleepDuration14DayAverage": 466.5,
+      "restingHeartRate14DayAverage": 55,
+      "hrv14DayAverage": 50.6,
+      "steps7DayAverage": 9237.9,
+      "energy7DayAverage": 7,
+      "stress7DayAverage": 5.6,
+      "sampleCounts": {
+        "sleep7": 7,
+        "sleep14": 14,
+        "restingHeartRate14": 14,
+        "hrv14": 14,
+        "steps7": 7,
+        "energy7": 7,
+        "stress7": 7
+      }
+    }
+  ],
+  "daily_strategy_briefs": [
+    {
+      "date": "2026-06-03",
+      "readinessLevel": "caution",
+      "dayType": "yellow",
+      "keySignals": [
+        {
+          "flag": "prior_day_load_high",
+          "label": "Prior-day load high",
+          "severity": "watch",
+          "confidence": 0.75,
+          "actual": "high",
+          "explanation": "Prior-day training or movement load looks high enough to affect readiness."
+        }
+      ],
+      "baselineComparisons": [
+        {
+          "metric": "sleepDurationMinutes",
+          "actual": 531,
+          "baseline": 466.5,
+          "delta": 64.5,
+          "direction": "above",
+          "unit": "minutes"
+        },
+        {
+          "metric": "restingHeartRate",
+          "actual": 55,
+          "baseline": 55,
+          "delta": 0,
+          "direction": "same",
+          "unit": "bpm"
+        },
+        {
+          "metric": "hrv",
+          "actual": 55,
+          "baseline": 50.6,
+          "delta": 4.4,
+          "direction": "above",
+          "unit": "ms"
+        },
+        {
+          "metric": "steps",
+          "actual": 11213,
+          "baseline": 9237.9,
+          "delta": 1975.1,
+          "direction": "above",
+          "unit": "steps"
+        },
+        {
+          "metric": "energy",
+          "actual": 5,
+          "baseline": 7,
+          "delta": -2,
+          "direction": "below",
+          "unit": "score"
+        },
+        {
+          "metric": "stress",
+          "actual": 7,
+          "baseline": 5.6,
+          "delta": 1.4,
+          "direction": "above",
+          "unit": "score"
+        }
+      ],
+      "similarDayPatterns": "Found 5 similar past days; recurring overlap is prior_day_load_high.",
+      "likelyContributors": [
+        {
+          "label": "Prior-day load high",
+          "confidence": 0.75,
+          "reason": "Prior-day training or movement load looks high enough to affect readiness."
+        }
+      ],
+      "bodySignals": [],
+      "subjectiveSignals": [],
+      "whatYouMightExpectToday": "You can probably still have a solid day, but pushing hard everywhere is likely to backfire.",
+      "recommendations": [
+        "Reduce training ambition and bias toward recovery movement.",
+        "Start wind-down earlier tonight."
+      ],
+      "nonNegotiable": "Protect one meaningful work block.",
+      "similarPastDaySummary": "Found 5 similar past days; recurring overlap is prior_day_load_high.",
+      "similarPastDays": [
+        {
+          "date": "2026-05-31",
+          "dayType": "blue",
+          "overlappingFlags": [
+            "prior_day_load_high"
+          ],
+          "summary": "blue day from seeded mock history. Overlap: prior_day_load_high. Afterward: energy 5, focus 7, mood steady. Recommendations did not clearly help. Earlier protein, water, and one focused block tended to help seeded days."
+        },
+        {
+          "date": "2026-05-24",
+          "dayType": "red",
+          "overlappingFlags": [
+            "prior_day_load_high"
+          ],
+          "summary": "red day from seeded mock history. Overlap: prior_day_load_high. Afterward: energy 4, focus 7, mood low. Recommendations did not clearly help. Earlier protein, water, and one focused block tended to help seeded days."
+        },
+        {
+          "date": "2026-05-23",
+          "dayType": "yellow",
+          "overlappingFlags": [
+            "prior_day_load_high"
+          ],
+          "summary": "yellow day from seeded mock history. Overlap: prior_day_load_high. Afterward: energy 8, focus 4, mood steady. Recommendations appeared to help. Earlier protein, water, and one focused block tended to help seeded days."
+        },
+        {
+          "date": "2026-05-22",
+          "dayType": "blue",
+          "overlappingFlags": [
+            "prior_day_load_high"
+          ],
+          "summary": "blue day from seeded mock history. Overlap: prior_day_load_high. Afterward: energy 5, focus 7, mood steady. Recommendations did not clearly help. Earlier protein, water, and one focused block tended to help seeded days."
+        },
+        {
+          "date": "2026-05-15",
+          "dayType": "red",
+          "overlappingFlags": [
+            "prior_day_load_high"
+          ],
+          "summary": "red day from seeded mock history. Overlap: prior_day_load_high. Afterward: energy 4, focus 7, mood low. Recommendations did not clearly help. Earlier protein, water, and one focused block tended to help seeded days."
+        }
+      ],
+      "caveats": [
+        "Mock data for local development and tests.",
+        "This brief is for planning and recovery habits, not healthcare guidance."
+      ],
+      "disclaimer": "This is a practical planning brief based on recent patterns. For severe, persistent, or unusual symptoms, use qualified health support."
+    }
+  ],
+  "pattern_episodes": [
+    {
+      "date": "2026-05-04",
+      "flags": [
+        "prior_day_load_high"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 5,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-05",
+      "flags": [
+        "hrv_low",
+        "prior_day_load_high",
+        "stress_high"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 8,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-06",
+      "flags": [
+        "sleep_very_low",
+        "hard_workout",
+        "prior_day_load_high",
+        "stress_high",
+        "mood_low",
+        "soreness_high",
+        "low_activity",
+        "drift_risk"
+      ],
+      "dayType": "red",
+      "summary": "red day from seeded mock history.",
+      "after": {
+        "energy": 4,
+        "focus": 7,
+        "mood": "low"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-07",
+      "flags": [
+        "sleep_low",
+        "low_activity",
+        "drift_risk"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 7,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-08",
+      "flags": [
+        "sleep_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 3,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-09",
+      "flags": [
+        "protein_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 6,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-10",
+      "flags": [
+        "hrv_low",
+        "mood_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 3,
+        "focus": 4,
+        "mood": "flat"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-11",
+      "flags": [],
+      "dayType": "gold",
+      "summary": "gold day from seeded mock history.",
+      "after": {
+        "energy": 6,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-12",
+      "flags": [
+        "hrv_low",
+        "protein_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 9,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-13",
+      "flags": [
+        "prior_day_load_high",
+        "stress_high"
+      ],
+      "dayType": "blue",
+      "summary": "blue day from seeded mock history.",
+      "after": {
+        "energy": 5,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-14",
+      "flags": [
+        "hrv_low",
+        "prior_day_load_high",
+        "stress_high"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 8,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-15",
+      "flags": [
+        "sleep_low",
+        "hard_workout",
+        "prior_day_load_high",
+        "stress_high",
+        "mood_low",
+        "soreness_high",
+        "low_activity",
+        "drift_risk"
+      ],
+      "dayType": "red",
+      "summary": "red day from seeded mock history.",
+      "after": {
+        "energy": 4,
+        "focus": 7,
+        "mood": "low"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-16",
+      "flags": [
+        "sleep_low",
+        "low_activity",
+        "drift_risk"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 7,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-17",
+      "flags": [
+        "sleep_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 3,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-18",
+      "flags": [
+        "protein_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 6,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-19",
+      "flags": [],
+      "dayType": "green",
+      "summary": "green day from seeded mock history.",
+      "after": {
+        "energy": 9,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-20",
+      "flags": [],
+      "dayType": "gold",
+      "summary": "gold day from seeded mock history.",
+      "after": {
+        "energy": 6,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-21",
+      "flags": [
+        "hrv_low",
+        "protein_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 9,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-22",
+      "flags": [
+        "prior_day_load_high",
+        "stress_high"
+      ],
+      "dayType": "blue",
+      "summary": "blue day from seeded mock history.",
+      "after": {
+        "energy": 5,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-23",
+      "flags": [
+        "hrv_low",
+        "prior_day_load_high",
+        "stress_high"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 8,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-24",
+      "flags": [
+        "sleep_low",
+        "hard_workout",
+        "prior_day_load_high",
+        "stress_high",
+        "mood_low",
+        "soreness_high",
+        "low_activity",
+        "drift_risk"
+      ],
+      "dayType": "red",
+      "summary": "red day from seeded mock history.",
+      "after": {
+        "energy": 4,
+        "focus": 7,
+        "mood": "low"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-25",
+      "flags": [
+        "sleep_low",
+        "low_activity",
+        "drift_risk"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 7,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-26",
+      "flags": [
+        "sleep_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 3,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-27",
+      "flags": [
+        "protein_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 6,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-28",
+      "flags": [],
+      "dayType": "green",
+      "summary": "green day from seeded mock history.",
+      "after": {
+        "energy": 9,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-29",
+      "flags": [
+        "mood_low"
+      ],
+      "dayType": "blue",
+      "summary": "blue day from seeded mock history.",
+      "after": {
+        "energy": 5,
+        "focus": 4,
+        "mood": "flat"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-30",
+      "flags": [
+        "hrv_low",
+        "protein_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 9,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-05-31",
+      "flags": [
+        "prior_day_load_high",
+        "stress_high"
+      ],
+      "dayType": "blue",
+      "summary": "blue day from seeded mock history.",
+      "after": {
+        "energy": 5,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": false,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-06-01",
+      "flags": [],
+      "dayType": "green",
+      "summary": "green day from seeded mock history.",
+      "after": {
+        "energy": 6,
+        "focus": 7,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-06-02",
+      "flags": [
+        "hrv_low",
+        "protein_low"
+      ],
+      "dayType": "yellow",
+      "summary": "yellow day from seeded mock history.",
+      "after": {
+        "energy": 9,
+        "focus": 4,
+        "mood": "steady"
+      },
+      "recommendationsHelped": true,
+      "repeatedImprovement": "Earlier protein, water, and one focused block tended to help seeded days."
+    },
+    {
+      "date": "2026-06-03",
+      "flags": [],
+      "dayType": "yellow",
+      "summary": "yellow day with no major flags.",
+      "repeatedImprovement": "Reduce training ambition and bias toward recovery movement."
+    }
+  ],
+  "manual_health_checkins": []
+}

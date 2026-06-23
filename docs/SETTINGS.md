@@ -11,7 +11,7 @@ current web Settings UI stores the v2 runtime document at
 - `llm.baseUrl` (string, default `http://localhost:1234`): OpenAI-compatible endpoint base URL. The runtime also accepts URLs ending in `/v1`.
 - `llm.model` (string, default `replace-with-loaded-model-id`): model ID used for chat completions. Replace this with the exact model ID shown by LM Studio/Ollama/provider settings before using the template as a real `settings.json`.
 - `llm.gatekeeperBaseUrl` (string, default empty): optional endpoint for the gatekeeper model. Empty reuses `llm.baseUrl`.
-- `llm.gatekeeperModelId` (string, default `qwen3.5-2b`): lightweight gatekeeper model used by the legacy runtime-host path.
+- `llm.gatekeeperModelId` (string, default `liquid/lfm2.5-1.2b`): lightweight gatekeeper model used by the legacy runtime-host path.
 - `llm.reusePrimaryModelForGatekeeperOnSharedEndpoint` (bool, default `true`): reuses the primary model when the gatekeeper shares the same endpoint.
 - `llm.maxTokens` (int, default `4096`): max completion tokens. Must be `> 0`.
 - `llm.contextWindowTokens` (int, default `16384`): estimated context window. Must be `> maxTokens`.
