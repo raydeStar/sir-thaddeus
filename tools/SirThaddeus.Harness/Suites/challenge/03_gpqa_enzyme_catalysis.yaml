@@ -1,0 +1,36 @@
+id: challenge_gpqa_enzyme_catalysis
+name: Challenge - GPQA-style Enzyme Catalysis
+rubric_profile: general
+user_message: "A biology student claims that an enzyme makes an unfavorable reaction favorable by changing the reaction delta G and equilibrium constant. Is that right? Answer in 3 sentences or fewer, naming what the enzyme actually changes and what it does not change."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - system_execute
+    - screen_capture
+    - tool_ping
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - activation
+    - equilibrium
+    - does not
+  forbidden_keywords:
+    - changes delta G
+    - changes the equilibrium constant
+    - web search
+  max_response_chars: 900
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/PostProcessing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

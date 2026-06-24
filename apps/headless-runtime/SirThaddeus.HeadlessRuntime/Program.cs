@@ -264,7 +264,9 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
 
     var sanitize = new Func<TurnContext, string, string>(
         (ctx, draft) => ApplyHeadlessQualityGuards(
-            AssistantResponseSanitizer.CleanChatReply(draft),
+            AssistantResponseSanitizer.NormalizeJsonOnlyReply(
+                AssistantResponseSanitizer.CleanChatReply(draft),
+                ctx.UserText),
             ctx));
 
     // Memory context read (user profile facts, preferences). Uses the

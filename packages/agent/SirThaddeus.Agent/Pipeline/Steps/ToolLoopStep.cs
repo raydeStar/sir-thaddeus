@@ -293,6 +293,8 @@ public sealed class ToolLoopStep : ITurnStep
                 }
 
                 if (LooksLikeResolveTimezoneForCurrentTimeRequest(toolName, context.UserText) &&
+                    (!IsAdvertisedTool(context.ToolDefs, ToolNames.TimeNow, ToolNames.TimeNowAlt) ||
+                     toolCallsMade.Any(existing => LooksLikeTimeNowTool(existing.ToolName))) &&
                     TryBuildCurrentTimeFromResolvedTimezone(context.UserText, outcome.ResultText, toolCallsMade) is { Length: > 0 } resolvedTimeDraft)
                 {
                     var updated = context with
@@ -322,6 +324,18 @@ public sealed class ToolLoopStep : ITurnStep
                     messages.Add(ChatMessage.System(
                         "The timezone lookup resolved the target timezone. Call time_now next, then convert that clock value to the resolved timezone and answer directly."));
                     forcedToolForNextRound = ToolNames.TimeNow;
+                }
+
+                if (outcome.Ok &&
+                    LooksLikeWeatherGeocodeForCurrentTimeRequest(toolName, context.UserText) &&
+                    IsAdvertisedTool(context.ToolDefs, ToolNames.ResolveTimezone, ToolNames.ResolveTimezoneAlt) &&
+                    !toolCallsMade.Any(existing =>
+                        string.Equals(existing.ToolName, ToolNames.ResolveTimezone, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(existing.ToolName, ToolNames.ResolveTimezoneAlt, StringComparison.OrdinalIgnoreCase)))
+                {
+                    messages.Add(ChatMessage.System(
+                        "The geocode result resolved the target location. Call resolve_timezone next with the best matching coordinates, then use time_now if available before answering."));
+                    forcedToolForNextRound = ToolNames.ResolveTimezone;
                 }
 
                 if (outcome.Ok &&
@@ -854,6 +868,17 @@ public sealed class ToolLoopStep : ITurnStep
                lower.Contains("outlook", StringComparison.Ordinal);
     }
 
+    private static bool LooksLikeWeatherGeocodeForCurrentTimeRequest(string toolName, string? userText)
+    {
+        if (!string.Equals(toolName, ToolNames.WeatherGeocode, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(toolName, ToolNames.WeatherGeocodeAlt, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !string.IsNullOrWhiteSpace(userText) && LooksLikeCurrentTimeRequest(userText);
+    }
+
     private static bool LooksLikeResolveTimezoneForCurrentTimeRequest(string toolName, string? userText)
     {
         if (!string.Equals(toolName, ToolNames.ResolveTimezone, StringComparison.OrdinalIgnoreCase) &&
@@ -1008,11 +1033,28 @@ public sealed class ToolLoopStep : ITurnStep
             userText,
             @"\b(?:time|timezone)\b.*\b(?:in|at|for)\s+(?<location>[A-Za-z][A-Za-z0-9 .,'-]{1,80}?)(?:\s+(?:right\s+now|now)|[?.!]|$)",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success || LooksLikeFormatInstructionLocation(match.Groups["location"].Value))
+        {
+            match = Regex.Match(
+                userText,
+                @"\b(?:in|at|for|with\s+someone\s+in)\s+(?<location>[A-Za-z][A-Za-z0-9 .,'-]{1,80}?)(?:[?.!,]|\s+(?:use|then|and)\b|$)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
         if (!match.Success)
             return "the requested location";
 
         var location = Regex.Replace(match.Groups["location"].Value.Trim(), @"\s+", " ");
         return string.IsNullOrWhiteSpace(location) ? "the requested location" : location.Trim(',', '.', '?', '!');
+    }
+
+    private static bool LooksLikeFormatInstructionLocation(string value)
+    {
+        var lower = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return lower.StartsWith("one ", StringComparison.Ordinal) ||
+               lower.StartsWith("a ", StringComparison.Ordinal) ||
+               lower.Contains("sentence", StringComparison.Ordinal) ||
+               lower.Contains("paragraph", StringComparison.Ordinal) ||
+               lower.Contains("bullet", StringComparison.Ordinal);
     }
 
     private static string ExtractLatestToolSource(

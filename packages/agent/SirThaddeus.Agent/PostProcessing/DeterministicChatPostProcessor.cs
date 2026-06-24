@@ -169,6 +169,7 @@ public sealed class DeterministicChatPostProcessor
         sanitized = StripHallucinatedUrls(sanitized);
         sanitized = SourceCitationFormatter.Apply(sanitized, toolCallsMade);
         sanitized = ApplySmallModelQualityGuards(sanitized, latestUserMessage);
+        sanitized = AssistantResponseSanitizer.NormalizeJsonOnlyReply(sanitized, latestUserMessage);
         sanitized = NormalizeStrictStructuredOutput(sanitized, latestUserMessage);
         sanitized = StripTrailingDeflectionDisclaimer(sanitized);
         var hasLocalBusinessRecoveryContext = HasLocalBusinessRecoveryContext(latestUserMessage, sanitized, toolCallsMade);

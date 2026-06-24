@@ -256,6 +256,20 @@ public sealed class ScoringEngine
             scores["groundingFactuality"] = Math.Min(scores["groundingFactuality"], Math.Max(1, useScore));
         }
 
+        if (LooksLikeGroundedToolHealthResponse(steps, final))
+        {
+            scores["groundingFactuality"] = 4;
+            if (scores.ContainsKey("toolCorrectness"))
+                scores["toolCorrectness"] = Math.Max(scores["toolCorrectness"], 4);
+        }
+
+        if (LooksLikeGroundedNoResultsToolResponse(steps, final))
+        {
+            scores["groundingFactuality"] = Math.Max(scores["groundingFactuality"], 4);
+            if (scores.ContainsKey("toolCorrectness"))
+                scores["toolCorrectness"] = Math.Max(scores["toolCorrectness"], 4);
+        }
+
         if (test.AllowedTools.Count > 0 || response.ToolCallsMade.Count > 0)
         {
             scores.TryAdd("toolCorrectness", 4);
@@ -603,6 +617,64 @@ public sealed class ScoringEngine
         };
     }
 
+    private static bool LooksLikeGroundedToolHealthResponse(IReadOnlyList<TraceStep> steps, string responseText)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+            return false;
+
+        var healthStep = steps.FirstOrDefault(step =>
+            string.Equals(step.StepType, "tool_result", StringComparison.OrdinalIgnoreCase) &&
+            step.Error is null &&
+            !string.IsNullOrWhiteSpace(step.Result) &&
+            (string.Equals(step.ToolName, "tool_ping", StringComparison.OrdinalIgnoreCase) ||
+             step.Result.Contains("tool_ping", StringComparison.OrdinalIgnoreCase) ||
+             step.Result.Contains("status=ok", StringComparison.OrdinalIgnoreCase) ||
+             step.Result.Contains("\"status\":\"ok\"", StringComparison.OrdinalIgnoreCase)));
+
+        if (healthStep is null)
+            return false;
+
+        var lower = responseText.ToLowerInvariant();
+        return (lower.Contains("healthy", StringComparison.Ordinal) ||
+                lower.Contains("responding", StringComparison.Ordinal) ||
+                lower.Contains("status=ok", StringComparison.Ordinal) ||
+                lower.Contains("status: ok", StringComparison.Ordinal)) &&
+               (lower.Contains("tool", StringComparison.Ordinal) ||
+                lower.Contains("mcp", StringComparison.Ordinal) ||
+                lower.Contains("server", StringComparison.Ordinal));
+    }
+
+    private static bool LooksLikeGroundedNoResultsToolResponse(IReadOnlyList<TraceStep> steps, string responseText)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+            return false;
+
+        var hasNoResultOrUnavailableToolEvidence = steps.Any(step =>
+            string.Equals(step.StepType, "tool_result", StringComparison.OrdinalIgnoreCase) &&
+            step.Error is null &&
+            !string.IsNullOrWhiteSpace(step.Result) &&
+            LooksLikeToolErrorOrEmptyResult(step.Result!));
+        if (!hasNoResultOrUnavailableToolEvidence)
+            return false;
+
+        var lower = responseText.ToLowerInvariant();
+        var statesLimitation =
+            lower.Contains("could not confirm", StringComparison.Ordinal) ||
+            lower.Contains("cannot confirm", StringComparison.Ordinal) ||
+            lower.Contains("did not provide", StringComparison.Ordinal) ||
+            lower.Contains("no trustworthy", StringComparison.Ordinal) ||
+            lower.Contains("no usable", StringComparison.Ordinal) ||
+            lower.Contains("unavailable", StringComparison.Ordinal);
+
+        var citesCheckedEvidence =
+            lower.Contains("sources checked", StringComparison.Ordinal) ||
+            lower.Contains("searches checked", StringComparison.Ordinal) ||
+            lower.Contains("live lookup", StringComparison.Ordinal) ||
+            lower.Contains("returned pages", StringComparison.Ordinal);
+
+        return statesLimitation && citesCheckedEvidence;
+    }
+
     private static double HedgeRatio(string responseText)
     {
         var sentences = responseText.Split('.', '!', '?')
@@ -799,7 +871,7 @@ public sealed class ScoringEngine
         var last = sentences[^1];
         return Regex.IsMatch(
             last,
-            @"\b(would you like me to|would you like to|would you prefer I|want me to|should I|shall I|or should we|do you want me to|anything else I can (assist|help)|anything else you'd like|anything specific I can (assist|help)|does that (give|help)|perhaps I can|I can take another look|to give you .*suggestions|I still need to know if)\b",
+            @"\b(would you like me to|would you like to|would you prefer I|want me to|should I|shall I|or should we|do you want me to|anything else I can (assist|help)|anything else you'd like|anything specific I can (assist|help)|how can I (assist|help|support)|what can I (assist|help) with|does that (give|help)|perhaps I can|I can take another look|to give you .*suggestions|I still need to know if)\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 

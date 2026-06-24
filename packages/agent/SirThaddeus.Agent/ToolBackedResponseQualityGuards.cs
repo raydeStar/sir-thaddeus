@@ -16,6 +16,11 @@ public static class ToolBackedResponseQualityGuards
         if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(latestUserMessage) || toolCallsMade.Count == 0)
             return text;
 
+        latestUserMessage = ExtractRetryInstructionUserRequest(latestUserMessage);
+
+        if (LooksLikeRetryInstructionEcho(text) && LooksLikeOpenStatusRequest(latestUserMessage))
+            return BuildConservativeOpenStatusFallback(latestUserMessage, toolCallsMade);
+
         if (LooksLikeRawLlmTransportFailure(text))
         {
             if (IntentFeatureExtractor.HasLocalBusinessProximitySignals(latestUserMessage.ToLowerInvariant()) ||
@@ -113,6 +118,36 @@ public static class ToolBackedResponseQualityGuards
         text = NormalizeStrictMovieComparisonAnswer(text, latestUserMessage);
 
         return RemoveToolBackedChatter(text);
+    }
+
+    private static string ExtractRetryInstructionUserRequest(string latestUserMessage)
+    {
+        if (string.IsNullOrWhiteSpace(latestUserMessage))
+            return latestUserMessage;
+
+        var normalized = latestUserMessage.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Trim();
+        if (!normalized.StartsWith("User request:", StringComparison.OrdinalIgnoreCase))
+            return latestUserMessage;
+
+        var request = normalized["User request:".Length..].TrimStart();
+        var markerIndex = request.IndexOf("\nRetry strategy:", StringComparison.OrdinalIgnoreCase);
+        if (markerIndex >= 0)
+            request = request[..markerIndex].TrimEnd();
+
+        return string.IsNullOrWhiteSpace(request) ? latestUserMessage : request;
+    }
+
+    private static bool LooksLikeRetryInstructionEcho(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var trimmed = text.TrimStart('*', ' ', '\r', '\n');
+        return trimmed.StartsWith("User request:", StringComparison.OrdinalIgnoreCase) &&
+               text.Contains("Retry strategy:", StringComparison.OrdinalIgnoreCase) &&
+               text.Contains("Previous answer for verification:", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeStrictMovieComparisonAnswer(string text, string latestUserMessage)

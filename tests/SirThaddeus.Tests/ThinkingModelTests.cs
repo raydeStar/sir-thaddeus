@@ -656,6 +656,28 @@ public class NonThinkingModelRegressionTests
     }
 
     [Fact]
+    public void NormalizeJsonOnlyReply_StripsParseableFenceForJsonOnlyPrompt()
+    {
+        var input = "```json\n{\"decision\":\"defer\",\"risk\":\"high\",\"next_action\":\"ask_for_path\"}\n```";
+        var result = AssistantResponseSanitizer.NormalizeJsonOnlyReply(
+            input,
+            "Return only valid JSON with exactly these top-level fields: decision, risk, next_action.");
+
+        Assert.Equal("{\"decision\":\"defer\",\"risk\":\"high\",\"next_action\":\"ask_for_path\"}", result);
+    }
+
+    [Fact]
+    public void NormalizeJsonOnlyReply_LeavesCodeFenceWhenPromptDoesNotRequestJsonOnly()
+    {
+        var input = "```json\n{\"decision\":\"defer\"}\n```";
+        var result = AssistantResponseSanitizer.NormalizeJsonOnlyReply(
+            input,
+            "Show me an example JSON block.");
+
+        Assert.Equal(input, result);
+    }
+
+    [Fact]
     public void StripRawTemplateTokens_BareHarmonyPair_StripsMarkersKeepsBody()
     {
         // Some gpt-oss builds leak the harmony format with the pipes

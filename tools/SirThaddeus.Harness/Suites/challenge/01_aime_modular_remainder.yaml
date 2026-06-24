@@ -1,0 +1,35 @@
+id: challenge_aime_modular_remainder
+name: Challenge - AIME-style Modular Remainder
+rubric_profile: general
+user_message: "Let N be the least positive integer such that N leaves remainder 2 when divided by 5, remainder 3 when divided by 7, and remainder 4 when divided by 9. What is N? Show a compact derivation and put the final answer on its own line."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - system_execute
+    - screen_capture
+    - tool_ping
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "157"
+  forbidden_keywords:
+    - error
+    - timeout
+    - as an ai
+  max_response_chars: 1200
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/Routing/
+    - packages/agent/SirThaddeus.Agent/PostProcessing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

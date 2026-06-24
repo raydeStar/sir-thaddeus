@@ -358,6 +358,27 @@ public class ScoringEngineTests
     }
 
     [Fact]
+    public void Score_DoesNotHardFailGenericHowCanIHelpCloserAsUnnecessaryClarification()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "smoke_casual_no_tools",
+            "Hey, how are you doing today? Just wanted to say thanks for helping me out.");
+
+        var response = new AgentResponse
+        {
+            Text = "Good day to you, friend! I'm functioning smoothly and ready to assist with whatever you need. How can I help you today?",
+            Success = true
+        };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.True(score.HardPass);
+        Assert.DoesNotContain(score.HardGateFailures, failure =>
+            failure.Contains("asking unnecessary clarification", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Score_DoesNotHardFailGenericCloserAsUnnecessaryClarification()
     {
         var scorer = new ScoringEngine();
@@ -724,6 +745,125 @@ public class ScoringEngineTests
         Assert.True(score.ToolTokensAvailable >= 5);
         Assert.Equal(score.ToolTokensAvailable, score.ToolTokensIncorporated);
         Assert.Equal(4, score.Scores["toolCorrectness"]);
+    }
+
+    [Fact]
+    public void Score_CreditsToolPingHealthResponseAsGrounded()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "smoke_tool_ping",
+            "Ping the tools and tell me if they are healthy.",
+            rubricProfile: "health");
+        test = test with
+        {
+            AllowedTools = ["tool_ping"],
+            Assertions = test.Assertions with
+            {
+                RequiredTools = ["tool_ping"]
+            }
+        };
+
+        const string result = "tool_ping healthy: MCP server is responding; status=ok; health details: version 0.3.0, protocol 2024-11-05, contract_version 1.0, tool_count 58.";
+        var response = new AgentResponse
+        {
+            Text = result,
+            Success = true,
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "tool_ping",
+                    Arguments = "{}",
+                    Result = result,
+                    Success = true
+                }
+            ]
+        };
+
+        var steps = new List<TraceStep>
+        {
+            new()
+            {
+                StepIndex = 1,
+                StepType = "tool_result",
+                ToolName = "tool_ping",
+                Result = result
+            }
+        };
+
+        var score = scorer.Score(test, response, steps, judgeResult: null);
+
+        Assert.Equal(4, score.Scores["toolCorrectness"]);
+        Assert.Equal(4, score.Scores["groundingFactuality"]);
+        Assert.True(score.Passed);
+    }
+
+    [Fact]
+    public void Score_CreditsHonestNoResultsFallbackAsGroundedToolUse()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "quality_no_bare_answers",
+            "Is McDonalds in Portland OR open right now?",
+            requiredKeywords: ["mcdonalds"],
+            rubricProfile: "ragGrounded");
+        test = test with
+        {
+            AllowedTools = ["places_lookup", "web_search"]
+        };
+
+        var response = new AgentResponse
+        {
+            Text = """
+                I could not confirm whether McDonalds in Portland OR is open right now from this live lookup.
+                The returned pages did not provide a trustworthy current-hours answer.
+                Sources checked: places_lookup/Google Places, web_search.
+                Best next step: Use the McDonalds store finder or call the location before visiting.
+                """,
+            Success = true,
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "{}",
+                    Result = "[Places lookup error: Google Places API key is not configured.]",
+                    Success = false
+                },
+                new ToolCallRecord
+                {
+                    ToolName = "web_search",
+                    Arguments = "{}",
+                    Result = "[search: 0 result(s) returned]",
+                    Success = true
+                }
+            ]
+        };
+
+        var steps = new List<TraceStep>
+        {
+            new()
+            {
+                StepIndex = 1,
+                StepType = "tool_result",
+                ToolName = "places_lookup",
+                Result = "[Places lookup error: Google Places API key is not configured.]"
+            },
+            new()
+            {
+                StepIndex = 2,
+                StepType = "tool_result",
+                ToolName = "web_search",
+                Result = "[search: 0 result(s) returned]"
+            }
+        };
+
+        var score = scorer.Score(test, response, steps, judgeResult: null);
+
+        Assert.Equal(4, score.Scores["groundingFactuality"]);
+        Assert.Equal(4, score.Scores["toolCorrectness"]);
+        Assert.True(score.Passed);
     }
 
     [Fact]

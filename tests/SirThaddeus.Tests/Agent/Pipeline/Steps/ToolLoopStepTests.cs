@@ -170,12 +170,13 @@ public class ToolLoopStepTests
         var result = await step.ExecuteAsync(ctx, CancellationToken.None);
 
         var cont = Assert.IsType<StepResult.Continue>(result);
-        Assert.Equal(2, cont.Next.ToolCallsMade.Count);
+        Assert.Equal(3, cont.Next.ToolCallsMade.Count);
+        Assert.Contains(cont.Next.ToolCallsMade, call => string.Equals(call.ToolName, ToolNames.TimeNow, StringComparison.OrdinalIgnoreCase));
         Assert.Contains("currently", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Tokyo, Japan", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Asia/Tokyo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("open-meteo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("clock=system UTC", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("time_now=", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -209,6 +210,48 @@ public class ToolLoopStepTests
         Assert.Contains("Tokyo, Japan", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Asia/Tokyo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("open-meteo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cannot provide", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Chains_timezone_and_time_now_for_natural_location_time_request()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool(ToolNames.WeatherGeocode, "{\"location\":\"Tokyo\"}"),
+            LlmReply.Tool(ToolNames.ResolveTimezone, "{\"countryCode\":\"JP\",\"latitude\":35.6768601,\"longitude\":139.7638947}"),
+            LlmReply.Final("I cannot provide the live time."));
+        var mcp = new StubMcp((tool, _) => tool switch
+        {
+            var name when string.Equals(name, ToolNames.WeatherGeocode, StringComparison.OrdinalIgnoreCase) =>
+                "{\"results\":[{\"name\":\"Tokyo\",\"latitude\":35.6768601,\"longitude\":139.7638947}],\"source\":\"photon\"}",
+            var name when string.Equals(name, ToolNames.ResolveTimezone, StringComparison.OrdinalIgnoreCase) =>
+                "{\"timezone\":\"Asia/Tokyo\",\"source\":\"open-meteo\"}",
+            var name when string.Equals(name, ToolNames.TimeNow, StringComparison.OrdinalIgnoreCase) =>
+                "{\"iso\":\"2026-05-07T20:29:14.0325030-06:00\",\"unix_ms\":1778207354032,\"timezone\":\"Mountain Standard Time\",\"offset\":\"-06:00\"}",
+            _ => "ok"
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var prompt = "I am scheduling a call with someone in Tokyo. Use the available time tools if needed and tell me the current date and time there in one short sentence.";
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = new[] { ChatMessage.System("sys"), ChatMessage.User(prompt) },
+            ToolDefs = new[]
+            {
+                new ToolDefinition { Function = new FunctionDefinition { Name = ToolNames.WeatherGeocode, Description = "geocode", Parameters = new { } } },
+                new ToolDefinition { Function = new FunctionDefinition { Name = ToolNames.ResolveTimezone, Description = "timezone", Parameters = new { } } },
+                new ToolDefinition { Function = new FunctionDefinition { Name = ToolNames.TimeNow, Description = "time", Parameters = new { } } },
+            }
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(3, cont.Next.ToolCallsMade.Count);
+        Assert.Contains("Tokyo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Asia/Tokyo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("time_now=", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("one short sentence", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cannot provide", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
     }
 

@@ -1,0 +1,34 @@
+id: challenge_swe_condition_fix
+name: Challenge - SWE-style Condition Repair
+rubric_profile: coding
+user_message: "A Python function should return the sum of the even numbers in a list, but it currently says: return sum(x for x in xs if x % 2 == 1). What exact condition should replace x % 2 == 1? Reply with only the corrected condition."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - browser_navigate
+    - file_read
+    - system_execute
+    - screen_capture
+    - tool_ping
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "x % 2 == 0"
+  forbidden_keywords:
+    - odd
+    - web search
+    - as an ai
+  max_response_chars: 80
+min_score: 8.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/PostProcessing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/
