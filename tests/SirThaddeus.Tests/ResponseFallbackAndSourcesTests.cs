@@ -1673,6 +1673,106 @@ public class ChatPostProcessorReasoningBehaviorTests
         Assert.DoesNotContain("budget", output, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData(
+        "B) the protein structure and active site can be disrupted, so catalysis drops sharply.",
+        "B")]
+    [InlineData(
+        "The best answer is C) decreases because the resistance rises while voltage is fixed.",
+        "C")]
+    [InlineData(
+        "answer: D - the expected counts are too small for the usual approximation.",
+        "D")]
+    public void SanitizeFinalResponse_MultipleChoiceLetterOnlyPrompt_CollapsesLeadingChoice(
+        string draftText,
+        string expected)
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.SanitizeFinalResponse(
+            text: draftText,
+            toolCallsMade: [],
+            latestUserMessage: "Choose the best answer. Reply with only A, B, C, or D.");
+
+        Assert.Equal(expected, output);
+    }
+
+    [Fact]
+    public void ProcessChatOnlyDraft_MultipleChoiceLetterOnlyPrompt_CollapsesLeadingChoice()
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.ProcessChatOnlyDraft(
+            draftText: "A. The transfer is most consistent with direct heat conduction.",
+            userMessage: "Choose the best answer. Reply with only A, B, C, or D.",
+            toolCallsMade: []);
+
+        Assert.Equal("A", output);
+    }
+
+    [Theory]
+    [InlineData(
+        "Select the best option. The membrane effect is: A) wrong B) larger because capacitances add in parallel C) no D) no. Final answer only: A, B, C, or D.",
+        "B) larger because capacitances add in parallel.",
+        "B")]
+    [InlineData(
+        "A row has 6 labeled boxes. Exactly 4 boxes must receive a marker. How many different marker placements are possible? Give only the final integer.",
+        "The number of ways to choose 4 boxes out of 6 is C(6,4), which equals 15. So there are 15 possible marker placements.",
+        "15")]
+    [InlineData(
+        "Among people flagged positive, what fraction actually have K? Give only the decimal.",
+        "True positives are 18.9 and false positives are 18.9, so the answer is 0.5.",
+        "0.5")]
+    [InlineData(
+        "A function should pair adjacent values. What expression should replace []? Give only the expression.",
+        "The expression is `[(items[i], items[i + 1]) for i in range(len(items) - 1)]`.",
+        "[(items[i], items[i + 1]) for i in range(len(items) - 1)]")]
+    public void StrictAnswerOnlyPrompt_CollapsesToRequestedSurfaceForm(
+        string userMessage,
+        string draftText,
+        string expected)
+    {
+        var output = DeterministicChatPostProcessor.TryNormalizeStrictAnswerOnlyReply(userMessage, draftText);
+
+        Assert.Equal(expected, output);
+    }
+
+    [Fact]
+    public void StrictJsonOnlyPrompt_ExtractsBalancedJsonObject()
+    {
+        var output = DeterministicChatPostProcessor.TryNormalizeStrictAnswerOnlyReply(
+            "Return only a JSON object selecting the first tool to use.",
+            "Sure:\n{\"tool\":\"notes_search\",\"args\":{\"query\":\"launch blocker list\"}}\nDone.");
+
+        Assert.Equal("{\"tool\":\"notes_search\",\"args\":{\"query\":\"launch blocker list\"}}", output);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_MultipleChoiceLetterOnlyPrompt_DoesNotCollapseNonChoiceLead()
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.SanitizeFinalResponse(
+            text: "C# would be the wrong language clue here; the answer needs the physics option.",
+            toolCallsMade: [],
+            latestUserMessage: "Choose the best answer. Reply with only A, B, C, or D.");
+
+        Assert.Equal("C# would be the wrong language clue here; the answer needs the physics option.", output);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_MultipleChoiceExplanationWithoutStrictPrompt_PassesThrough()
+    {
+        var processor = new DeterministicChatPostProcessor();
+
+        var output = processor.SanitizeFinalResponse(
+            text: "B) the enzyme loses active-site structure at the wrong pH.",
+            toolCallsMade: [],
+            latestUserMessage: "Which option is best?");
+
+        Assert.Equal("B) the enzyme loses active-site structure at the wrong pH.", output);
+    }
+
     [Fact]
     public void ProcessChatOnlyDraft_DoesNotApplyCarWashHardcodedOverride()
     {

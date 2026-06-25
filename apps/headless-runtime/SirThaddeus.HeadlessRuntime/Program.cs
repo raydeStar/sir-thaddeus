@@ -10,6 +10,7 @@ using SirThaddeus.Agent.Guardrails;
 using SirThaddeus.Agent.Memory;
 using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Pipeline.Steps;
+using SirThaddeus.Agent.PostProcessing;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.Agent.Utilities;
@@ -462,6 +463,12 @@ static string ApplyHeadlessQualityGuards(string text, TurnContext context)
 {
     text = GeneralResponseQualityGuards.Apply(text, context.UserText);
     text = ToolBackedResponseQualityGuards.Apply(text, context.UserText, context.ToolCallsMade);
+
+    if (DeterministicChatPostProcessor.TryNormalizeStrictAnswerOnlyReply(context.UserText, text) is { Length: > 0 } strictReply)
+        return strictReply;
+
+    if (DeterministicChatPostProcessor.TryNormalizeMultipleChoiceLetterOnlyReply(context.UserText, text) is { Length: > 0 } multipleChoiceReply)
+        return multipleChoiceReply;
 
     if (TryBuildToolPingSummary(context) is { Length: > 0 } pingSummary)
         return pingSummary;

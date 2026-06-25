@@ -14,6 +14,26 @@ namespace SirThaddeus.Agent.PostProcessing;
 /// </summary>
 public sealed class DeterministicChatPostProcessor
 {
+    private static readonly Regex MultipleChoiceLetterOnlyPromptPattern = new(
+        @"(?:\breply\s+with\s+only\s+A,\s+B,\s+C,\s+or\s+D\b|\bfinal\s+answer\s+only\s*:\s*A,\s+B,\s+C,\s+or\s+D\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex LeadingMultipleChoiceAnswerPattern = new(
+        @"^\s*(?:answer\s*[:\-]\s*|the\s+best\s+answer\s+is\s+)?(?<letter>[A-D])(?:\s*[)\].:,\-]|\s+|$)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex StrictNumericOnlyPromptPattern = new(
+        @"\b(?:give|return|reply\s+with)\s+only\s+(?:the\s+)?(?:final\s+)?(?:integer|number|decimal)\b|\bfinal\s+(?:integer|number|decimal)\s+only\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex StrictCodeOnlyPromptPattern = new(
+        @"\bgive\s+only\s+the\s+(?:expression|statement)\b|\breturn\s+only\s+the\s+(?:expression|statement)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex StrictJsonOnlyPromptPattern = new(
+        @"\breturn\s+only\s+(?:a\s+)?json\s+object\b|\breturn\s+valid\s+json\s+only\b|\breturn\s+only\s+valid\s+json\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private readonly Func<PersonalityProfile?> _resolveActiveProfile;
     private readonly ResponseKindClassifier _responseKindClassifier = new();
 
@@ -34,6 +54,11 @@ public sealed class DeterministicChatPostProcessor
         var preserveRationale = responseKind is ResponseKind.Reasoning;
 
         var text = SanitizeCommon(draftText, preserveRationale);
+        if (TryNormalizeStrictAnswerOnlyReply(userMessage, text) is { Length: > 0 } strictReply)
+            return strictReply;
+
+        if (TryNormalizeMultipleChoiceLetterOnlyReply(userMessage, text) is { Length: > 0 } multipleChoiceLetter)
+            return multipleChoiceLetter;
 
         if (LooksLikeThinkingLeak(text))
         {
@@ -98,6 +123,143 @@ public sealed class DeterministicChatPostProcessor
         }
 
         return text;
+    }
+
+    public static string? TryNormalizeMultipleChoiceLetterOnlyReply(string? userMessage, string assistantText)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage) || string.IsNullOrWhiteSpace(assistantText))
+            return null;
+
+        if (!MultipleChoiceLetterOnlyPromptPattern.IsMatch(userMessage))
+            return null;
+
+        var match = LeadingMultipleChoiceAnswerPattern.Match(assistantText);
+        return match.Success
+            ? match.Groups["letter"].Value.ToUpperInvariant()
+            : null;
+    }
+
+    public static string? TryNormalizeStrictAnswerOnlyReply(string? userMessage, string assistantText)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage) || string.IsNullOrWhiteSpace(assistantText))
+            return null;
+
+        if (TryNormalizeMultipleChoiceLetterOnlyReply(userMessage, assistantText) is { Length: > 0 } multipleChoiceReply)
+            return multipleChoiceReply;
+
+        if (StrictNumericOnlyPromptPattern.IsMatch(userMessage) &&
+            TryExtractLastNumericAnswer(assistantText) is { Length: > 0 } numericReply)
+        {
+            return numericReply;
+        }
+
+        if (StrictJsonOnlyPromptPattern.IsMatch(userMessage) &&
+            TryExtractJsonObject(assistantText) is { Length: > 0 } jsonReply)
+        {
+            return jsonReply;
+        }
+
+        if (StrictCodeOnlyPromptPattern.IsMatch(userMessage) &&
+            TryExtractCodeOnlyAnswer(assistantText) is { Length: > 0 } codeReply)
+        {
+            return codeReply;
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractLastNumericAnswer(string assistantText)
+    {
+        var finalLine = Regex.Match(
+            assistantText,
+            @"(?im)^\s*(?:final\s+answer|answer)\s*:\s*(?<answer>.+?)\s*$",
+            RegexOptions.CultureInvariant);
+        var candidate = finalLine.Success ? finalLine.Groups["answer"].Value : assistantText;
+
+        var boxed = Regex.Match(candidate, @"\\boxed\{(?<answer>[^{}]+)\}", RegexOptions.CultureInvariant);
+        if (boxed.Success)
+            candidate = boxed.Groups["answer"].Value;
+
+        var matches = Regex.Matches(
+            candidate.Replace(",", "", StringComparison.Ordinal),
+            @"[-+]?\d+(?:\.\d+)?",
+            RegexOptions.CultureInvariant);
+        return matches.Count > 0 ? matches[^1].Value : null;
+    }
+
+    private static string? TryExtractCodeOnlyAnswer(string assistantText)
+    {
+        var fenced = Regex.Match(
+            assistantText,
+            @"```(?:python|py)?\s*(?<code>.*?)\s*```",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline);
+        if (fenced.Success)
+            return fenced.Groups["code"].Value.Trim();
+
+        var inline = Regex.Match(assistantText, @"`(?<code>[^`\r\n]+)`", RegexOptions.CultureInvariant);
+        if (inline.Success)
+            return inline.Groups["code"].Value.Trim();
+
+        var finalLine = Regex.Match(
+            assistantText,
+            @"(?im)^\s*(?:final\s+answer|answer)\s*:\s*(?<code>.+?)\s*$",
+            RegexOptions.CultureInvariant);
+        return finalLine.Success ? finalLine.Groups["code"].Value.Trim() : null;
+    }
+
+    private static string? TryExtractJsonObject(string assistantText)
+    {
+        var fenced = Regex.Match(
+            assistantText,
+            @"```(?:json)?\s*(?<json>\{.*?\})\s*```",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline);
+        if (fenced.Success)
+            return fenced.Groups["json"].Value.Trim();
+
+        var start = assistantText.IndexOf('{');
+        if (start < 0)
+            return null;
+
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        for (var index = start; index < assistantText.Length; index++)
+        {
+            var character = assistantText[index];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (character == '\\' && inString)
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (character == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString)
+                continue;
+
+            if (character == '{')
+            {
+                depth++;
+            }
+            else if (character == '}')
+            {
+                depth--;
+                if (depth == 0)
+                    return assistantText[start..(index + 1)].Trim();
+            }
+        }
+
+        return null;
     }
 
     private static bool LooksLikeToolingLeakEssay(string text)
@@ -171,6 +333,11 @@ public sealed class DeterministicChatPostProcessor
         sanitized = ApplySmallModelQualityGuards(sanitized, latestUserMessage);
         sanitized = AssistantResponseSanitizer.NormalizeJsonOnlyReply(sanitized, latestUserMessage);
         sanitized = NormalizeStrictStructuredOutput(sanitized, latestUserMessage);
+        if (TryNormalizeStrictAnswerOnlyReply(latestUserMessage, sanitized) is { Length: > 0 } strictReply)
+            return strictReply;
+
+        if (TryNormalizeMultipleChoiceLetterOnlyReply(latestUserMessage, sanitized) is { Length: > 0 } multipleChoiceLetter)
+            return multipleChoiceLetter;
         sanitized = StripTrailingDeflectionDisclaimer(sanitized);
         var hasLocalBusinessRecoveryContext = HasLocalBusinessRecoveryContext(latestUserMessage, sanitized, toolCallsMade);
         if (hasNonMemoryToolEvidence)

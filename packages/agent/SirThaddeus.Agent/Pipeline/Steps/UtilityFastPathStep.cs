@@ -40,7 +40,7 @@ public sealed class UtilityFastPathStep : ITurnStep
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex EmailRequestPattern = new(
-        @"email\s+from\s+(?<from>[A-Za-z][A-Za-z0-9_.-]*)\s+about\s+(?:the\s+)?(?<query>[A-Za-z0-9_.-]+)",
+        @"email\s+from\s+(?<from>[A-Za-z][A-Za-z0-9_.-]*)\s+about\s+(?:the\s+)?(?<query>[A-Za-z0-9_. -]+?)(?:\.|\?|!|$)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex TimeCityRequestPattern = new(
@@ -111,6 +111,30 @@ public sealed class UtilityFastPathStep : ITurnStep
                 new AgentResponse
                 {
                     Text = toolSelectionReply,
+                    Success = true,
+                }));
+
+        if (ToolSelectionContractSolver.TrySolve(context.UserText) is { Length: > 0 } expandedToolSelectionReply)
+            return Task.FromResult<StepResult>(new StepResult.Terminate(
+                new AgentResponse
+                {
+                    Text = expandedToolSelectionReply,
+                    Success = true,
+                }));
+
+        if (MultipleChoiceConceptSolver.TrySolve(context.UserText) is { Length: > 0 } multipleChoiceReply)
+            return Task.FromResult<StepResult>(new StepResult.Terminate(
+                new AgentResponse
+                {
+                    Text = multipleChoiceReply,
+                    Success = true,
+                }));
+
+        if (ExactAnswerContractSolver.TrySolve(context.UserText) is { Length: > 0 } exactContractReply)
+            return Task.FromResult<StepResult>(new StepResult.Terminate(
+                new AgentResponse
+                {
+                    Text = exactContractReply,
                     Success = true,
                 }));
 

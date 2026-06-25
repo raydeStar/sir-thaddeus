@@ -9,6 +9,18 @@ namespace SirThaddeus.Harness.Scoring;
 
 public sealed class ScoringEngine
 {
+    private static readonly Regex MultipleChoiceLetterOnlyPromptPattern = new(
+        @"\breply\s+with\s+only\s+A,\s+B,\s+C,\s+or\s+D\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex NumericOnlyPromptPattern = new(
+        @"\breply\s+with\s+only\s+(?:the\s+)?(?:number|integer|decimal(?:\s+number)?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex NumericAnswerPattern = new(
+        @"^\s*-?(?:\d+(?:\.\d+)?|\.\d+)\s*$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private static readonly string[] DefaultMetrics =
     [
         "taskCorrectness",
@@ -100,6 +112,7 @@ public sealed class ScoringEngine
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var strictContractCompliant = ShouldScoreAsStrictAnswerContract(test, response.Text);
         var heuristic = BuildHeuristicScores(test, response, steps, profile, checks);
         var scores = MergeJudgeScores(heuristic, judgeResult, profile);
         var overall = hardGateFailures.Count > 0
@@ -140,10 +153,10 @@ public sealed class ScoringEngine
             KeywordPenalty = KeywordPenalty(test, response.Text),
             DeflectionPenalty = DeflectionPenalty(response.Text),
             ToolIncorporationPenalty = ToolIncorporationPenalty(steps, response.Text),
-            AssertionDensityPenalty = HedgePenalty(response.Text),
+            AssertionDensityPenalty = strictContractCompliant ? 0 : HedgePenalty(response.Text),
             PersonalityAdjustment = PersonalityAdjustment(test, response.Text),
             DeflectionPhraseCount = CountDeflections(response.Text),
-            HedgeRatio = Math.Round(HedgeRatio(response.Text), 2),
+            HedgeRatio = Math.Round(strictContractCompliant ? 0 : HedgeRatio(response.Text), 2),
             ToolTokensIncorporated = ToolTokenStats(steps, response.Text).Incorporated,
             ToolTokensAvailable = ToolTokenStats(steps, response.Text).Available,
             RequiredKeywordsFound = CountRequiredKeywords(test, response.Text).Found,
@@ -198,7 +211,8 @@ public sealed class ScoringEngine
 
         var final = response.Text ?? string.Empty;
         var deflections = CountDeflections(final);
-        var keywordStats = CountRequiredKeywords(test, final);
+        var strictContractCompliant = ShouldScoreAsStrictAnswerContract(test, final);
+        var keywordStats = strictContractCompliant ? (Found: 0, Total: 0) : CountRequiredKeywords(test, final);
         var toolStats = ToolTokenStats(steps, final);
         var hedgeRatio = HedgeRatio(final);
 
@@ -287,7 +301,7 @@ public sealed class ScoringEngine
         if (profile == "agentTool")
             scores["stateContinuity"] = StateContinuityScore(test, final);
 
-        if (hedgeRatio > 0.7)
+        if (!strictContractCompliant && hedgeRatio > 0.7)
             scores["groundingFactuality"] = Math.Min(scores["groundingFactuality"], 2);
 
         scores["personaFit"] = Math.Min(scores["personaFit"], PersonaScore(final));
@@ -304,6 +318,14 @@ public sealed class ScoringEngine
         {
             scores["taskCorrectness"] = 0;
             scores["instructionAdherence"] = Math.Min(scores["instructionAdherence"], 1);
+        }
+
+        if (strictContractCompliant)
+        {
+            scores["conversationality"] = 4;
+            scores["personaFit"] = 4;
+            scores["actionability"] = 4;
+            scores["concisenessFit"] = 4;
         }
 
         return scores;
@@ -372,7 +394,8 @@ public sealed class ScoringEngine
             }
         }
 
-        if (test.Expectations.RequiredKeywords.Count > 0)
+        if (test.Expectations.RequiredKeywords.Count > 0 &&
+            !ShouldScoreAsStrictAnswerContract(test, final))
         {
             var missing = test.Expectations.RequiredKeywords
                 .Where(k => !Contains(final, k))
@@ -562,8 +585,26 @@ public sealed class ScoringEngine
 
     private static (int Found, int Total) CountRequiredKeywords(HarnessTestCase test, string final)
     {
+        if (ShouldScoreAsStrictAnswerContract(test, final))
+            return (0, 0);
+
         var required = test.Expectations.RequiredKeywords.Where(k => !string.IsNullOrWhiteSpace(k)).ToList();
         return (required.Count(k => Contains(final, k)), required.Count);
+    }
+
+    private static bool ShouldScoreAsStrictAnswerContract(HarnessTestCase test, string? final)
+    {
+        if (string.IsNullOrWhiteSpace(test.UserMessage) || string.IsNullOrWhiteSpace(final))
+            return false;
+
+        var trimmed = final.Trim();
+        if (MultipleChoiceLetterOnlyPromptPattern.IsMatch(test.UserMessage))
+            return Regex.IsMatch(trimmed, @"^[A-D]$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        if (NumericOnlyPromptPattern.IsMatch(test.UserMessage))
+            return NumericAnswerPattern.IsMatch(trimmed);
+
+        return false;
     }
 
     private static double KeywordPenalty(HarnessTestCase test, string final)

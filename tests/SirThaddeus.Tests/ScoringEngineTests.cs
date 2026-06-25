@@ -1076,6 +1076,56 @@ public class ScoringEngineTests
             failure.Contains("local-business fallback non-answer", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Score_DoesNotPenalizeStrictDecimalOnlyAnswerForMissingProse()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "strict_decimal_contract",
+            "A bag has 5 red marbles and 5 blue marbles. Two marbles are drawn without replacement. What is the probability both are red? Reply with only the decimal number.",
+            requiredKeywords: ["0.2222222222222222"]);
+
+        var response = new AgentResponse
+        {
+            Text = "0.222222222222",
+            Success = true
+        };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.True(score.Passed);
+        Assert.Equal(0, score.KeywordPenalty);
+        Assert.Equal(0, score.AssertionDensityPenalty);
+        Assert.Equal(0, score.HedgeRatio);
+        Assert.Equal(0, score.RequiredKeywordsTotal);
+        Assert.InRange(score.OverallScore, 0.85, 1.0);
+    }
+
+    [Fact]
+    public void Score_DoesNotPenalizeStrictMultipleChoiceLetterForMissingExplanation()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "strict_choice_contract",
+            "Choose the best answer. A chi-square goodness-of-fit test is commonly used to compare: A) activation energy against pH B) observed counts against expected counts C) speed against distance without categories D) two DNA codons by mass only Reply with only A, B, C, or D.",
+            requiredKeywords: ["observed counts"]);
+
+        var response = new AgentResponse
+        {
+            Text = "B",
+            Success = true
+        };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.True(score.Passed);
+        Assert.Equal(0, score.KeywordPenalty);
+        Assert.Equal(0, score.AssertionDensityPenalty);
+        Assert.Equal(0, score.HedgeRatio);
+        Assert.Equal(0, score.RequiredKeywordsTotal);
+        Assert.InRange(score.OverallScore, 0.85, 1.0);
+    }
+
     private static HarnessTestCase BasicTest(
         string id,
         string userMessage,
