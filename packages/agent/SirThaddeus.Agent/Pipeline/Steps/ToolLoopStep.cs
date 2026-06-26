@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using SirThaddeus.Agent.Utilities;
+using SirThaddeus.Agent.Validation;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Pipeline.Steps;
@@ -1156,6 +1157,25 @@ public sealed class ToolLoopStep : ITurnStep
                 .TryInterceptAsync(context, toolName, args, activityId, ct)
                 .ConfigureAwait(false);
             if (claimed is not null) return claimed;
+        }
+
+        // Pre-flight argument check: catch structurally broken arguments
+        // (unparseable JSON, missing required params) before spending a tool
+        // round-trip, and hand the model a schema-aware repair message so it can
+        // re-formulate the call rather than guess. Only fires on definitely-fatal
+        // issues, so a call that would have worked is never blocked.
+        var toolDef = context.ToolDefs?
+            .FirstOrDefault(d => string.Equals(d.Function?.Name, toolName, StringComparison.OrdinalIgnoreCase));
+        if (toolDef is not null)
+        {
+            var argCheck = ToolArgumentValidator.Validate(args, toolDef);
+            if (!argCheck.IsValid && argCheck.Issues.Any(ToolArgumentRepair.IsFatalIssue))
+            {
+                return new ToolCallOutcome(
+                    ToolArgumentRepair.BuildStructuredError(toolName, toolDef, argCheck.Issues),
+                    Ok: false,
+                    Error: "invalid_arguments");
+            }
         }
 
         // Fall through to the real MCP server.
