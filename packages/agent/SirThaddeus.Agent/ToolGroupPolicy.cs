@@ -114,6 +114,11 @@ public static class ToolGroupPolicy
         ["policy_get_state"]       = "meta",
         ["time_now"]               = "meta",
 
+        // Math — pure deterministic computation, no I/O or side effects, so
+        // it shares time_now's always-allowed class rather than needing its
+        // own permission group.
+        ["calculator"]             = "meta",
+
         // Control-plane side effects
         ["audit.export_bundle"]    = "files",
         ["audit_export_bundle"]    = "files",
