@@ -29,8 +29,14 @@ public static class CalculatorTools
     private const int MaxExpressionLength = 500;
 
     [McpServerTool, Description(
-        "Evaluate a math expression and return the exact result. ALWAYS use this " +
-        "instead of doing multi-digit or multi-step arithmetic yourself. " +
+        "Evaluate ONE pure math expression and return the exact result. Use this " +
+        "instead of doing multi-digit arithmetic yourself, then use the number it " +
+        "returns as your answer. " +
+        "Pass only digits, operators (+ - * / % ^), and the functions/constants " +
+        "below — NOT words, a question, or a word problem. If the task is a word " +
+        "problem, work out the numbers yourself first, then call this with just " +
+        "the arithmetic: e.g. for 'the sum of the multiples of 6 below 50', call " +
+        "it with \"6+12+18+24+30+36+42+48\". " +
         "Operators: + - * / % and ^ for powers. Functions: sqrt, cbrt, abs, " +
         "round, floor, ceil, min, max, log, ln, log10, pow(a,b), factorial(n) " +
         "or n!, comb(n,k) for combinations, perm(n,k) for permutations, " +
@@ -39,7 +45,7 @@ public static class CalculatorTools
         "\"22 + 19 - 8\" returns 33; \"sqrt(8^2 + 15^2)\" returns 17. " +
         "Returns JSON {\"expression\":\"...\",\"result\":\"...\"} or {\"error\":\"...\"}.")]
     public static string Calculator(
-        [Description("The math expression to evaluate, e.g. \"comb(12,5)\" or \"2^10 % 7\".")]
+        [Description("A single pure arithmetic expression (numbers, operators, and the listed functions) — never words or a word problem. E.g. \"comb(12,5)\" or \"2^10 % 7\".")]
         string expression)
     {
         if (string.IsNullOrWhiteSpace(expression))
