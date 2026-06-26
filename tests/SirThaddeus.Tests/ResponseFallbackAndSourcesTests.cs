@@ -1737,6 +1737,33 @@ public class ChatPostProcessorReasoningBehaviorTests
         Assert.Equal(expected, output);
     }
 
+    [Theory]
+    [InlineData(
+        "Answer this benchmark item through Sir Thaddeus. Work briefly if useful. Put the final answer on its own line as `Final answer: <answer>`.",
+        "After considering the options, the answer is (G).",
+        "Final answer: G")]
+    [InlineData(
+        "Answer this benchmark item through Sir Thaddeus. Work briefly if useful. Put the final answer on its own line as `Final answer: <answer>`.",
+        "2 + 2 = 4.\n\nD",
+        "Final answer: D")]
+    [InlineData(
+        "Answer this benchmark item through Sir Thaddeus. Put the final answer on its own line as Final answer: <answer>.",
+        "Answer: D - the expected counts are too small.",
+        "Final answer: D")]
+    [InlineData(
+        "Answer this benchmark item through Sir Thaddeus. Put the final answer on its own line as `Final answer: <answer>`.",
+        "The arithmetic gives \\boxed{004}.",
+        "Final answer: 004")]
+    public void ExplicitFinalAnswerLinePrompt_CollapsesToFinalAnswerLine(
+        string userMessage,
+        string draftText,
+        string expected)
+    {
+        var output = DeterministicChatPostProcessor.TryNormalizeStrictAnswerOnlyReply(userMessage, draftText);
+
+        Assert.Equal(expected, output);
+    }
+
     [Fact]
     public void StrictJsonOnlyPrompt_ExtractsBalancedJsonObject()
     {
@@ -1745,6 +1772,33 @@ public class ChatPostProcessorReasoningBehaviorTests
             "Sure:\n{\"tool\":\"notes_search\",\"args\":{\"query\":\"launch blocker list\"}}\nDone.");
 
         Assert.Equal("{\"tool\":\"notes_search\",\"args\":{\"query\":\"launch blocker list\"}}", output);
+    }
+
+    [Fact]
+    public void SanitizeFinalResponse_StripsEchoedInternalPromptBlocks()
+    {
+        var processor = new DeterministicChatPostProcessor();
+        const string request = "Write a plot for a story about two people who swap fingerprints.";
+
+        var output = processor.SanitizeFinalResponse(
+            text: request + "\n\n" +
+                  "[Task:task.instructions]\n" +
+                  "Today's date is Thursday, June 25, 2026 (2026-06-25).\n" +
+                  "You have access to tools that can interact with the user's computer.\n\n" +
+                  "[Personality:personality.sir_thaddeus]\n" +
+                  "Profile id: sir_thaddeus\n" +
+                  "Profile hash: abc123\n" +
+                  "Core identity: Witty, pragmatic, and calm guide.\n\n" +
+                  "<<The Fingerprint Exchange>>\n" +
+                  "Two strangers trade identities through a biometric mix-up and must decide whether truth or reinvention matters more.",
+            toolCallsMade: [],
+            latestUserMessage: request);
+
+        Assert.Contains(request, output, StringComparison.Ordinal);
+        Assert.Contains("<<The Fingerprint Exchange>>", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Task:", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Profile hash", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tools that can interact", output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
