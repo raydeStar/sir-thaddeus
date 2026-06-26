@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using SirThaddeus.Agent.Reasoning;
 using SirThaddeus.LlmClient;
@@ -39,11 +40,13 @@ public sealed class SelfConsistencyStep : ITurnStep
 
     private readonly ILlmClient _llm;
     private readonly int _samples;
+    private readonly double _samplingTemperature;
 
-    public SelfConsistencyStep(ILlmClient llm, int? samples = null)
+    public SelfConsistencyStep(ILlmClient llm, int? samples = null, double? samplingTemperature = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _samples = samples ?? ReadConfiguredSampleCount();
+        _samplingTemperature = samplingTemperature ?? ReadConfiguredTemperature();
     }
 
     public string Name => "SelfConsistency";
@@ -76,7 +79,7 @@ public sealed class SelfConsistencyStep : ITurnStep
             try
             {
                 var response = await _llm
-                    .ChatAsync(messages, tools: null, maxTokensOverride: 512, cancellationToken)
+                    .ChatAsync(messages, tools: null, maxTokensOverride: 512, temperatureOverride: _samplingTemperature, cancellationToken)
                     .ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(response.Content))
                     samples.Add(response.Content);
@@ -135,5 +138,20 @@ public sealed class SelfConsistencyStep : ITurnStep
     {
         var raw = Environment.GetEnvironmentVariable("ST_SELF_CONSISTENCY");
         return int.TryParse(raw, out var n) && n > 1 ? Math.Min(n, 9) : 1;
+    }
+
+    // Sampling temperature for self-consistency. Diversity across samples is
+    // what makes the majority vote meaningful, so this defaults to 0.9 (higher
+    // than the usual 0.7) and is applied per-call, independent of the global
+    // temperature — so SC never degenerates to identical samples even if a
+    // benchmark config runs the model at temperature 0. Override with
+    // ST_SELF_CONSISTENCY_TEMP; clamped to a sane (0, 2] range.
+    private static double ReadConfiguredTemperature()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_SELF_CONSISTENCY_TEMP");
+        return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var t)
+            && t is > 0 and <= 2.0
+            ? t
+            : 0.9;
     }
 }

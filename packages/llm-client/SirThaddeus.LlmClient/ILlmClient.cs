@@ -59,6 +59,25 @@ public interface ILlmClient
             : ChatAsync(messages, tools, forcedToolName, cancellationToken);
 
     /// <summary>
+    /// Chat with an explicit max_tokens cap and a per-call sampling
+    /// <paramref name="temperatureOverride"/> that overrides the client's
+    /// configured temperature for this request only. Used by self-consistency
+    /// so its repeated samples stay diverse regardless of the global
+    /// temperature.
+    ///
+    /// <para>The default implementation ignores the override (so fakes and
+    /// non-OpenAI-compatible clients keep compiling unchanged); real clients
+    /// like <c>LmStudioClient</c> apply it.</para>
+    /// </summary>
+    Task<LlmResponse> ChatAsync(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        int maxTokensOverride,
+        double temperatureOverride,
+        CancellationToken cancellationToken = default) =>
+        ChatAsync(messages, tools, maxTokensOverride, cancellationToken);
+
+    /// <summary>
     /// Pings the LLM endpoint and returns the loaded model name if reachable,
     /// or null if the provider is offline / unreachable.
     /// This is transport-only — no state, no side effects.
