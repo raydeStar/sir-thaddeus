@@ -1,0 +1,120 @@
+using System.Text.RegularExpressions;
+using SirThaddeus.Agent.Reasoning;
+using SirThaddeus.LlmClient;
+
+namespace SirThaddeus.Agent.Pipeline.Steps;
+
+/// <summary>
+/// For strict-answer reasoning items (a bare number or A–D letter), samples the
+/// model several times with a step-by-step prompt and returns the majority-vote
+/// final answer. This is the honest lever for the variance the calculator can't
+/// fix: a single sample of a multi-step problem is unreliable (the same
+/// recurrence scored 32 once and 37 once), but the majority across N samples is
+/// stable. The model does all the reasoning; only the vote is mechanical.
+///
+/// <para>Opt-in and off by default: enabled only when <c>ST_SELF_CONSISTENCY</c>
+/// is set to N&gt;=2 (capped at 9). When disabled, or when the prompt isn't a
+/// strict numeric/choice item, the step is a no-op and the normal pipeline runs.</para>
+/// </summary>
+public sealed class SelfConsistencyStep : ITurnStep
+{
+    private static readonly Regex NumericOnlyPrompt = new(
+        @"reply\s+with\s+only\b[^.]*\b(integer|number|decimal|value|remainder|count|sum|digits?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex ChoiceOnlyPrompt = new(
+        @"reply\s+with\s+only\s+a\s*,?\s*b\s*,?\s*c\s*,?\s*(?:or\s+)?d\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private readonly ILlmClient _llm;
+    private readonly int _samples;
+
+    public SelfConsistencyStep(ILlmClient llm, int? samples = null)
+    {
+        _llm = llm ?? throw new ArgumentNullException(nameof(llm));
+        _samples = samples ?? ReadConfiguredSampleCount();
+    }
+
+    public string Name => "SelfConsistency";
+
+    public async Task<StepResult> ExecuteAsync(TurnContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (_samples < 2 || string.IsNullOrWhiteSpace(context.UserText))
+            return new StepResult.Continue(context);
+
+        var isChoice = ChoiceOnlyPrompt.IsMatch(context.UserText);
+        var isNumeric = !isChoice && NumericOnlyPrompt.IsMatch(context.UserText);
+        if (!isChoice && !isNumeric)
+            return new StepResult.Continue(context);
+
+        var messages = BuildChainOfThoughtMessages(context);
+
+        var samples = new List<string>(_samples);
+        for (var i = 0; i < _samples; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var response = await _llm
+                    .ChatAsync(messages, tools: null, maxTokensOverride: 512, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(response.Content))
+                    samples.Add(response.Content);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // A failed sample just doesn't vote; fall back gracefully.
+            }
+        }
+
+        if (samples.Count == 0)
+            return new StepResult.Continue(context);
+
+        Func<string?, string?> extract = isChoice
+            ? SelfConsistency.ExtractChoice
+            : SelfConsistency.ExtractNumeric;
+
+        var vote = SelfConsistency.Vote(samples, extract);
+        if (string.IsNullOrWhiteSpace(vote.Answer))
+            return new StepResult.Continue(context);
+
+        // Strict-answer contract: emit just the winning value.
+        return new StepResult.Terminate(new AgentResponse
+        {
+            Text = vote.Answer,
+            Success = true,
+        });
+    }
+
+    private static List<ChatMessage> BuildChainOfThoughtMessages(TurnContext context)
+    {
+        var messages = context.LlmMessages.ToList();
+        var cot = context.UserText
+            + "\n\nWork through this step by step, showing each arithmetic step. "
+            + "On the last line, write exactly: Final answer: <answer>";
+
+        for (var i = messages.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(messages[i].Role, "user", StringComparison.Ordinal))
+            {
+                messages[i] = ChatMessage.User(cot);
+                return messages;
+            }
+        }
+
+        messages.Add(ChatMessage.User(cot));
+        return messages;
+    }
+
+    private static int ReadConfiguredSampleCount()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_SELF_CONSISTENCY");
+        return int.TryParse(raw, out var n) && n > 1 ? Math.Min(n, 9) : 1;
+    }
+}

@@ -383,6 +383,12 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         // chat and opinion prompts pass through untouched.
         new FreshnessRouterStep(),
 
+        // Self-consistency (opt-in via ST_SELF_CONSISTENCY=N): for strict-answer
+        // reasoning items, sample the model N times step-by-step and return the
+        // majority-vote answer — stabilizes the variance a single sample shows
+        // on multi-step problems. No-op when disabled or for non-strict prompts.
+        new SelfConsistencyStep(llm),
+
         toolLoop,
         new PostProcessStep(sanitize, "PostProcess:Sanitize"),
 
