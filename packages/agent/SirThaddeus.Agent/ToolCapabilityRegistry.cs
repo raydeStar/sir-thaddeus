@@ -148,7 +148,12 @@ public static class ToolCapabilityRegistry
 
             // Time
             ["time_now"] = ToolCapability.TimeRead,
-            ["TimeNow"] = ToolCapability.TimeRead
+            ["TimeNow"] = ToolCapability.TimeRead,
+
+            // Math — pure deterministic computation, no I/O or side effects, so
+            // it shares the always-available meta capability class.
+            ["calculator"] = ToolCapability.Meta,
+            ["Calculator"] = ToolCapability.Meta
         };
 
     public static bool TryResolveCapability(string toolName, out ToolCapability capability)
