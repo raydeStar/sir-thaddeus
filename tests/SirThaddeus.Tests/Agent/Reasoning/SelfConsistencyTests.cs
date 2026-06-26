@@ -17,6 +17,8 @@ public class SelfConsistencyTests
     [InlineData("Reasoning about it. Final answer: B", "B")]
     [InlineData("The correct option is (C).", "C")]
     [InlineData("Final answer: d", "D")]
+    [InlineData("After elimination, Final answer: G", "G")] // MMLU-Pro is A-J, not just A-D
+    [InlineData("Final answer: J", "J")]
     public void ExtractChoice_pulls_letter(string text, string expected)
         => Assert.Equal(expected, SelfConsistency.ExtractChoice(text));
 

@@ -20,8 +20,9 @@ public static class SelfConsistency
         @"-?\d+(?:\.\d+)?",
         RegexOptions.Compiled);
 
+    // A–J so it covers MMLU-Pro (up to 10 options), not just 4-way A–D.
     private static readonly Regex ChoiceToken = new(
-        @"(?<![A-Za-z])([A-D])(?![A-Za-z])",
+        @"(?<![A-Za-z])([A-J])(?![A-Za-z])",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>Extracts a normalized numeric answer, preferring the value on a

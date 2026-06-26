@@ -26,6 +26,17 @@ public sealed class SelfConsistencyStep : ITurnStep
         @"reply\s+with\s+only\s+a\s*,?\s*b\s*,?\s*c\s*,?\s*(?:or\s+)?d\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    // Real benchmark fixtures (MMLU-Pro, AIME) don't say "reply with only X";
+    // they say "put the final answer on its own line". Fire on that too, and
+    // tell choice from numeric by whether the prompt lists A–J options.
+    private static readonly Regex FinalAnswerInstruction = new(
+        @"final\s+answer",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex ChoiceOptionLine = new(
+        @"(?m)^\s*\(?[A-J][.)]\s",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private readonly ILlmClient _llm;
     private readonly int _samples;
 
@@ -44,8 +55,11 @@ public sealed class SelfConsistencyStep : ITurnStep
         if (_samples < 2 || string.IsNullOrWhiteSpace(context.UserText))
             return new StepResult.Continue(context);
 
-        var isChoice = ChoiceOnlyPrompt.IsMatch(context.UserText);
-        var isNumeric = !isChoice && NumericOnlyPrompt.IsMatch(context.UserText);
+        var hasFinalAnswer = FinalAnswerInstruction.IsMatch(context.UserText);
+        var isChoice = ChoiceOnlyPrompt.IsMatch(context.UserText)
+            || ChoiceOptionLine.Matches(context.UserText).Count >= 3;
+        var isNumeric = !isChoice
+            && (NumericOnlyPrompt.IsMatch(context.UserText) || hasFinalAnswer);
         if (!isChoice && !isNumeric)
             return new StepResult.Continue(context);
 
