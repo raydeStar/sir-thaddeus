@@ -55,4 +55,27 @@ public class SelfConsistencyTests
         Assert.Equal("42", result.Answer);
         Assert.Equal(1, result.Votes);
     }
+
+    [Fact]
+    public void MajorityLocked_true_when_lead_is_insurmountable()
+    {
+        // 3 agree out of max 5: the runner-up can reach at most 2 in the last
+        // two samples, so the winner is decided -> stop early.
+        var samples = new[] { "Final answer: 7", "Final answer: 7", "Final answer: 7" };
+        Assert.True(SelfConsistency.MajorityLocked(samples, SelfConsistency.ExtractNumeric, maxSamples: 5));
+    }
+
+    [Fact]
+    public void MajorityLocked_false_when_outcome_still_open()
+    {
+        // 2-1 with two samples to go: the minority could still catch up.
+        var samples = new[] { "Final answer: 7", "Final answer: 7", "Final answer: 9" };
+        Assert.False(SelfConsistency.MajorityLocked(samples, SelfConsistency.ExtractNumeric, maxSamples: 5));
+    }
+
+    [Fact]
+    public void MajorityLocked_false_when_no_answers_parsed()
+    {
+        Assert.False(SelfConsistency.MajorityLocked(["no answer here"], SelfConsistency.ExtractNumeric, maxSamples: 5));
+    }
 }

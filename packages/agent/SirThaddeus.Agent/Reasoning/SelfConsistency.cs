@@ -70,6 +70,45 @@ public static class SelfConsistency
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(extract);
 
+        var (counts, firstSeen) = Tally(candidates, extract);
+        if (firstSeen.Count == 0)
+            return new SelfConsistencyResult(null, 0, candidates.Count);
+
+        var winner = firstSeen[0];
+        foreach (var answer in firstSeen)
+        {
+            if (counts[answer] > counts[winner])
+                winner = answer;
+        }
+
+        return new SelfConsistencyResult(winner, counts[winner], candidates.Count);
+    }
+
+    /// <summary>True when the majority winner can no longer change no matter
+    /// what the remaining samples say — i.e. the leader's lead over the runner-up
+    /// already exceeds the samples still to come. Lets the caller stop sampling
+    /// early once the outcome is locked, cutting cost with no change to the
+    /// result. Needs at least one parsed answer; returns false otherwise.</summary>
+    public static bool MajorityLocked(
+        IReadOnlyList<string> candidatesSoFar, Func<string?, string?> extract, int maxSamples)
+    {
+        ArgumentNullException.ThrowIfNull(candidatesSoFar);
+        ArgumentNullException.ThrowIfNull(extract);
+
+        var (counts, _) = Tally(candidatesSoFar, extract);
+        if (counts.Count == 0)
+            return false;
+
+        var ordered = counts.Values.OrderByDescending(v => v).ToList();
+        var leader = ordered[0];
+        var runnerUp = ordered.Count > 1 ? ordered[1] : 0;
+        var remaining = Math.Max(0, maxSamples - candidatesSoFar.Count);
+        return leader - runnerUp > remaining;
+    }
+
+    private static (Dictionary<string, int> Counts, List<string> FirstSeen) Tally(
+        IReadOnlyList<string> candidates, Func<string?, string?> extract)
+    {
         var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var firstSeen = new List<string>();
 
@@ -86,17 +125,7 @@ public static class SelfConsistency
             counts[answer]++;
         }
 
-        if (firstSeen.Count == 0)
-            return new SelfConsistencyResult(null, 0, candidates.Count);
-
-        var winner = firstSeen[0];
-        foreach (var answer in firstSeen)
-        {
-            if (counts[answer] > counts[winner])
-                winner = answer;
-        }
-
-        return new SelfConsistencyResult(winner, counts[winner], candidates.Count);
+        return (counts, firstSeen);
     }
 
     private static string? LastNumber(string segment)

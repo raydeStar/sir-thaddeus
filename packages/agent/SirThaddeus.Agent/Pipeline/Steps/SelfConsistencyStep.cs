@@ -63,6 +63,10 @@ public sealed class SelfConsistencyStep : ITurnStep
         if (!isChoice && !isNumeric)
             return new StepResult.Continue(context);
 
+        Func<string?, string?> extract = isChoice
+            ? SelfConsistency.ExtractChoice
+            : SelfConsistency.ExtractNumeric;
+
         var messages = BuildChainOfThoughtMessages(context);
 
         var samples = new List<string>(_samples);
@@ -85,14 +89,15 @@ public sealed class SelfConsistencyStep : ITurnStep
             {
                 // A failed sample just doesn't vote; fall back gracefully.
             }
+
+            // Adaptive early-stop: once the leader's margin exceeds the samples
+            // still to come, the majority can't change — stop and save the rest.
+            if (SelfConsistency.MajorityLocked(samples, extract, _samples))
+                break;
         }
 
         if (samples.Count == 0)
             return new StepResult.Continue(context);
-
-        Func<string?, string?> extract = isChoice
-            ? SelfConsistency.ExtractChoice
-            : SelfConsistency.ExtractNumeric;
 
         var vote = SelfConsistency.Vote(samples, extract);
         if (string.IsNullOrWhiteSpace(vote.Answer))
