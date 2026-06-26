@@ -131,22 +131,6 @@ public sealed class UtilityFastPathStep : ITurnStep
                     Success = true,
                 }));
 
-        if (MultipleChoiceConceptSolver.TrySolve(context.UserText) is { Length: > 0 } multipleChoiceReply)
-            return Task.FromResult<StepResult>(new StepResult.Terminate(
-                new AgentResponse
-                {
-                    Text = multipleChoiceReply,
-                    Success = true,
-                }));
-
-        if (ExactAnswerContractSolver.TrySolve(context.UserText) is { Length: > 0 } exactContractReply)
-            return Task.FromResult<StepResult>(new StepResult.Terminate(
-                new AgentResponse
-                {
-                    Text = exactContractReply,
-                    Success = true,
-                }));
-
         var match = _engine.TryMatch(context.UserText);
         if (match is null || match.Confidence < _minConfidence)
             return Task.FromResult<StepResult>(new StepResult.Continue(context));
