@@ -745,6 +745,18 @@ public static class ToolManifest
         },
 
         // ── Time Tool ────────────────────────────────────────────────
+        // ── Math Tools ───────────────────────────────────────────────
+        new()
+        {
+            Name        = "calculator",
+            Aliases     = ["Calculator"],
+            Category    = "math",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Evaluates a math expression (arithmetic, powers, roots, factorial, comb/perm, gcd/lcm, logs, pi/e) and returns the exact result. The model writes the expression; the CPU computes it.",
+            Limits      = "Single expression, max 500 chars; pure computation, no side effects."
+        },
+
         new()
         {
             Name        = "time_now",

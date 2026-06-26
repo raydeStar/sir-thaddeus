@@ -1,0 +1,28 @@
+id: probe_calc_modular_power
+name: Solver Probe (calculator) - Modular Power
+rubric_profile: general
+user_message: "Use the calculator tool to compute the arithmetic. What is the remainder when 2^20 is divided by 1000? Reply with only the integer."
+allowed_tools: [calculator]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "576"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/

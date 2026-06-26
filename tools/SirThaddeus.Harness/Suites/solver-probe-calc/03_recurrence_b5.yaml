@@ -1,0 +1,28 @@
+id: probe_calc_recurrence_b5
+name: Solver Probe (calculator) - Second-Order Recurrence
+rubric_profile: general
+user_message: "Use the calculator tool for each arithmetic step. Let b1 = 2, b2 = 5, and b_n = b_{n-1} + 2b_{n-2} for n >= 3. What is b5? Reply with only the integer."
+allowed_tools: [calculator]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "37"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/
