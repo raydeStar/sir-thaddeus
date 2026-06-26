@@ -31,22 +31,6 @@ public sealed class UtilityFastPathStep : ITurnStep
         @"^\s*(?:reply|respond|answer)\s+exactly\s+[""“](?<literal>.+?)[""”]\s*(?:and\s+nothing\s+else)?\s*\.?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    private static readonly Regex ToolSelectionPromptPattern = new(
-        @"choose\s+the\s+best\s+tool\s+and\s+return\s+only\s+json\s*:\s*user\s+asks,\s*[""“](?<request>.+?)[""”]\s+available\s+tools\s+are\s+(?<tools>.+?)\.\s*schema\s*:",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
-    private static readonly Regex PercentRequestPattern = new(
-        @"(?<pct>\d+(?:\.\d+)?)\s*percent\s+of\s+(?<base>\d+(?:\.\d+)?)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
-    private static readonly Regex EmailRequestPattern = new(
-        @"email\s+from\s+(?<from>[A-Za-z][A-Za-z0-9_.-]*)\s+about\s+(?:the\s+)?(?<query>[A-Za-z0-9_. -]+?)(?:\.|\?|!|$)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
-    private static readonly Regex TimeCityRequestPattern = new(
-        @"\b(?:current\s+)?(?:date\s+and\s+time|time|date)\s+in\s+(?<city>[A-Za-z][A-Za-z .'-]{1,60})\??\s*$",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
     private static readonly Regex JsonFieldsPattern = new(
         @"return\s+only\s+valid\s+json\b.*?\b(?:top-level\s+)?fields\s*:\s*(?<fields>[^.]+)\.",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline | RegexOptions.Compiled);
@@ -112,22 +96,6 @@ public sealed class UtilityFastPathStep : ITurnStep
                 new AgentResponse
                 {
                     Text = jsonContractReply,
-                    Success = true,
-                }));
-
-        if (TryMatchToolSelectionJsonContract(context.UserText) is { Length: > 0 } toolSelectionReply)
-            return Task.FromResult<StepResult>(new StepResult.Terminate(
-                new AgentResponse
-                {
-                    Text = toolSelectionReply,
-                    Success = true,
-                }));
-
-        if (ToolSelectionContractSolver.TrySolve(context.UserText) is { Length: > 0 } expandedToolSelectionReply)
-            return Task.FromResult<StepResult>(new StepResult.Terminate(
-                new AgentResponse
-                {
-                    Text = expandedToolSelectionReply,
                     Success = true,
                 }));
 
@@ -207,104 +175,6 @@ public sealed class UtilityFastPathStep : ITurnStep
             return number;
         return trimmed;
     }
-
-    private static string? TryMatchToolSelectionJsonContract(string userText)
-    {
-        var match = ToolSelectionPromptPattern.Match(userText);
-        if (!match.Success)
-            return null;
-
-        var request = match.Groups["request"].Value.Trim();
-        var tools = ParseAvailableTools(match.Groups["tools"].Value);
-        if (tools.Count == 0)
-            return null;
-
-        if (tools.Contains("calculator") && TryBuildCalculatorToolSelection(request) is { } calculator)
-            return calculator;
-        if (tools.Contains("calendar_search") && TryBuildCalendarToolSelection(request) is { } calendar)
-            return calendar;
-        if (tools.Contains("email_search") && TryBuildEmailToolSelection(request) is { } email)
-            return email;
-        if (tools.Contains("time_now") && TryBuildTimeToolSelection(request) is { } time)
-            return time;
-
-        return null;
-    }
-
-    private static HashSet<string> ParseAvailableTools(string text) =>
-        text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(tool => tool.Trim().TrimEnd('.').ToLowerInvariant())
-            .Where(tool => Regex.IsMatch(tool, @"^[a-z_][a-z0-9_]*$", RegexOptions.CultureInvariant))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-    private static string? TryBuildCalculatorToolSelection(string request)
-    {
-        var match = PercentRequestPattern.Match(request);
-        if (!match.Success)
-            return null;
-
-        var pct = match.Groups["pct"].Value;
-        var baseValue = match.Groups["base"].Value;
-        var expression = $"{FormatDecimalPercent(pct)} * {baseValue}";
-        return SerializeToolSelection("calculator", new Dictionary<string, object?>
-        {
-            ["expression"] = expression,
-        });
-    }
-
-    private static string FormatDecimalPercent(string percent)
-    {
-        if (!decimal.TryParse(percent, NumberStyles.Number, CultureInfo.InvariantCulture, out var value))
-            return percent;
-        return (value / 100m).ToString("0.################", CultureInfo.InvariantCulture);
-    }
-
-    private static string? TryBuildCalendarToolSelection(string request)
-    {
-        if (!Regex.IsMatch(request, @"\btomorrow\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-            return null;
-        if (!Regex.IsMatch(request, @"\b(meetings?|calendar|schedule|appointments?)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-            return null;
-
-        return SerializeToolSelection("calendar_search", new Dictionary<string, object?>
-        {
-            ["date"] = "tomorrow",
-        });
-    }
-
-    private static string? TryBuildEmailToolSelection(string request)
-    {
-        var match = EmailRequestPattern.Match(request);
-        if (!match.Success)
-            return null;
-
-        return SerializeToolSelection("email_search", new Dictionary<string, object?>
-        {
-            ["from"] = match.Groups["from"].Value.Trim(),
-            ["query"] = match.Groups["query"].Value.Trim().TrimEnd('.', '?', '!'),
-        });
-    }
-
-    private static string? TryBuildTimeToolSelection(string request)
-    {
-        var match = TimeCityRequestPattern.Match(request);
-        if (!match.Success)
-            return null;
-
-        return SerializeToolSelection("time_now", new Dictionary<string, object?>
-        {
-            ["timezone_or_city"] = match.Groups["city"].Value.Trim().TrimEnd('.', '?', '!'),
-        });
-    }
-
-    private static string SerializeToolSelection(string tool, Dictionary<string, object?> args) =>
-        JsonSerializer.Serialize(
-            new Dictionary<string, object?>
-            {
-                ["tool"] = tool,
-                ["args"] = args,
-            },
-            CompactJsonOptions);
 
     private static string UnwrapInlineLiteral(string value)
     {
