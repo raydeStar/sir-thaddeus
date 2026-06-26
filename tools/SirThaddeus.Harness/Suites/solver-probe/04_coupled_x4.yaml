@@ -1,0 +1,28 @@
+id: probe_coupled_x4
+name: Solver Probe - Coupled Recurrence
+rubric_profile: general
+user_message: "Let x1 = 1 and y1 = 2. For n >= 2, x_n = x_{n-1} + 3y_{n-1} and y_n = x_{n-1} + y_{n-1}. What is x4? Reply with only the integer."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "46"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/PostProcessing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

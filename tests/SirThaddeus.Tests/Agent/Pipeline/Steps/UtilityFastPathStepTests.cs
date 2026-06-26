@@ -11,6 +11,34 @@ public class UtilityFastPathStepTests
         Assert.Equal("UtilityFastPath", new UtilityFastPathStep().Name);
 
     [Fact]
+    public async Task Continues_without_solving_when_harness_disables_fastpath()
+    {
+        // Ablation seam: ST_HARNESS_DISABLE_FASTPATH=1 turns the step into a
+        // no-op so benchmark items are answered by the model + tool loop, not
+        // the deterministic solvers. The same exact-math prompt that normally
+        // terminates (see Terminates_on_exact_math_contracts_*) must instead
+        // Continue, and the engine must never be consulted.
+        var throwingEngine = new ThrowingEngine();
+        var step = new UtilityFastPathStep(throwingEngine);
+        var ctx = NewContext("What is the remainder when 2^10 is divided by 7? Reply with only the remainder.");
+
+        var previous = Environment.GetEnvironmentVariable("ST_HARNESS_DISABLE_FASTPATH");
+        Environment.SetEnvironmentVariable("ST_HARNESS_DISABLE_FASTPATH", "1");
+        StepResult result;
+        try
+        {
+            result = await step.ExecuteAsync(ctx, CancellationToken.None);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ST_HARNESS_DISABLE_FASTPATH", previous);
+        }
+
+        Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(0, throwingEngine.CallCount);
+    }
+
+    [Fact]
     public async Task Terminates_on_high_confidence_temperature_conversion()
     {
         // Strict regex match → High confidence → deterministic termination.

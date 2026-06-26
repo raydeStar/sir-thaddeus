@@ -1108,7 +1108,9 @@ public class ScoringEngineTests
         var test = BasicTest(
             "strict_choice_contract",
             "Choose the best answer. A chi-square goodness-of-fit test is commonly used to compare: A) activation energy against pH B) observed counts against expected counts C) speed against distance without categories D) two DNA codons by mass only Reply with only A, B, C, or D.",
-            requiredKeywords: ["observed counts"]);
+            // Real multiple-choice fixtures carry the expected letter alongside
+            // the answer text, so a bare correct letter can be verified.
+            requiredKeywords: ["observed counts", "B"]);
 
         var response = new AgentResponse
         {
@@ -1124,6 +1126,65 @@ public class ScoringEngineTests
         Assert.Equal(0, score.HedgeRatio);
         Assert.Equal(0, score.RequiredKeywordsTotal);
         Assert.InRange(score.OverallScore, 0.85, 1.0);
+    }
+
+    [Fact]
+    public void Score_HardFailsStrictNumericAnswerWithWrongValue()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "strict_numeric_wrong",
+            "How many 5-person committees can be chosen from 12 people? Reply with only the integer.",
+            requiredKeywords: ["792"]);
+
+        var response = new AgentResponse { Text = "60", Success = true };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.False(score.Passed);
+        Assert.Equal(0.0, score.OverallScore);
+        Assert.Contains(score.DeterministicChecks, check =>
+            check.Name == "strict_answer_correct" && !check.Passed);
+        Assert.Contains(score.HardGateFailures, failure =>
+            failure.Contains("Strict answer is incorrect", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Score_PassesStrictNumericAnswerWithCorrectValue()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "strict_numeric_right",
+            "How many 5-person committees can be chosen from 12 people? Reply with only the integer.",
+            requiredKeywords: ["792"]);
+
+        var response = new AgentResponse { Text = "792", Success = true };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.True(score.Passed);
+        Assert.Contains(score.DeterministicChecks, check =>
+            check.Name == "strict_answer_correct" && check.Passed);
+        Assert.InRange(score.OverallScore, 0.85, 1.0);
+    }
+
+    [Fact]
+    public void Score_HardFailsStrictMultipleChoiceWithWrongLetter()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "strict_choice_wrong",
+            "Choose the best answer. A chi-square goodness-of-fit test compares: A) activation energy B) observed counts against expected counts C) speed against distance D) DNA codons by mass. Reply with only A, B, C, or D.",
+            requiredKeywords: ["observed counts", "B"]);
+
+        var response = new AgentResponse { Text = "A", Success = true };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.False(score.Passed);
+        Assert.Equal(0.0, score.OverallScore);
+        Assert.Contains(score.HardGateFailures, failure =>
+            failure.Contains("Strict answer is incorrect", StringComparison.OrdinalIgnoreCase));
     }
 
     private static HarnessTestCase BasicTest(

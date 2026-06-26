@@ -90,6 +90,15 @@ public sealed class UtilityFastPathStep : ITurnStep
         if (string.IsNullOrWhiteSpace(context.UserText))
             return Task.FromResult<StepResult>(new StepResult.Continue(context));
 
+        // Ablation seam: when ST_HARNESS_DISABLE_FASTPATH is set, every prompt
+        // skips the deterministic short-circuits below and is answered by the
+        // model + tool loop instead. This lets the benchmark harness measure
+        // the model's true ability (and quantify how much these pre-LLM
+        // solvers contribute) without changing default behavior. Unset → the
+        // normal fast-path runs exactly as before.
+        if (FastPathDisabledByHarness())
+            return Task.FromResult<StepResult>(new StepResult.Continue(context));
+
         if (TryMatchLiteralReplyContract(context.UserText) is { Length: > 0 } literalReply)
             return Task.FromResult<StepResult>(new StepResult.Terminate(
                 new AgentResponse
@@ -372,6 +381,14 @@ public sealed class UtilityFastPathStep : ITurnStep
                lower.Contains(" i've ", StringComparison.Ordinal) ||
                lower.Contains(" we ", StringComparison.Ordinal) ||
                lower.Contains(" our ", StringComparison.Ordinal);
+    }
+
+    private static bool FastPathDisabledByHarness()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_DISABLE_FASTPATH")?.Trim();
+        return string.Equals(raw, "1", StringComparison.Ordinal)
+            || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool HarnessAllowsMemoryRetrieve()

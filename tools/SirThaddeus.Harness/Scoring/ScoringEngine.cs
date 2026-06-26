@@ -394,14 +394,31 @@ public sealed class ScoringEngine
             }
         }
 
-        if (test.Expectations.RequiredKeywords.Count > 0 &&
-            !ShouldScoreAsStrictAnswerContract(test, final))
+        if (test.Expectations.RequiredKeywords.Count > 0)
         {
-            var missing = test.Expectations.RequiredKeywords
-                .Where(k => !Contains(final, k))
-                .ToList();
-            Add(checks, "required_keywords_present", missing.Count == 0, "warn",
-                missing.Count == 0 ? "Required keywords present." : $"Missing required keywords: {string.Join(", ", missing)}");
+            if (ShouldScoreAsStrictAnswerContract(test, final))
+            {
+                // Strict-answer items (a bare number or single letter) are
+                // exact-match: the terse answer is simply right or wrong, so
+                // correctness is a HARD gate, not a soft penalty. The style
+                // waiver still applies elsewhere, so a correct terse answer
+                // keeps full marks — but a wrong one now fails outright instead
+                // of scoring ~1.0 for merely being the right shape.
+                var correct = test.Expectations.RequiredKeywords
+                    .Any(keyword => StrictAnswerMatches(final, keyword));
+                Add(checks, "strict_answer_correct", correct, "hard",
+                    correct
+                        ? "Strict answer matches the expected value."
+                        : $"Strict answer is incorrect; expected one of: {string.Join(", ", test.Expectations.RequiredKeywords)}.");
+            }
+            else
+            {
+                var missing = test.Expectations.RequiredKeywords
+                    .Where(k => !Contains(final, k))
+                    .ToList();
+                Add(checks, "required_keywords_present", missing.Count == 0, "warn",
+                    missing.Count == 0 ? "Required keywords present." : $"Missing required keywords: {string.Join(", ", missing)}");
+            }
         }
 
         var forbidden = test.Expectations.ForbiddenKeywords.Concat(test.Expectations.ForbiddenPhrases)
@@ -605,6 +622,36 @@ public sealed class ScoringEngine
             return NumericAnswerPattern.IsMatch(trimmed);
 
         return false;
+    }
+
+    // Value comparison for strict bare answers (a number or single letter),
+    // tolerant of surrounding punctuation/quotes and thousands separators —
+    // NOT substring, so "376" never counts as "37".
+    private static bool StrictAnswerMatches(string final, string expected)
+    {
+        var actual = NormalizeStrictAnswer(final);
+        var want = NormalizeStrictAnswer(expected);
+        if (actual.Length == 0 || want.Length == 0)
+            return false;
+
+        // Numbers compare by value with a small relative tolerance, so the
+        // same number written at different precision (0.222222222222 vs
+        // 0.2222222222222222) matches while genuinely different values do not.
+        if (double.TryParse(actual, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var actualNumber) &&
+            double.TryParse(want, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var wantNumber))
+        {
+            var tolerance = 1e-6 * Math.Max(1.0, Math.Abs(wantNumber));
+            return Math.Abs(actualNumber - wantNumber) <= tolerance;
+        }
+
+        // Letters / non-numeric tokens compare exactly (case-insensitive).
+        return string.Equals(actual, want, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeStrictAnswer(string? value)
+    {
+        var text = (value ?? string.Empty).Trim().Trim('(', ')', '[', ']', '"', '\'', '`', '.', ' ');
+        return text.Replace(",", string.Empty).Trim();
     }
 
     private static double KeywordPenalty(HarnessTestCase test, string final)
