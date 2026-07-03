@@ -182,7 +182,23 @@ internal sealed class WorkflowChatRunCoordinator
             retryState.Evidence.AddRange(workflowState.Evidence);
             CaptureEvidence(retryState, retryResponse, "retry");
 
-            var retryConfidence = _confidenceEvaluator.Evaluate(retryState);
+            // Judge the retry on its OWN evidence, not the accumulated
+            // first+retry set. firstConfidence was computed on the first
+            // attempt's evidence alone, so the comparison must be
+            // like-for-like. Folding the first attempt's failed tool calls
+            // into the retry's score charges them a second time as
+            // contradictions — which means a retry that recovers from a
+            // tool error (fail → fix → correct answer) can never out-score
+            // the first attempt, and its correct answer gets discarded.
+            var retryOnlyState = new TaskRunState
+            {
+                Envelope = workflowState.Envelope,
+                DraftAnswer = retryResponse.Text,
+                RuntimeState = TaskLifecycleState.Retrying
+            };
+            CaptureEvidence(retryOnlyState, retryResponse, "retry");
+
+            var retryConfidence = _confidenceEvaluator.Evaluate(retryOnlyState);
             if (retryConfidence.Score >= firstConfidence.Score)
             {
                 selectedResponse = retryResponse;
