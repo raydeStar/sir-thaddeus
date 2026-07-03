@@ -437,7 +437,13 @@ public sealed class LmStudioAssistant : IAssistant
     /// footman, footman before the tool loop, post-process before the
     /// composer.
     /// </summary>
-    private ChatPipeline BuildTurnPipeline(IMcpToolClient mcp, IChatEventSink sink, IToolPermissionGate permissionGate)
+    /// <remarks>
+    /// <c>internal</c> (exposed to <c>Thaddeus.Runtime.Tests</c> via
+    /// <c>InternalsVisibleTo</c>) so composition tests can assert step order —
+    /// notably that <see cref="SelfConsistencyStep"/> sits immediately before
+    /// the tool loop — without spinning up a full turn.
+    /// </remarks>
+    internal ChatPipeline BuildTurnPipeline(IMcpToolClient mcp, IChatEventSink sink, IToolPermissionGate permissionGate)
     {
         var sanitize = new Func<TurnContext, string, string>((_, draft) =>
             AssistantResponseSanitizer.CleanChatReply(draft));
@@ -545,6 +551,18 @@ public sealed class LmStudioAssistant : IAssistant
             // so the model can't answer from stale training memory. The
             // soft hint above motivates; this enforces.
             new FreshnessRouterStep(),
+
+            // Self-consistency (opt-in via ST_SELF_CONSISTENCY=N): for strict-answer
+            // reasoning items, sample the model N times step-by-step and return the
+            // majority-vote answer — stabilizes the variance a single sample shows
+            // on multi-step problems. No-op when disabled or for non-strict prompts,
+            // so production behavior is byte-identical when ST_SELF_CONSISTENCY is
+            // unset. The tool loop is passed as an optional collaborator so tool-aware
+            // mode (ST_SELF_CONSISTENCY_TOOLS=1) can vote over full tool-loop runs for
+            // compute-bound problems. It stays inert unless that flag is also set.
+            // Mirrors BuildPipelineBackedOrchestrator so the desktop UI and the CLI
+            // harness exercise the same lever at the same pipeline position.
+            new SelfConsistencyStep(_llm, toolLoop: toolLoop),
 
             toolLoop,
             new PostProcessStep(sanitize, "PostProcess:Sanitize"),
