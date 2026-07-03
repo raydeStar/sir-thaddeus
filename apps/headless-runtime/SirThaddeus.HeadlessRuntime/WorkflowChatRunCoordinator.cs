@@ -124,6 +124,25 @@ internal sealed class WorkflowChatRunCoordinator
                 ShouldRetry = false
             };
         }
+        else if (firstResponse.FromConsensusVote)
+        {
+            // A self-consistency vote already sampled this answer N times and
+            // returned the majority. The confidence-gated retry would re-run the
+            // ENTIRE N-sample vote a second time behind a "please re-check"
+            // preamble — redundant work on exactly the turn that already spent
+            // the most compute, and a consensus answer does not get more
+            // reliable by voting again. Preserve it the same way the other
+            // deterministic responses above short-circuit the retry gate: raise
+            // the confidence floor + ShouldRetry=false so RetryGateEvaluator
+            // disallows the retry. Non-voted turns are untouched.
+            firstConfidence = new ConfidenceSnapshot
+            {
+                Score = Math.Max(firstConfidence.Score, 0.85),
+                Band = "High",
+                Summary = "Consensus-voted answer preserved without retry.",
+                ShouldRetry = false
+            };
+        }
         workflowState.LatestConfidence = firstConfidence;
         var selectedConfidence = firstConfidence;
 

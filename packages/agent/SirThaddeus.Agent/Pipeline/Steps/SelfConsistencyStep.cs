@@ -250,10 +250,18 @@ public sealed class SelfConsistencyStep : ITurnStep
         // tool calls (tool-aware path) so the response stays truthful about the
         // work the model actually did — the harness reconstructs the trace from
         // the audit log, but the response should not lie by omission.
+        //
+        // FromConsensusVote is set ONLY here — this is the one place a real
+        // majority vote produces the turn's answer. The workflow coordinator
+        // reads it to skip its confidence-gated retry: this answer was already
+        // voted from N independent samples, so re-running the whole vote with a
+        // "please re-check" preamble is redundant work on the turn that already
+        // spent the most compute.
         return new StepResult.Terminate(new AgentResponse
         {
             Text = vote.Answer,
             Success = true,
+            FromConsensusVote = true,
             ToolCallsMade = toolCallsMade is { Count: > 0 }
                 ? toolCallsMade
                 : Array.Empty<ToolCallRecord>(),

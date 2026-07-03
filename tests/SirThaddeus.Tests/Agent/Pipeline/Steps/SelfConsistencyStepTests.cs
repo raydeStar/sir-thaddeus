@@ -1,3 +1,4 @@
+using SirThaddeus.Agent;
 using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Pipeline.Steps;
 using SirThaddeus.LlmClient;
@@ -20,6 +21,52 @@ public sealed class SelfConsistencyStepTests
         var term = Assert.IsType<StepResult.Terminate>(result);
         Assert.Equal("42", term.Response.Text);
         Assert.Equal(3, llm.CallCount);
+    }
+
+    [Fact]
+    public async Task Vote_terminate_marks_response_FromConsensusVote()
+    {
+        // The flag is the coordinator's signal to skip its confidence-gated
+        // retry. It must be TRUE on the CoT vote Terminate — this is a real
+        // majority vote over N samples.
+        var llm = new QueueLlm(
+            "Final answer: 42",
+            "Final answer: 42",
+            "Final answer: 42");
+        var step = new SelfConsistencyStep(llm, samples: 3, samplingTemperature: 0.9);
+
+        var result = await step.ExecuteAsync(StrictNumericContext(), CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.True(term.Response.FromConsensusVote);
+    }
+
+    [Fact]
+    public async Task Tool_aware_vote_terminate_marks_response_FromConsensusVote()
+    {
+        // Same signal on the tool-aware vote Terminate path.
+        using var _ = new EnvScope("ST_SELF_CONSISTENCY_TOOLS", "1");
+        var toolLoop = new FakeToolLoop(
+            ContinueDraft("111"),
+            ContinueDraft("111"),
+            ContinueDraft("13"));
+        var step = new SelfConsistencyStep(new QueueLlm(), samples: 3, toolLoop: toolLoop);
+
+        var result = await step.ExecuteAsync(StrictNumericContextWithTools(), CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Equal("111", term.Response.Text);
+        Assert.True(term.Response.FromConsensusVote);
+    }
+
+    [Fact]
+    public void AgentResponse_FromConsensusVote_defaults_false()
+    {
+        // TRUTHFULNESS guard: the flag is set only by an actual vote Terminate,
+        // so a plain AgentResponse (any non-voted turn) must default it false.
+        var response = new AgentResponse { Text = "hello" };
+
+        Assert.False(response.FromConsensusVote);
     }
 
     [Fact]
