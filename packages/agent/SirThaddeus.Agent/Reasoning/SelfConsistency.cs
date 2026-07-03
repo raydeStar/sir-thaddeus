@@ -84,6 +84,19 @@ public static class SelfConsistency
         return new SelfConsistencyResult(winner, counts[winner], candidates.Count);
     }
 
+    /// <summary>True when the winning answer has enough agreement to safely
+    /// override the normal deterministic pipeline. Self-consistency is an
+    /// escalation, not an obligation: weak pluralities should fall through so a
+    /// reliable base model can keep its first-pass answer.</summary>
+    public static bool HasStrongConsensus(SelfConsistencyResult result, double minAgreement)
+    {
+        if (string.IsNullOrWhiteSpace(result.Answer) || result.Samples <= 0 || result.Votes <= 0)
+            return false;
+
+        var threshold = Math.Clamp(minAgreement, 0.5, 1.0);
+        return (double)result.Votes / result.Samples >= threshold;
+    }
+
     /// <summary>True when the majority winner can no longer change no matter
     /// what the remaining samples say — i.e. the leader's lead over the runner-up
     /// already exceeds the samples still to come. Lets the caller stop sampling

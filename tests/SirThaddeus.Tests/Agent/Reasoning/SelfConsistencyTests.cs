@@ -56,6 +56,21 @@ public class SelfConsistencyTests
         Assert.Equal(1, result.Votes);
     }
 
+    [Theory]
+    [InlineData(3, 3, 2.0 / 3.0, true)]
+    [InlineData(3, 5, 2.0 / 3.0, false)]
+    [InlineData(4, 5, 2.0 / 3.0, true)]
+    [InlineData(2, 5, 0.5, false)]
+    public void HasStrongConsensus_requires_configured_agreement(
+        int votes,
+        int samples,
+        double minAgreement,
+        bool expected)
+    {
+        var result = new SelfConsistencyResult("42", votes, samples);
+        Assert.Equal(expected, SelfConsistency.HasStrongConsensus(result, minAgreement));
+    }
+
     [Fact]
     public void MajorityLocked_true_when_lead_is_insurmountable()
     {

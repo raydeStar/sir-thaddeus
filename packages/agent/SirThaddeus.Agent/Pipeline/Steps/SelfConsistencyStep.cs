@@ -41,12 +41,18 @@ public sealed class SelfConsistencyStep : ITurnStep
     private readonly ILlmClient _llm;
     private readonly int _samples;
     private readonly double _samplingTemperature;
+    private readonly double _minAgreement;
 
-    public SelfConsistencyStep(ILlmClient llm, int? samples = null, double? samplingTemperature = null)
+    public SelfConsistencyStep(
+        ILlmClient llm,
+        int? samples = null,
+        double? samplingTemperature = null,
+        double? minAgreement = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _samples = samples ?? ReadConfiguredSampleCount();
         _samplingTemperature = samplingTemperature ?? ReadConfiguredTemperature();
+        _minAgreement = minAgreement ?? ReadConfiguredMinAgreement();
     }
 
     public string Name => "SelfConsistency";
@@ -105,6 +111,16 @@ public sealed class SelfConsistencyStep : ITurnStep
         var vote = SelfConsistency.Vote(samples, extract);
         if (string.IsNullOrWhiteSpace(vote.Answer))
             return new StepResult.Continue(context);
+        // Consensus gate (opt-in): when a positive threshold is configured and
+        // the winner's agreement falls short, fall through to the normal
+        // pipeline instead of overriding it. Measured on solver-probe the gate
+        // helps neither model as a default — the 1.2B lost a marginal-but-
+        // correct plurality win, and the 8B's bad samples agree with each
+        // other, sailing past any threshold — so it is OFF unless configured.
+        // SC itself is already per-model opt-in, which is the honest lever for
+        // models whose greedy answer is reliable.
+        if (_minAgreement > 0 && !SelfConsistency.HasStrongConsensus(vote, _minAgreement))
+            return new StepResult.Continue(context);
 
         // Strict-answer contract: emit just the winning value.
         return new StepResult.Terminate(new AgentResponse
@@ -153,5 +169,18 @@ public sealed class SelfConsistencyStep : ITurnStep
             && t is > 0 and <= 2.0
             ? t
             : 0.9;
+    }
+
+    // Optional agreement threshold before sampled reasoning may short-circuit
+    // the normal deterministic path (ST_SELF_CONSISTENCY_MIN_AGREEMENT,
+    // 0.5–1.0). Default 0 = gate off: plurality wins, which measured best for
+    // the small-model deployments SC is designed for.
+    private static double ReadConfiguredMinAgreement()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_SELF_CONSISTENCY_MIN_AGREEMENT");
+        return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            && value is >= 0.5 and <= 1.0
+            ? value
+            : 0;
     }
 }
