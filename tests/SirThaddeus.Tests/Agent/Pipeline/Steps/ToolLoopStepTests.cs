@@ -327,6 +327,152 @@ public class ToolLoopStepTests
     }
 
     [Fact]
+    public async Task Calculator_parse_error_nudges_model_to_retry_with_expression()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("calculator", "{\"expression\":\"sum of all positive multiples of 6 less than 50\"}"),
+            LlmReply.Tool("calculator", "{\"expression\":\"6+12+18+24+30+36+42+48\"}"),
+            LlmReply.Final("216"));
+        var mcp = new StubMcp((_, args) =>
+            args.Contains("6+12+18+24+30+36+42+48", StringComparison.Ordinal)
+                ? "{\"expression\":\"6+12+18+24+30+36+42+48\",\"result\":\"216\"}"
+                : "{\"error\":\"Could not evaluate expression: Error parsing the expression. The calculator only accepts a pure arithmetic expression, not prose or a word problem.\"}");
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = NewContext() with
+        {
+            UserText = "What is the sum of all positive multiples of 6 that are less than 50?",
+            LlmMessages =
+            [
+                ChatMessage.System("sys"),
+                ChatMessage.User("What is the sum of all positive multiples of 6 that are less than 50?"),
+            ],
+            ToolDefs =
+            [
+                new ToolDefinition { Function = new FunctionDefinition { Name = "calculator", Description = "calc", Parameters = new { } } },
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("216", cont.Next.AssistantDraft);
+        Assert.Equal(3, llm.ReceivedMessages.Count);
+        Assert.Contains(
+            llm.ReceivedMessages[1],
+            message => message.Role == "system" &&
+                (message.Content?.Contains("Call calculator again with only a pure expression", StringComparison.OrdinalIgnoreCase) ?? false));
+        Assert.Equal("calculator", llm.ForcedToolNames[1]);
+    }
+
+    [Fact]
+    public async Task Calculator_turn_adds_setup_hint_before_first_model_call()
+    {
+        var llm = new FakeLlm(LlmReply.Final("37"));
+        var step = BuildStep(llm);
+        var prompt = "Use the calculator tool for each arithmetic step. Let b1 = 2, b2 = 5, and b_n = b_{n-1} + 2b_{n-2} for n >= 3. What is b5? Reply with only the integer.";
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = new[] { ChatMessage.System("sys"), ChatMessage.User(prompt) },
+            ToolDefs = new[]
+            {
+                new ToolDefinition { Function = new FunctionDefinition { Name = "calculator", Description = "calc", Parameters = new { } } },
+            },
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var firstRound = Assert.Single(llm.ReceivedMessages);
+        Assert.Contains(
+            firstRound,
+            message => message.Role == "system" &&
+                (message.Content?.Contains("Preserve operand order exactly from formulas", StringComparison.OrdinalIgnoreCase) ?? false) &&
+                (message.Content?.Contains("recurrences or indexed sequences", StringComparison.OrdinalIgnoreCase) ?? false));
+    }
+
+    [Fact]
+    public async Task Strict_calculator_integer_turn_uses_latest_successful_tool_result()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("calculator", "{\"expression\":\"6+12+18+24+30+36+42+48\"}"),
+            LlmReply.Final("48"));
+        var mcp = new StubMcp(_ => "{\"expression\":\"6+12+18+24+30+36+42+48\",\"result\":\"216\"}");
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = NewContext() with
+        {
+            UserText = "Use the calculator tool to compute the arithmetic. What is the sum of all positive multiples of 6 that are less than 50? Reply with only the integer.",
+            LlmMessages =
+            [
+                ChatMessage.System("sys"),
+                ChatMessage.User("Use the calculator tool to compute the arithmetic. What is the sum of all positive multiples of 6 that are less than 50? Reply with only the integer."),
+            ],
+            ToolDefs =
+            [
+                new ToolDefinition { Function = new FunctionDefinition { Name = "calculator", Description = "calc", Parameters = new { } } },
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("216", cont.Next.AssistantDraft);
+    }
+
+    [Fact]
+    public async Task Strict_python_integer_turn_uses_latest_successful_stdout()
+    {
+        // Observed live: the model's second python attempt printed the correct
+        // 111 (exit 0) and the model still answered "1". The latest successful
+        // bare-number stdout must win the strict-integer turn.
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(collatz(27))\"}"),
+            LlmReply.Final("1"));
+        var mcp = new StubMcp(_ => "{\"stdout\":\"111\\n\",\"exit_code\":0}");
+        var step = BuildStep(llm, mcp: mcp);
+        var prompt = "Use the python_eval tool to compute this. Starting from 27, how many Collatz steps does it take to reach 1? Reply with only the integer.";
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs =
+            [
+                new ToolDefinition { Function = new FunctionDefinition { Name = "python_eval", Description = "sandbox", Parameters = new { } } },
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("111", cont.Next.AssistantDraft);
+    }
+
+    [Fact]
+    public async Task Failed_python_script_stdout_is_never_adopted_as_strict_answer()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(x)\"}"),
+            LlmReply.Final("42"));
+        var mcp = new StubMcp(_ => "{\"stdout\":\"13\\n\",\"stderr\":\"NameError\",\"exit_code\":1}");
+        var step = BuildStep(llm, mcp: mcp);
+        var prompt = "Use the python_eval tool to compute this. Reply with only the integer.";
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs =
+            [
+                new ToolDefinition { Function = new FunctionDefinition { Name = "python_eval", Description = "sandbox", Parameters = new { } } },
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Exit code 1 → the printed 13 is from a broken script; keep the model's draft.
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("42", cont.Next.AssistantDraft);
+    }
+
+    [Fact]
     public async Task Places_discover_success_builds_local_business_draft_without_second_llm_round()
     {
         var llm = new FakeLlm(
@@ -404,6 +550,7 @@ public class ToolLoopStepTests
         private readonly Queue<LlmReply> _replies;
         public List<int> MaxTokenOverrides { get; } = new();
         public List<string?> ForcedToolNames { get; } = new();
+        public List<IReadOnlyList<ChatMessage>> ReceivedMessages { get; } = new();
 
         public FakeLlm(params LlmReply[] replies) => _replies = new(replies);
 
@@ -411,9 +558,10 @@ public class ToolLoopStepTests
             IReadOnlyList<ChatMessage> messages,
             IReadOnlyList<ToolDefinition>? tools = null,
             CancellationToken cancellationToken = default) => Task.FromResult(
+                Record(messages,
                 _replies.Count > 0
                     ? _replies.Dequeue().ToResponse()
-                    : new LlmResponse { IsComplete = true, Content = "(ran out)", FinishReason = "stop" });
+                    : new LlmResponse { IsComplete = true, Content = "(ran out)", FinishReason = "stop" }));
 
         public Task<LlmResponse> ChatAsync(
             IReadOnlyList<ChatMessage> messages,
@@ -436,6 +584,12 @@ public class ToolLoopStepTests
 
         public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<string?>("fake-model");
+
+        private LlmResponse Record(IReadOnlyList<ChatMessage> messages, LlmResponse response)
+        {
+            ReceivedMessages.Add(messages.ToArray());
+            return response;
+        }
     }
 
     private abstract record LlmReply

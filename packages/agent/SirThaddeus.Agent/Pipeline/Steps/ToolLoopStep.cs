@@ -90,6 +90,14 @@ public sealed class ToolLoopStep : ITurnStep
         var lastCallOk = true;
         string? forcedToolForNextRound = null;
 
+        if (ShouldAddCalculatorSetupHint(context))
+        {
+            messages.Add(ChatMessage.System(
+                "For calculator math, set up the expression before calling the tool. " +
+                "Preserve operand order exactly from formulas. For recurrences or indexed sequences, " +
+                "label the previous terms first, then call calculator for each derived term."));
+        }
+
         for (var round = 0; round < _maxRoundTrips; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -174,6 +182,10 @@ public sealed class ToolLoopStep : ITurnStep
                 if (!string.IsNullOrWhiteSpace(currentTimeDraft))
                 {
                     assistantDraft = currentTimeDraft;
+                }
+                else if (TryBuildStrictComputeResultDraft(context.UserText, toolCallsMade) is { Length: > 0 } computeDraft)
+                {
+                    assistantDraft = computeDraft;
                 }
 
                 // Happy path — hand the draft off to the next step
@@ -363,6 +375,15 @@ public sealed class ToolLoopStep : ITurnStep
                         "The weather_geocode result is sufficient for a general-city weather request. " +
                         "Call weather_forecast next using the best matching coordinates; do not ask the user to confirm the city center."));
                     forcedToolForNextRound = ToolNames.WeatherForecast;
+                }
+
+                if (!outcome.Ok && LooksLikeCalculatorParseError(toolName, outcome.ResultText, outcome.Error))
+                {
+                    messages.Add(ChatMessage.System(
+                        "The calculator rejected the last call because it was prose, not arithmetic. " +
+                        "Call calculator again with only a pure expression made of numbers, operators, and supported functions. " +
+                        "For list/sum problems, enumerate the terms first; do not answer until a calculator call succeeds."));
+                    forcedToolForNextRound = toolName;
                 }
 
                 lastCallOk = outcome.Ok;
@@ -1126,6 +1147,89 @@ public sealed class ToolLoopStep : ITurnStep
             current = rewriter.Rewrite(context, toolName, current) ?? current;
         return current;
     }
+
+    private static bool LooksLikeCalculatorParseError(string toolName, string resultText, string? error) =>
+        string.Equals(toolName, "calculator", StringComparison.OrdinalIgnoreCase) &&
+        (ContainsCalculatorParseCue(resultText) || ContainsCalculatorParseCue(error));
+
+    private static bool ContainsCalculatorParseCue(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Contains("pure arithmetic expression", StringComparison.OrdinalIgnoreCase);
+
+    // Compute tools whose successful output IS the answer for a strict
+    // "reply with only the number" turn. Small models sometimes get the right
+    // value from their own tool call and then mistranscribe it in the final
+    // draft (observed: calculator returned 576, model answered 600; python
+    // printed 111, model answered 1). When the user explicitly directed the
+    // tool and demanded a bare number, the model's own latest successful
+    // computation wins over its transcription. The reasoning (expression /
+    // program construction) remains entirely the model's.
+    private static readonly string[] StrictComputeTools = ["calculator", "python_eval"];
+
+    private static string? TryBuildStrictComputeResultDraft(string? userText, IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        if (string.IsNullOrWhiteSpace(userText) ||
+            !Regex.IsMatch(userText, @"reply\s+with\s+only\s+the\s+(integer|number|value)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            return null;
+        }
+
+        foreach (var call in toolCallsMade.Reverse())
+        {
+            if (!call.Success)
+                continue;
+
+            var tool = StrictComputeTools.FirstOrDefault(t =>
+                string.Equals(call.ToolName, t, StringComparison.OrdinalIgnoreCase));
+            if (tool is null || !userText.Contains(tool, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(call.Result);
+
+                // Failed scripts return exit_code != 0 with Ok=true (the model
+                // is meant to read the traceback) — never treat those as answers.
+                if (doc.RootElement.TryGetProperty("exit_code", out var exitCode) &&
+                    exitCode.ValueKind == JsonValueKind.Number &&
+                    exitCode.GetInt32() != 0)
+                {
+                    continue;
+                }
+
+                string? value = null;
+                if (doc.RootElement.TryGetProperty("result", out var result) &&
+                    result.ValueKind == JsonValueKind.String)
+                {
+                    value = result.GetString();
+                }
+                else if (doc.RootElement.TryGetProperty("stdout", out var stdout) &&
+                         stdout.ValueKind == JsonValueKind.String)
+                {
+                    value = stdout.GetString()?.Trim();
+                }
+
+                // Only a bare numeric output is unambiguous enough to adopt.
+                if (!string.IsNullOrWhiteSpace(value) &&
+                    Regex.IsMatch(value, @"^-?\d+(?:\.\d+)?$", RegexOptions.CultureInvariant))
+                {
+                    return value;
+                }
+            }
+            catch (JsonException)
+            {
+                // Ignore malformed tool output and let the model draft stand.
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ShouldAddCalculatorSetupHint(TurnContext context) =>
+        !string.IsNullOrWhiteSpace(context.UserText) &&
+        context.UserText.Contains("calculator", StringComparison.OrdinalIgnoreCase) &&
+        context.ToolDefs.Any(tool =>
+            string.Equals(tool.Function?.Name, "calculator", StringComparison.OrdinalIgnoreCase));
 
     private async Task<ToolCallOutcome> ExecuteSingleCallAsync(
         TurnContext context,
