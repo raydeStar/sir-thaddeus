@@ -387,7 +387,10 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         // reasoning items, sample the model N times step-by-step and return the
         // majority-vote answer — stabilizes the variance a single sample shows
         // on multi-step problems. No-op when disabled or for non-strict prompts.
-        new SelfConsistencyStep(llm),
+        // The tool loop is passed as an optional collaborator so tool-aware mode
+        // (ST_SELF_CONSISTENCY_TOOLS=1) can vote over full tool-loop runs for
+        // compute-bound problems. It stays inert unless that flag is also set.
+        new SelfConsistencyStep(llm, toolLoop: toolLoop),
 
         toolLoop,
         new PostProcessStep(sanitize, "PostProcess:Sanitize"),
