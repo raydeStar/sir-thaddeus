@@ -119,6 +119,11 @@ public static class ToolGroupPolicy
         // own permission group.
         ["calculator"]             = "meta",
 
+        // Sandboxed compute — Docker container with no network, no host
+        // mounts, read-only rootfs, and hard resource caps, so like the
+        // calculator it is pure computation with no reachable side effects.
+        ["python_eval"]            = "meta",
+
         // Control-plane side effects
         ["audit.export_bundle"]    = "files",
         ["audit_export_bundle"]    = "files",

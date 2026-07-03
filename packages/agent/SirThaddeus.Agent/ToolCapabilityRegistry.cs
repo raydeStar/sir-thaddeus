@@ -153,7 +153,12 @@ public static class ToolCapabilityRegistry
             // Math — pure deterministic computation, no I/O or side effects, so
             // it shares the always-available meta capability class.
             ["calculator"] = ToolCapability.Meta,
-            ["Calculator"] = ToolCapability.Meta
+            ["Calculator"] = ToolCapability.Meta,
+
+            // Sandboxed compute — network-isolated, resource-capped container;
+            // pure computation like the calculator.
+            ["python_eval"] = ToolCapability.Meta,
+            ["PythonEval"] = ToolCapability.Meta
         };
 
     public static bool TryResolveCapability(string toolName, out ToolCapability capability)

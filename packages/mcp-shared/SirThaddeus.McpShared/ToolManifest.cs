@@ -759,6 +759,17 @@ public static class ToolManifest
 
         new()
         {
+            Name        = "python_eval",
+            Aliases     = ["PythonEval"],
+            Category    = "code",
+            ReadWrite   = "read",
+            Permission  = "none",
+            Description = "Runs a short Python 3 script in a network-isolated, resource-capped Docker sandbox and returns its printed output. The model writes the program; the sandbox computes it.",
+            Limits      = "No network or host filesystem; 256MB/1 CPU/64 pid caps; 20s timeout; script max 4000 chars; output truncated to 4000 chars."
+        },
+
+        new()
+        {
             Name        = "time_now",
             Aliases     = ["TimeNow"],
             Category    = "time",
