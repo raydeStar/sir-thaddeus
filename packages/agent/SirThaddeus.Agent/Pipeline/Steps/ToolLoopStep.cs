@@ -90,6 +90,17 @@ public sealed class ToolLoopStep : ITurnStep
         var lastCallOk = true;
         string? forcedToolForNextRound = null;
 
+        // Class-B "script mechanics" recovery (~61% of live compute failures):
+        // when a python_eval call errors or prints nothing, nudge the model to
+        // rewrite a proper multi-line script and force one more python_eval
+        // round. Capped so a genuinely broken problem can't spin the loop.
+        var pythonRepairNudges = 0;
+
+        // Class-C "answer selection" recovery (~24%): when a strict-compute turn
+        // ends with the model's own successful computations disagreeing, force
+        // exactly one reconciliation round before adopting a draft.
+        var reconciliationNudges = 0;
+
         if (ShouldAddCalculatorSetupHint(context))
         {
             messages.Add(ChatMessage.System(
@@ -176,6 +187,22 @@ public sealed class ToolLoopStep : ITurnStep
 
             if (response.ToolCalls is null || response.ToolCalls.Count == 0)
             {
+                // INTERVENTION 2 (class C, answer selection): on a strict-compute
+                // turn, if the model's OWN successful bare-numeric computations
+                // disagree, force exactly one reconciliation round before we let
+                // any draft stand. Purely mechanical — we only ever quote back
+                // the model's own tool outputs, never a recognized answer.
+                if (reconciliationNudges < 1 &&
+                    IsStrictComputeTurn(context.UserText) &&
+                    IsAdvertisedTool(context.ToolDefs, "python_eval") &&
+                    TryDescribeComputeDisagreement(context.UserText, toolCallsMade) is { Length: > 0 } disagreement)
+                {
+                    reconciliationNudges++;
+                    messages.Add(ChatMessage.System(disagreement));
+                    forcedToolForNextRound = "python_eval";
+                    continue;
+                }
+
                 var assistantDraft = response.Content ?? string.Empty;
                 var currentTimeDraft = TryBuildCurrentTimeInLocationDraft(context.UserText, toolCallsMade) ??
                                        ToolBackedResponseQualityGuards.TryBuildCurrentTimeInLocationFallback(context.UserText ?? string.Empty, toolCallsMade);
@@ -383,6 +410,25 @@ public sealed class ToolLoopStep : ITurnStep
                         "The calculator rejected the last call because it was prose, not arithmetic. " +
                         "Call calculator again with only a pure expression made of numbers, operators, and supported functions. " +
                         "For list/sum problems, enumerate the terms first; do not answer until a calculator call succeeds."));
+                    forcedToolForNextRound = toolName;
+                }
+
+                // INTERVENTION 1 (class B, script mechanics): a python_eval call
+                // that errored (exit_code != 0) or exited 0 with empty stdout is
+                // the dominant compute failure. Small models don't recover from
+                // the traceback — they fabricate an answer. Inject a targeted
+                // rewrite nudge and force python_eval next round. Capped at 2 per
+                // turn so a truly stuck problem can't spin the loop.
+                if (LooksLikePythonEvalTool(toolName) &&
+                    LooksLikeFailedOrEmptyPythonResult(outcome) &&
+                    pythonRepairNudges < 2)
+                {
+                    pythonRepairNudges++;
+                    messages.Add(ChatMessage.System(
+                        "Your python script failed or printed nothing. Rewrite it as a proper MULTI-LINE script: " +
+                        "use real newlines (never put the whole program on one physical line), " +
+                        "import only standard-library modules that actually exist, define every name you use, " +
+                        "and END with print(<final value>). Then call python_eval again."));
                     forcedToolForNextRound = toolName;
                 }
 
@@ -1156,25 +1202,85 @@ public sealed class ToolLoopStep : ITurnStep
         !string.IsNullOrWhiteSpace(value) &&
         value.Contains("pure arithmetic expression", StringComparison.OrdinalIgnoreCase);
 
+    private static bool LooksLikePythonEvalTool(string toolName) =>
+        string.Equals(toolName, "python_eval", StringComparison.OrdinalIgnoreCase);
+
+    // A python_eval call fails "mechanically" when the sandbox exited non-zero
+    // (SyntaxError, NameError, fake import, stray ')') OR the interpreter exited
+    // 0 but printed nothing (a script that computed but forgot its final print).
+    // Both leave the model with no usable value; it fabricates one otherwise.
+    private static bool LooksLikeFailedOrEmptyPythonResult(ToolCallOutcome outcome)
+    {
+        if (!outcome.Ok)
+            return true;
+
+        if (string.IsNullOrWhiteSpace(outcome.ResultText))
+            return true;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(outcome.ResultText);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return false;
+
+            if (root.TryGetProperty("exit_code", out var exitCode) &&
+                exitCode.ValueKind == JsonValueKind.Number &&
+                exitCode.GetInt32() != 0)
+            {
+                return true;
+            }
+
+            var stdout = root.TryGetProperty("stdout", out var stdoutEl) && stdoutEl.ValueKind == JsonValueKind.String
+                ? stdoutEl.GetString()
+                : null;
+            var hasResult = root.TryGetProperty("result", out var resultEl) &&
+                            resultEl.ValueKind == JsonValueKind.String &&
+                            !string.IsNullOrWhiteSpace(resultEl.GetString());
+
+            // Exit 0 with empty/whitespace stdout and no explicit result value:
+            // the script ran but produced no answer to read.
+            return !hasResult && string.IsNullOrWhiteSpace(stdout);
+        }
+        catch (JsonException)
+        {
+            // Non-JSON payloads from a successful call are unusual for the
+            // sandbox; leave them alone rather than guess at a repair.
+            return false;
+        }
+    }
+
+    // Strict-compute turn: the user explicitly directed a compute tool AND
+    // demanded a bare number ("reply with only the integer/number/value").
+    // Shared by the draft adoption and the reconciliation trigger so both
+    // always agree on which turns qualify.
+    private static bool IsStrictComputeTurn(string? userText) =>
+        !string.IsNullOrWhiteSpace(userText) &&
+        Regex.IsMatch(userText, @"reply\s+with\s+only\s+the\s+(integer|number|value)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) &&
+        StrictComputeTools.Any(tool => userText.Contains(tool, StringComparison.OrdinalIgnoreCase));
+
     // Compute tools whose successful output IS the answer for a strict
     // "reply with only the number" turn. Small models sometimes get the right
     // value from their own tool call and then mistranscribe it in the final
     // draft (observed: calculator returned 576, model answered 600; python
     // printed 111, model answered 1). When the user explicitly directed the
-    // tool and demanded a bare number, the model's own latest successful
-    // computation wins over its transcription. The reasoning (expression /
-    // program construction) remains entirely the model's.
+    // tool and demanded a bare number, the model's own successful computation
+    // wins over its transcription. The reasoning (expression / program
+    // construction) remains entirely the model's.
     private static readonly string[] StrictComputeTools = ["calculator", "python_eval"];
 
-    private static string? TryBuildStrictComputeResultDraft(string? userText, IReadOnlyList<ToolCallRecord> toolCallsMade)
+    // Every successful, bare-numeric result the model's own compute tools
+    // produced this turn, oldest→newest. Failed scripts (exit_code != 0) are
+    // excluded — their stdout is from a broken program, never an answer.
+    private static List<string> CollectSuccessfulComputeValues(
+        string? userText,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
     {
-        if (string.IsNullOrWhiteSpace(userText) ||
-            !Regex.IsMatch(userText, @"reply\s+with\s+only\s+the\s+(integer|number|value)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-        {
-            return null;
-        }
+        var values = new List<string>();
+        if (string.IsNullOrWhiteSpace(userText))
+            return values;
 
-        foreach (var call in toolCallsMade.Reverse())
+        foreach (var call in toolCallsMade)
         {
             if (!call.Success)
                 continue;
@@ -1184,45 +1290,111 @@ public sealed class ToolLoopStep : ITurnStep
             if (tool is null || !userText.Contains(tool, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            try
+            if (TryExtractBareNumericComputeValue(call.Result) is { Length: > 0 } value)
+                values.Add(value);
+        }
+
+        return values;
+    }
+
+    private static string? TryExtractBareNumericComputeValue(string? result)
+    {
+        if (string.IsNullOrWhiteSpace(result))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(result);
+
+            // Failed scripts return exit_code != 0 with Ok=true (the model
+            // is meant to read the traceback) — never treat those as answers.
+            if (doc.RootElement.TryGetProperty("exit_code", out var exitCode) &&
+                exitCode.ValueKind == JsonValueKind.Number &&
+                exitCode.GetInt32() != 0)
             {
-                using var doc = JsonDocument.Parse(call.Result);
-
-                // Failed scripts return exit_code != 0 with Ok=true (the model
-                // is meant to read the traceback) — never treat those as answers.
-                if (doc.RootElement.TryGetProperty("exit_code", out var exitCode) &&
-                    exitCode.ValueKind == JsonValueKind.Number &&
-                    exitCode.GetInt32() != 0)
-                {
-                    continue;
-                }
-
-                string? value = null;
-                if (doc.RootElement.TryGetProperty("result", out var result) &&
-                    result.ValueKind == JsonValueKind.String)
-                {
-                    value = result.GetString();
-                }
-                else if (doc.RootElement.TryGetProperty("stdout", out var stdout) &&
-                         stdout.ValueKind == JsonValueKind.String)
-                {
-                    value = stdout.GetString()?.Trim();
-                }
-
-                // Only a bare numeric output is unambiguous enough to adopt.
-                if (!string.IsNullOrWhiteSpace(value) &&
-                    Regex.IsMatch(value, @"^-?\d+(?:\.\d+)?$", RegexOptions.CultureInvariant))
-                {
-                    return value;
-                }
+                return null;
             }
-            catch (JsonException)
+
+            string? value = null;
+            if (doc.RootElement.TryGetProperty("result", out var resultEl) &&
+                resultEl.ValueKind == JsonValueKind.String)
             {
-                // Ignore malformed tool output and let the model draft stand.
+                value = resultEl.GetString();
             }
+            else if (doc.RootElement.TryGetProperty("stdout", out var stdoutEl) &&
+                     stdoutEl.ValueKind == JsonValueKind.String)
+            {
+                value = stdoutEl.GetString()?.Trim();
+            }
+
+            // Only a bare numeric output is unambiguous enough to adopt.
+            if (!string.IsNullOrWhiteSpace(value) &&
+                Regex.IsMatch(value, @"^-?\d+(?:\.\d+)?$", RegexOptions.CultureInvariant))
+            {
+                return value;
+            }
+        }
+        catch (JsonException)
+        {
+            // Ignore malformed tool output and let the model draft stand.
         }
 
         return null;
+    }
+
+    // Refactored per INTERVENTION 2: adopt the MAJORITY value among all the
+    // turn's successful bare-numeric compute results; ties break to the newest.
+    // (Previously newest-only, which let a subtly corrupted "verify" call
+    // clobber a correct first result.) Single or agreeing results behave
+    // exactly as before: the majority of one value, or of equal values, is
+    // that value.
+    private static string? TryBuildStrictComputeResultDraft(string? userText, IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        if (!IsStrictComputeTurn(userText))
+            return null;
+
+        var values = CollectSuccessfulComputeValues(userText, toolCallsMade);
+        return SelectMajorityThenNewest(values);
+    }
+
+    // Majority wins; on a tie the newest (last appended) of the tied values wins.
+    private static string? SelectMajorityThenNewest(IReadOnlyList<string> valuesOldestFirst)
+    {
+        if (valuesOldestFirst.Count == 0)
+            return null;
+
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var value in valuesOldestFirst)
+            counts[value] = counts.GetValueOrDefault(value) + 1;
+
+        var maxCount = counts.Values.Max();
+
+        // Walk newest→oldest and return the first value that hits the max
+        // count, so a tie resolves to the most recent computation.
+        for (var i = valuesOldestFirst.Count - 1; i >= 0; i--)
+        {
+            if (counts[valuesOldestFirst[i]] == maxCount)
+                return valuesOldestFirst[i];
+        }
+
+        return valuesOldestFirst[^1];
+    }
+
+    // INTERVENTION 2 trigger: names the disagreement when the turn's successful
+    // bare-numeric compute results contain >= 2 DISTINCT values. The message
+    // quotes back only the model's own outputs and asks for one clean script.
+    private static string? TryDescribeComputeDisagreement(
+        string? userText,
+        IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var values = CollectSuccessfulComputeValues(userText, toolCallsMade);
+        var distinct = values.Distinct(StringComparer.Ordinal).ToList();
+        if (distinct.Count < 2)
+            return null;
+
+        return $"Your computations returned different values: {string.Join(" and ", distinct)}. " +
+               "Write ONE careful, multi-line script that computes the answer from scratch, " +
+               "define every name you use, and print only the final value.";
     }
 
     private static bool ShouldAddCalculatorSetupHint(TurnContext context) =>
