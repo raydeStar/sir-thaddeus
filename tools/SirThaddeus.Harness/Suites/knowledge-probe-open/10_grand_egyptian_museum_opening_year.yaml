@@ -1,0 +1,29 @@
+# answers verified via web 2026-07-03; open-book lane — never compare to closed-book numbers
+id: probe_open_grand_egyptian_museum_opening_year
+name: Knowledge Probe (Open) - Grand Egyptian Museum Opening Year
+rubric_profile: general
+user_message: "Use the web_search tool to find this. In what year did the Grand Egyptian Museum near the Giza pyramids hold its official grand-opening inauguration ceremony? Reply with only the year."
+allowed_tools: [web_search]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - python_eval
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "2025"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/

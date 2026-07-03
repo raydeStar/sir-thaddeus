@@ -1,0 +1,29 @@
+# answers verified via web 2026-07-03; open-book lane — never compare to closed-book numbers
+id: probe_open_super_bowl_lix_mvp
+name: Knowledge Probe (Open) - Super Bowl LIX MVP
+rubric_profile: general
+user_message: "Use the web_search tool to find this. Which player was named Most Valuable Player of Super Bowl LIX, the February 2025 game the Philadelphia Eagles won 40-22 over the Kansas City Chiefs? Reply with only the player's full name."
+allowed_tools: [web_search]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - python_eval
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "Hurts"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/

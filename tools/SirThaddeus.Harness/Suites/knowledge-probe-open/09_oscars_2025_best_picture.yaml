@@ -1,0 +1,29 @@
+# answers verified via web 2026-07-03; open-book lane — never compare to closed-book numbers
+id: probe_open_oscars_2025_best_picture
+name: Knowledge Probe (Open) - 2025 Best Picture Oscar
+rubric_profile: general
+user_message: "Use the web_search tool to find this. Which film directed by Sean Baker won Best Picture at the 97th Academy Awards, the ceremony held in March 2025? Reply with only the film title."
+allowed_tools: [web_search]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - python_eval
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "Anora"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/
