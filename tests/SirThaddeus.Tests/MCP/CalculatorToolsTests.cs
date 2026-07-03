@@ -15,6 +15,7 @@ public class CalculatorToolsTests
     [InlineData("lcm(4, 6)", "12")]
     [InlineData("factorial(5)", "120")]
     [InlineData("5!", "120")]
+    [InlineData("sum(6, 12, 18, 24, 30, 36, 42, 48)", "216")]
     [InlineData("pow(2, 10)", "1024")]
     [InlineData("(9 + 4) * 3", "39")]
     [InlineData("abs(-7)", "7")]
@@ -35,5 +36,19 @@ public class CalculatorToolsTests
         var json = CalculatorTools.Calculator(expression);
         using var doc = JsonDocument.Parse(json);
         Assert.True(doc.RootElement.TryGetProperty("error", out _), $"expected error for '{expression}': {json}");
+    }
+
+    [Fact]
+    public void Calculator_error_guides_model_to_retry_with_arithmetic_expression()
+    {
+        var json = CalculatorTools.Calculator("sum of all positive multiples of 6 less than 50");
+        using var doc = JsonDocument.Parse(json);
+
+        var error = doc.RootElement.GetProperty("error").GetString();
+        Assert.Contains("pure arithmetic expression", error);
+        // The example must stay disjoint from benchmark fixtures (the probe item
+        // is multiples of 6 below 50) so guidance never doubles as an answer key.
+        Assert.Contains("4+8+12+16+20+24+28", error);
+        Assert.DoesNotContain("6+12+18+24+30+36+42+48", error);
     }
 }

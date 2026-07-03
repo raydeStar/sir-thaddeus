@@ -35,10 +35,10 @@ public static class CalculatorTools
         "Pass only digits, operators (+ - * / % ^), and the functions/constants " +
         "below — NOT words, a question, or a word problem. If the task is a word " +
         "problem, work out the numbers yourself first, then call this with just " +
-        "the arithmetic: e.g. for 'the sum of the multiples of 6 below 50', call " +
-        "it with \"6+12+18+24+30+36+42+48\". " +
+        "the arithmetic: e.g. for 'the sum of the multiples of 4 below 30', call " +
+        "it with \"4+8+12+16+20+24+28\". " +
         "Operators: + - * / % and ^ for powers. Functions: sqrt, cbrt, abs, " +
-        "round, floor, ceil, min, max, log, ln, log10, pow(a,b), factorial(n) " +
+        "round, floor, ceil, min, max, sum, log, ln, log10, pow(a,b), factorial(n) " +
         "or n!, comb(n,k) for combinations, perm(n,k) for permutations, " +
         "gcd(a,b), lcm(a,b). Constants: pi, e. " +
         "Examples: \"comb(12,5)\" returns 792; \"2^10 % 7\" returns 2; " +
@@ -66,7 +66,7 @@ public static class CalculatorTools
 
             var value = expr.Evaluate();
             if (expr.Error is not null)
-                return ErrorJson($"Could not evaluate expression: {expr.Error}");
+                return ErrorJson(BuildParseError(trimmed, expr.Error.Message));
 
             var formatted = FormatNumericAnswer(value);
             if (formatted is null)
@@ -76,11 +76,35 @@ public static class CalculatorTools
         }
         catch (Exception ex)
         {
-            return ErrorJson($"Could not evaluate expression: {ex.Message}");
+            return ErrorJson(BuildParseError(trimmed, ex.Message));
         }
     }
 
+    private static string BuildParseError(string expression, string detail)
+    {
+        var guidance =
+            "The calculator only accepts a pure arithmetic expression, not prose or a word problem. " +
+            "Translate the problem into numbers/operators/functions and retry with only that expression.";
+
+        if (LooksLikeNaturalLanguage(expression))
+        {
+            // Keep this example DISJOINT from any benchmark fixture — it teaches
+            // the translation move without handing over a fixture's answer.
+            guidance += " For a sum/count/list problem, enumerate the terms first; for example, " +
+                "the multiples of 4 below 30 should be passed as 4+8+12+16+20+24+28.";
+        }
+
+        return $"Could not evaluate expression: {detail}. {guidance}";
+    }
+
+    private static bool LooksLikeNaturalLanguage(string expression) =>
+        Regex.IsMatch(
+            expression,
+            @"\b(all|positive|multiple|multiples|less|than|below|sum|total|what|compute|find|people|choose|group)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     // n! → Factorial(n) (NCalc has no factorial operator).
+
     private static string RewriteFactorial(string input) =>
         Regex.Replace(input, @"(?<val>\d+(?:\.\d+)?|\([^()]+\))\s*!", "Factorial(${val})");
 
@@ -155,6 +179,18 @@ public static class CalculatorTools
             case "ceil":
                 if (TryArg(args, 0, out var ce)) args.Result = Math.Ceiling(ce);
                 break;
+            case "sum":
+                {
+                    double total = 0;
+                    for (var i = 0; i < args.Parameters.Length; i++)
+                    {
+                        if (!TryArg(args, i, out var value))
+                            return;
+                        total += value;
+                    }
+                    args.Result = total;
+                    break;
+                }
         }
     }
 
