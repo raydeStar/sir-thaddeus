@@ -1,164 +1,158 @@
 <div align="center">
-  <img src="assets/svg/banner.svg" alt="Sir Thaddeus — a private, local-first AI assistant for Windows" width="100%" />
+  <img src="assets/svg/banner.svg" alt="Sir Thaddeus — a private, local-first AI workspace for Windows" width="100%" />
 
-  <h1>Private, local-first AI for Windows</h1>
-
-  <p><strong>Your thoughts deserve a butler, not an audience.</strong></p>
+  <h1>Private AI that answers to you.</h1>
 
   <p>
-    Run your own models. Keep your own memory. Approve sensitive tools before they act.<br />
-    No account. No telemetry. No mystery background agent.
+    <strong>Run your model. Keep your memory. See every sensitive action before it happens.</strong><br />
+    A local-first AI assistant and knowledge workspace for Windows—without the account, telemetry, or invisible agent.
   </p>
 
   <p>
     <a href="https://github.com/raydeStar/sir-thaddeus/releases/latest"><strong>Download for Windows</strong></a>
     &nbsp;·&nbsp;
-    <a href="#quick-start">Quick Start</a>
+    <a href="#three-minutes-to-private-ai">Quick Start</a>
     &nbsp;·&nbsp;
-    <a href="#see-it-in-action">See It in Action</a>
+    <a href="#control-is-the-feature">How Control Works</a>
     &nbsp;·&nbsp;
-    <a href="#trust-model">Trust Model</a>
+    <a href="#measured-not-guessed">Benchmarks</a>
     &nbsp;·&nbsp;
-    <a href="https://github.com/raydeStar/sir-thaddeus">Star on GitHub</a>
+    <a href="https://github.com/raydeStar/sir-thaddeus">Star the Project</a>
   </p>
 
   <p>
-    <a href="https://github.com/raydeStar/sir-thaddeus/actions/workflows/ci-pr.yml">
-      <img src="https://github.com/raydeStar/sir-thaddeus/actions/workflows/ci-pr.yml/badge.svg?branch=master" alt="Sir Thaddeus CI status" />
-    </a>
-    <a href="https://github.com/raydeStar/sir-thaddeus/releases/latest">
-      <img src="https://img.shields.io/github/v/release/raydeStar/sir-thaddeus?color=blue&label=Release" alt="Latest Sir Thaddeus release" />
-    </a>
-    <a href="LICENSE">
-      <img src="https://img.shields.io/github/license/raydeStar/sir-thaddeus" alt="Apache 2.0 license" />
-    </a>
-    <img src="https://img.shields.io/badge/platform-Windows-0078D6" alt="Windows desktop app" />
-    <img src="https://img.shields.io/badge/telemetry-none-black" alt="No telemetry" />
-    <img src="https://img.shields.io/badge/MCP-tools-D97757" alt="Model Context Protocol tools" />
+    <a href="https://github.com/raydeStar/sir-thaddeus/actions/workflows/ci-pr.yml"><img src="https://github.com/raydeStar/sir-thaddeus/actions/workflows/ci-pr.yml/badge.svg?branch=master" alt="CI status" /></a>
+    <a href="https://github.com/raydeStar/sir-thaddeus/releases/latest"><img src="https://img.shields.io/github/v/release/raydeStar/sir-thaddeus?color=1B3F6E&label=release" alt="Latest release" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/raydeStar/sir-thaddeus?color=C9973E" alt="Apache 2.0 license" /></a>
+    <img src="https://img.shields.io/badge/platform-Windows-0078D6" alt="Windows" />
+    <img src="https://img.shields.io/badge/telemetry-none-111111" alt="No telemetry" />
+    <img src="https://img.shields.io/badge/tools-MCP-D97757" alt="MCP tools" />
   </p>
 </div>
 
-![A private local AI workstation with tools, documents, memory, and audit controls orbiting a secure desktop](assets/images/local-first-workspace.png)
+![A cinematic private AI workstation with local compute, a memory vault, permission controls, evidence, and a Sir Thaddeus crest](assets/images/local-first-workspace-v2.png)
 
-**Sir Thaddeus is an open-source, local-first AI assistant and private knowledge workspace for Windows.** Connect [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/), or another OpenAI-compatible model endpoint; chat with your model; search the web; work with files; build a Markdown wiki; and inspect the trail afterward. Sensitive capabilities run through explicit policies and visible permission prompts instead of silent access.
+**Sir Thaddeus is an open-source, local-first AI assistant for Windows.** Connect [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/), or another OpenAI-compatible endpoint, then give your model a private workspace: threaded chat, permissioned tools, durable memory, a Markdown wiki, routines, sources, traces, and an emergency stop.
 
-Use a local model with network tools disabled and the core workspace stays offline. Enable web tools or a hosted model only when you choose to.
+Use a model on your machine and leave network tools off to keep the core experience offline. Turn on web access or a hosted endpoint only when *you* decide the job needs it.
 
-## Why Sir Thaddeus?
-
-| Your model | Your data | Your permission | Your receipts |
+| **Your model** | **Your workspace** | **Your boundary** | **Your receipts** |
 | --- | --- | --- | --- |
-| Bring LM Studio, Ollama, or an OpenAI-compatible endpoint. | Threads, memory, settings, routines, and wiki pages live on your disk. | Set each capability group to **Off**, **Ask**, or **Always**, with per-tool overrides. | Inspect activity, tool outcomes, permission decisions, diagnostics, and per-turn traces. |
+| LM Studio, Ollama, or any compatible `/v1` endpoint. | Threads, memory, wiki, routines, and settings on your disk. | Capability groups set to **Off**, **Ask**, or **Always**, plus per-tool overrides. | Sources, outcomes, permission decisions, diagnostics, and per-turn traces. |
 
-This is for developers protecting source code, consultants protecting client work, and anyone who wants useful AI without surrendering the workspace around it.
+<a id="control-is-the-feature"></a>
+## Control Is the Feature
 
-<a id="see-it-in-action"></a>
-## See It in Action
+Most assistants ask for trust. Sir Thaddeus gives you a boundary you can inspect.
 
-### Permission before power
+![Permission, scoped action, and evidence flow in Sir Thaddeus](assets/svg/trust-flow.svg)
 
-When a protected capability is set to **Ask**, Sir Thaddeus pauses the turn and shows the exact tool, arguments, and available scope. Deny it, allow it once, allow it for the session, or remember the decision.
+<table>
+  <tr>
+    <td width="48%" valign="top">
+      <img src="assets/images/permission-decision.png" alt="Sir Thaddeus asking permission before a web search and showing the exact query" />
+    </td>
+    <td width="52%" valign="middle">
+      <h3>Nothing vague. Nothing buried.</h3>
+      <p>When a protected capability is set to <strong>Ask</strong>, the turn pauses. You see the tool, its arguments, and the scope of the decision.</p>
+      <ul>
+        <li><strong>Deny</strong> — stop this call.</li>
+        <li><strong>Allow once</strong> — approve only this action.</li>
+        <li><strong>For session</strong> — remember it until you leave.</li>
+        <li><strong>Always</strong> — update the visible policy.</li>
+      </ul>
+      <p>File, web, system, screen, and memory capabilities stay independently configurable. Individual tools can override their group.</p>
+    </td>
+  </tr>
+</table>
 
-<p align="center">
-  <img src="assets/images/permissions-gate.png" alt="Sir Thaddeus permission dialog asking before a location lookup, with Deny, Allow Once, Allow Session, and Always Allow choices" width="720" />
-</p>
+## Answers Should Show Their Work
 
-### Policies you can actually see
+Search results are not dumped into a footnote graveyard. Sir Thaddeus turns them into readable source cards with titles, domains, snippets, publication context, and one-click access—then keeps the tool outcome in the local trace.
 
-Network, file, system, screen, and memory capabilities have direct controls in Settings. Safe defaults stay legible; individual tools can override their group when you need precision.
+![Rich cited source cards in the Sir Thaddeus workspace](assets/images/source-cards.png)
 
-![Sir Thaddeus permission settings showing Off, Ask, and Always policies for capability groups](assets/images/permissions-settings.png)
+## More Than a Chat Window
 
-### Answers with evidence, not link confetti
-
-Search results become readable source cards with titles, domains, snippets, publication context, and one-click source access.
-
-![Sir Thaddeus cited source cards in a dark local AI workspace](assets/images/source-cards.png)
-
-## What You Can Do
-
-- **Chat with local models** — stream threaded conversations through LM Studio, Ollama, or another compatible endpoint.
-- **Use live information** — search the web, fetch pages, find places, check weather and time zones, read feeds, and look up holidays.
-- **Work with documents** — read scoped files and extract useful content from PDF, DOCX, XLSX, CSV, RTF, Markdown, and text files.
-- **Build a private knowledge base** — organize Markdown roots, folders, pages, revisions, search, imports, exports, and AI-assisted edits.
-- **Keep durable memory** — review, search, edit, and audit the facts your assistant can recall.
-- **Run repeatable routines** — turn recurring work into visible, reusable workflows.
-- **Debug the whole turn** — inspect activity, model/tool events, permission decisions, diagnostics, and trace data.
-- **Stop it immediately** — abort active turns and sidecar processes with explicit stop and kill controls.
-
-Voice, push-to-talk, tray integration, the compact panel, clipboard tools, and screen tools are available as beta features.
-
-<a id="quick-start"></a>
-## Quick Start
-
-### 1. Download
-
-1. Open the [latest Windows release](https://github.com/raydeStar/sir-thaddeus/releases/latest).
-2. Download the release ZIP and its checksum, then extract it.
-3. Run `Launch Sir Thaddeus.cmd` or `Thaddeus.Runtime.exe`.
-
-Windows may show SmartScreen while the app is unsigned. Verify the published checksum before running it. The [first-run guide](docs/FIRST_RUN.md) covers the setup wizard and local data paths.
-
-### 2. Connect a model
-
-Open **Settings → Models**, select a provider, enter its base URL, and test the connection.
-
-| Provider | Default base URL | Setup note |
+| Research | Private knowledge | Real work |
 | --- | --- | --- |
-| LM Studio | `http://127.0.0.1:1234/v1` | Load an instruction-tuned model and start the local server. |
-| Ollama | `http://127.0.0.1:11434/v1` | Pull and run a model; Sir Thaddeus uses Ollama's OpenAI-compatible API. |
-| Custom | Your `/v1` endpoint | Use any compatible local or hosted service. |
+| Web search, page fetch, places, weather, time zones, feeds, and holidays. | Durable memory plus a Markdown wiki with roots, folders, pages, revisions, search, import, export, and AI editing. | Scoped file reading for PDF, DOCX, XLSX, CSV, RTF, Markdown, and text; repeatable routines; system tools behind policy. |
+| **Inspectable** | **Model-flexible** | **Interruptible** |
+| Activity, diagnostics, audit events, permission decisions, and per-turn traces. | Local or hosted OpenAI-compatible models, with direct provider and context controls. | Stop active turns and kill sidecar work instead of hoping an agent eventually listens. |
 
-### 3. Choose the boundary
+Voice, ASR/TTS, push-to-talk, tray integration, the compact panel, clipboard tools, and screen tools are available as beta features.
 
-Open **Settings → Permissions**. Leave sensitive groups on **Ask**, switch unwanted capabilities **Off**, and enable silent access only where you trust it.
+<a id="three-minutes-to-private-ai"></a>
+## Three Minutes to Private AI
 
-## How It Works
+### 1. Launch
+
+Download the [latest Windows release](https://github.com/raydeStar/sir-thaddeus/releases/latest), verify the published checksum, extract it, and run `Launch Sir Thaddeus.cmd` or `Thaddeus.Runtime.exe`.
+
+### 2. Connect your model
+
+Open **Settings → Models** and test one of these endpoints:
+
+| Provider | Default base URL |
+| --- | --- |
+| LM Studio | `http://127.0.0.1:1234/v1` |
+| Ollama | `http://127.0.0.1:11434/v1` |
+| Custom | Your compatible `/v1` endpoint |
+
+### 3. Draw the line
+
+Open **Settings → Permissions**. Leave sensitive groups on **Ask**, turn unwanted capabilities **Off**, and allow silent access only where you trust it.
+
+Windows may show SmartScreen while release binaries remain unsigned. The [first-run guide](docs/FIRST_RUN.md) covers setup, local data paths, and backups.
+
+## Built Local-First, Not Painted Local Later
 
 ```mermaid
 flowchart LR
-    UI["Windows shell + React workspace"] -->|"per-launch token over loopback"| RT["Local .NET runtime"]
-    RT --> MODEL["LM Studio, Ollama, or compatible model"]
-    RT --> POLICY["Capability policy + permission gate"]
-    POLICY --> MCP["MCP tool process"]
+    UI["Windows shell + React workspace"] -->|"rotating token · loopback only"| RT["Local .NET runtime"]
+    RT --> MODEL["Your model endpoint"]
+    RT --> POLICY["Capability policy"]
+    POLICY -->|"Off · Ask · Always"| MCP["MCP process boundary"]
     MCP --> TOOLS["Web · files · memory · system"]
     RT --> DATA["Local threads · wiki · routines · traces"]
 ```
 
-The runtime binds to `127.0.0.1` on an ephemeral port. A bearer token rotates each launch. Tool execution crosses a separate MCP process boundary, and protected capabilities are resolved through their configured policy before execution. Read the [public architecture overview](docs/ARCHITECTURE_PUBLIC.md) for the complete boundary and its explicit non-promises.
+The runtime binds to `127.0.0.1` on an ephemeral port. A bearer token rotates each launch. Protected tool execution crosses a separate MCP process boundary and resolves the policy you configured before it runs. Read the [public architecture overview](docs/ARCHITECTURE_PUBLIC.md) for the full boundary and its explicit non-promises.
 
 <a id="measured-not-guessed"></a>
 ## Measured, Not Guessed
 
-Sir Thaddeus includes a benchmark harness because “agentic” is easy to claim and harder to prove. The harness value-grades answers across repeated runs, records failures, tests tool infrastructure before scoring it, and keeps negative results instead of polishing them away.
+“Agentic” is cheap copy. Sir Thaddeus ships the harness that can prove—or disprove—the claim.
 
-- A 1.2B local model scored **0/6** on a math probe unaided and **5/6** with the calculator tool.
-- A sandboxed `python_eval` tool moved a 20-item compute suite from roughly **0% to 43%**; the remaining misses exposed model reasoning limits rather than being hidden.
-- About **1,900 lines** of benchmark-specific shortcut solvers were removed so the harness exercises the real model and tool loop.
-- Strict items grade the actual value, not answer shape; a confidently wrong number fails.
-- A Docker sandbox canary aborts a broken run instead of misreporting infrastructure failures as model failures.
-- Majority-vote self-consistency was measured and rejected for the tested model family: it was flat on the Python suite at twice the cost and reduced MMLU-Pro from **37.9% to 27.9%**.
+| Probe | Without the tool | With the tool | What it proved |
+| --- | ---: | ---: | --- |
+| 1.2B model, six math tasks | **0 / 6** | **5 / 6** with `calculator` | The tool loop changes capability. |
+| 20-item compute suite | roughly **0%** | **43%** with `python_eval` | Tools help; model reasoning still sets the ceiling. |
+| MMLU-Pro self-consistency | **37.9%** | **27.9%** | More inference can make a small model worse. The feature stays off. |
 
-Run [`dev/model-intake.ps1`](dev/model-intake.ps1) to turn a new model into a scorecard and recommended configuration. The suites live under [`tools/SirThaddeus.Harness/Suites/`](tools/SirThaddeus.Harness/Suites/); the methodology is documented in [docs/TESTING.md](docs/TESTING.md).
+The scorer grades actual values, not answer shape. A Docker canary aborts broken sandbox runs instead of blaming the model. Roughly **1,900 lines** of benchmark-specific shortcut solvers were removed so the suite exercises the real model and tool pipeline.
+
+Run [`dev/model-intake.ps1`](dev/model-intake.ps1) to turn a new model into a scorecard and recommended configuration. See [docs/TESTING.md](docs/TESTING.md) for methodology and [`tools/SirThaddeus.Harness/Suites/`](tools/SirThaddeus.Harness/Suites/) for the probes.
 
 <a id="trust-model"></a>
-## Trust Model
+## The Trust Model, Without Hand-Waving
 
-| Promise | Concrete mechanism |
+| Promise | Mechanism |
 | --- | --- |
-| Local-first | The runtime listens on loopback, not the LAN. |
-| Per-launch access | A bearer token rotates on every launch; old tokens die with the process. |
-| Controlled tools | Protected capabilities resolve **Off**, **Ask**, or **Always** policies, with per-tool overrides. |
-| Scoped files | File access is constrained to user-configured roots and limits. |
+| Local-first | Runtime listens on loopback, not the LAN. |
+| Per-launch access | The bearer token rotates every launch. |
+| Controlled tools | Protected capabilities resolve **Off**, **Ask**, or **Always**, with per-tool overrides. |
+| Scoped files | File reads stay inside user-configured roots and limits. |
 | Auditability | Tool calls, permission decisions, outcomes, and turn events are recorded locally. |
 | Stop control | `/api/stop-all` aborts active turns and sidecar processes. |
 | No telemetry | No product analytics, crash reporting, or “anonymous” usage collection. |
 
-Sir Thaddeus is a local-first workspace, not a hardened multi-tenant security product. A local process running as you can still access data you can access. Review [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), and [DISCLAIMER.md](DISCLAIMER.md) before using it with sensitive work.
+Sir Thaddeus is a local-first personal workspace, not a hardened multi-tenant security product. A local process running as you can access what you can access. Review [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), and [DISCLAIMER.md](DISCLAIMER.md) before using it with sensitive work.
 
-## Build From Source
+<details>
+<summary><strong>Build from source</strong></summary>
 
-Requirements: Windows 10/11, the .NET SDK version pinned in [`global.json`](global.json), Node.js with npm, and PowerShell 5.1 or newer.
+Requirements: Windows 10/11, the .NET SDK pinned in [`global.json`](global.json), Node.js with npm, and PowerShell 5.1 or newer.
 
 ```powershell
 git clone https://github.com/raydeStar/sir-thaddeus.git
@@ -173,76 +167,64 @@ Pop-Location
 dotnet run --project src/Thaddeus.Shell/Thaddeus.Shell.csproj
 ```
 
-Common developer commands:
-
 ```powershell
-./dev/bootstrap.ps1                     # one-time environment setup + restore
+./dev/bootstrap.ps1                     # one-time setup + restore
 ./dev/test.ps1                          # local CI-equivalent test loop
 ./dev/harness.ps1 --all --judge none    # conversation-level validation
 ./dev/release-package.ps1 -Runtime win-x64
 ```
 
-See [docs/TESTING.md](docs/TESTING.md) for the full test guide and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for release packaging.
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for release packaging.
+</details>
 
-## Project Status
+<details>
+<summary><strong>Project status</strong></summary>
 
-- **Stable v1 core** — Windows shell, loopback runtime, React workspace, chat, history, settings, diagnostics, memory, routines, wiki, model configuration, MCP boundary, permission policies, activity, and audit surfaces.
+- **Stable v1 core** — Windows shell, loopback runtime, React workspace, chat, history, settings, memory, routines, wiki, model configuration, MCP boundary, permissions, activity, diagnostics, and audit surfaces.
 - **Beta** — voice, ASR/TTS, push-to-talk, tray integration, compact panel, clipboard tools, and screen tools.
-- **Planned** — a polished installer, auto-update, scheduled unattended automation, and cross-platform desktop parity.
+- **Planned** — polished installer, auto-update, scheduled unattended automation, and cross-platform desktop parity.
 
-The honest release boundary lives in [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+See [known limitations](docs/KNOWN_LIMITATIONS.md) and the [roadmap](docs/ROADMAP.md).
+</details>
 
 ## Frequently Asked Questions
 
 <details>
 <summary><strong>Can Sir Thaddeus run fully offline?</strong></summary>
 
-Yes. Use a model hosted on your machine and leave network-capable tools disabled. The app does not require a Sir Thaddeus cloud account and does not send telemetry. Web tools and hosted model endpoints naturally require network access when you enable them.
+Yes. Use a model hosted on your machine and leave network-capable tools disabled. The app requires no Sir Thaddeus cloud account and sends no telemetry. Web tools and hosted models naturally use the network when you enable them.
 </details>
 
 <details>
-<summary><strong>Which local AI servers are supported?</strong></summary>
+<summary><strong>Which local model servers are supported?</strong></summary>
 
 LM Studio and Ollama have first-class presets. Any service exposing a compatible OpenAI-style `/v1` API can also be configured.
 </details>
 
 <details>
-<summary><strong>Does every tool pop up a permission dialog?</strong></summary>
+<summary><strong>Does every tool produce a permission popup?</strong></summary>
 
-No. Protected capability groups follow the policy you choose: **Off** blocks, **Ask** prompts, and **Always** allows. Safe metadata operations may run without a prompt. Individual tools can override their group policy.
+No. Protected capability groups follow your policy: **Off** blocks, **Ask** prompts, and **Always** allows. Safe metadata operations may run without a prompt. Individual tools can override their group.
 </details>
 
 <details>
 <summary><strong>Where is my data stored?</strong></summary>
 
-Threads, workspace state, memory, wiki content, settings, routines, logs, and traces are stored locally. See [docs/FIRST_RUN.md](docs/FIRST_RUN.md) for the current paths and backup guidance.
+Threads, workspace state, memory, wiki content, settings, routines, logs, and traces stay local. The [first-run guide](docs/FIRST_RUN.md) lists current paths and backup guidance.
 </details>
 
-<details>
-<summary><strong>How is this different from a cloud chatbot?</strong></summary>
+## Make Your Model Yours
 
-Sir Thaddeus is the workspace around your model: local state, explicit tool boundaries, inspectable execution, durable memory, a wiki, routines, diagnostics, and stop controls. You choose whether the model itself is local or hosted.
-</details>
-
-## Documentation
-
-Start with the [documentation index](docs/README.md), or jump directly to:
-
-- [First run](docs/FIRST_RUN.md)
-- [Public architecture](docs/ARCHITECTURE_PUBLIC.md)
-- [Testing and benchmark harness](docs/TESTING.md)
-- [Known limitations](docs/KNOWN_LIMITATIONS.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Release notes](CHANGELOG.md)
-
-## Try It
+The model is only half the product. The boundary, memory, tools, evidence, and stop button are what turn it into a workspace you can own.
 
 1. **[Download the latest Windows release](https://github.com/raydeStar/sir-thaddeus/releases/latest).**
-2. Point it at LM Studio, Ollama, or your own compatible endpoint.
-3. Ask it to use a protected tool and watch the permission boundary become visible.
+2. Connect LM Studio, Ollama, or your own compatible endpoint.
+3. Ask for live information and watch the permission boundary do its job.
 
-If something feels off, [open an issue](https://github.com/raydeStar/sir-thaddeus/issues). If this is the kind of AI ownership you want to see more of, [star the repository](https://github.com/raydeStar/sir-thaddeus).
+If something feels wrong, [open an issue](https://github.com/raydeStar/sir-thaddeus/issues). If this is the future you want local AI to have, [star Sir Thaddeus](https://github.com/raydeStar/sir-thaddeus).
 
-## Contributing and License
+## Documentation, Contributing, and License
+
+[Documentation](docs/README.md) · [First run](docs/FIRST_RUN.md) · [Architecture](docs/ARCHITECTURE_PUBLIC.md) · [Testing](docs/TESTING.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md)
 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [SECURITY.md](SECURITY.md) for vulnerability reporting. Sir Thaddeus is licensed under the [Apache License 2.0](LICENSE).
