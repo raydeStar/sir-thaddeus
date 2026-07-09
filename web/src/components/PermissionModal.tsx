@@ -3,6 +3,16 @@ import { AlertTriangle, Globe, FolderOpen, Monitor, Terminal, BookOpen, Pencil, 
 import { usePermissionsStore } from '../stores/permissionsStore';
 import type { PermissionResponse } from '../lib/permissionsApi';
 
+/**
+ * Local record of the scope checkbox for the prompt it was toggled on.
+ * Keyed by request id so the choice resets to the request's own default
+ * whenever a different prompt reaches the head of the queue.
+ */
+interface ScopeChoice {
+  id: string;
+  group: boolean;
+}
+
 const groupMeta: Record<string, { label: string; icon: typeof Shield; blurb: string }> = {
   Screen: { label: 'Screen', icon: Monitor, blurb: 'Capture a screenshot or inspect the active window.' },
   Files: { label: 'Files', icon: FolderOpen, blurb: 'Read local files and directory listings.' },
@@ -23,11 +33,22 @@ export function PermissionModal() {
   const queue = usePermissionsStore((s) => s.queue);
   const resolve = usePermissionsStore((s) => s.resolve);
   const [submitting, setSubmitting] = useState<PermissionResponse | null>(null);
+  const [scopeChoice, setScopeChoice] = useState<ScopeChoice | null>(null);
 
   useEffect(() => { start(); }, [start]);
 
   const current = queue[0];
   const queued = queue.length;
+
+  // Checked = apply the decision group-wide. Defaults from the request's own
+  // scope (missing scope = 'group'); a manual toggle only sticks for the
+  // request it was made on.
+  const groupScope =
+    current && scopeChoice?.id === current.id
+      ? scopeChoice.group
+      : current
+        ? current.scope !== 'tool'
+        : true;
 
   const prettyArgs = useMemo(() => {
     if (!current) return '';
@@ -51,7 +72,7 @@ export function PermissionModal() {
     if (submitting) return;
     setSubmitting(decision);
     try {
-      await resolve(current.id, decision);
+      await resolve(current.id, decision, groupScope ? 'group' : 'tool');
     } finally {
       setSubmitting(null);
     }
@@ -102,6 +123,24 @@ export function PermissionModal() {
           </pre>
         </div>
 
+        <label className="mt-4 flex cursor-pointer items-start gap-2.5">
+          <input
+            type="checkbox"
+            data-testid="permission-scope-checkbox"
+            checked={groupScope}
+            onChange={(e) => setScopeChoice({ id: current.id, group: e.target.checked })}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-line accent-accent"
+          />
+          <span className="min-w-0">
+            <span className="block text-[13px] font-medium text-ink">
+              Apply to all {meta.label} tools
+            </span>
+            <span className="mt-0.5 block text-[11px] text-ink-subtle">
+              Deny and Allow once always apply to this call only.
+            </span>
+          </span>
+        </label>
+
         <div className="mt-5 flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -143,7 +182,7 @@ export function PermissionModal() {
           </button>
         </div>
         <p className="mt-3 text-center text-[11px] text-ink-subtle">
-          "Always" updates your Settings for this category. You can change it in Settings → General → Privacy.
+          "Always" updates your Settings for this category. You can change it in Settings → Permissions.
         </p>
       </div>
     </div>

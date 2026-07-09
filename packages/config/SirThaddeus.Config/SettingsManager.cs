@@ -379,7 +379,8 @@ public static class SettingsManager
                     System = NormalizePolicy(mcpPerms.System),
                     Web = NormalizePolicy(mcpPerms.Web),
                     MemoryRead = NormalizePolicy(mcpPerms.MemoryRead),
-                    MemoryWrite = NormalizePolicy(mcpPerms.MemoryWrite)
+                    MemoryWrite = NormalizePolicy(mcpPerms.MemoryWrite),
+                    ToolOverrides = NormalizeToolOverrides(mcpPerms.ToolOverrides)
                 }
             },
             WebSearch = webSearch with
@@ -615,6 +616,29 @@ public static class SettingsManager
             "always" => "always",
             _ => "none"   // "off" normalizes to "none" — use per-group settings to disable individual groups
         };
+    }
+
+    /// <summary>
+    /// Normalizes the optional per-tool override map: trims + lowercases keys
+    /// (canonical snake_case tool names), keeps only valid {off, ask, always}
+    /// values, dedupes case-insensitively, and collapses an empty result to
+    /// null so serialization (WhenWritingNull) never emits "toolOverrides": {}.
+    /// </summary>
+    private static Dictionary<string, string>? NormalizeToolOverrides(
+        Dictionary<string, string>? raw)
+    {
+        if (raw is null || raw.Count == 0) return null;
+
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in raw)
+        {
+            if (string.IsNullOrWhiteSpace(kvp.Key)) continue;
+            var value = (kvp.Value ?? "").Trim().ToLowerInvariant();
+            if (value is not ("off" or "ask" or "always")) continue;
+            result[kvp.Key.Trim().ToLowerInvariant()] = value;
+        }
+
+        return result.Count == 0 ? null : result;
     }
 
     private static string NormalizeReasoningGuardrails(string? value, string fallback)

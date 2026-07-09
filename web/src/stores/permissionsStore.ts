@@ -4,6 +4,7 @@ import {
   respondToPermission,
   type PendingPermission,
   type PermissionResponse,
+  type PermissionScope,
 } from '../lib/permissionsApi';
 import { subscribeWsEvents } from '../lib/wsEvents';
 
@@ -17,16 +18,21 @@ import { subscribeWsEvents } from '../lib/wsEvents';
 interface PermissionsStoreState {
   queue: PendingPermission[];
   start: () => void;
-  resolve: (id: string, decision: PermissionResponse) => Promise<void>;
+  resolve: (id: string, decision: PermissionResponse, scope?: PermissionScope) => Promise<void>;
   dismiss: (id: string) => void;
 }
 
 let unsubscribe: (() => void) | null = null;
 let started = false;
 
+/** Older runtimes omit `scope`; treat anything but 'tool' as 'group'. */
+function withScopeDefault(req: PendingPermission): PendingPermission {
+  return { ...req, scope: req.scope === 'tool' ? 'tool' : 'group' };
+}
+
 function enqueueUnique(queue: PendingPermission[], req: PendingPermission): PendingPermission[] {
   if (queue.some((q) => q.id === req.id)) return queue;
-  return [...queue, req];
+  return [...queue, withScopeDefault(req)];
 }
 
 export const usePermissionsStore = create<PermissionsStoreState>((set, get) => ({
@@ -62,13 +68,13 @@ export const usePermissionsStore = create<PermissionsStoreState>((set, get) => (
     });
   },
 
-  resolve: async (id, decision) => {
+  resolve: async (id, decision, scope) => {
     // Optimistically drop from the queue so the modal closes immediately.
     // If the POST fails we re-queue from whatever the server reports.
     const prior = get().queue;
     set({ queue: prior.filter((q) => q.id !== id) });
     try {
-      await respondToPermission(id, decision);
+      await respondToPermission(id, decision, scope);
     } catch (err) {
       // Roll back — let the user try again.
       console.warn('[permissions] respond failed', err);

@@ -733,6 +733,18 @@ public sealed record McpPermissionsSettings
     /// </summary>
     [JsonPropertyName("memoryWrite")]
     public string MemoryWrite { get; init; } = "ask";
+
+    /// <summary>
+    /// Optional per-tool overrides layered over the per-group policies. Maps a
+    /// canonical (snake_case) tool name to "off" / "ask" / "always"; a tool
+    /// absent from the map inherits its group's effective policy. Most-specific
+    /// wins — a per-tool override beats both the group policy and the developer
+    /// override — but the safety force-offs (SafeMode / PanicMode /
+    /// sensitiveRead per-call / memory-master-off) always win over it. Null or
+    /// empty when unset.
+    /// </summary>
+    [JsonPropertyName("toolOverrides")]
+    public Dictionary<string, string>? ToolOverrides { get; init; }
 }
 
 /// <summary>

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
+using SirThaddeus.Agent;
 using Thaddeus.Runtime.Events;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.SharedTypes;
@@ -58,6 +60,13 @@ public sealed class ToolPermissionGate
     // the group is explicitly denied / Alwaysed via the modal.
     private readonly ConcurrentDictionary<ToolGroup, bool> _sessionAllow = new();
 
+    // Per-tool session cache, keyed by canonical (snake_case) tool name.
+    // Populated when a user answers a tool-scoped "ask" prompt with Session
+    // (or Always). Independent of the group cache: an explicit per-tool "ask"
+    // must keep prompting even when the whole group was session-granted.
+    private readonly ConcurrentDictionary<string, bool> _sessionAllowTool =
+        new(StringComparer.OrdinalIgnoreCase);
+
     // Pending ask requests keyed by request id. The UI pulls from GET
     // /api/permissions/pending and resolves with POST /api/permissions/respond.
     private readonly ConcurrentDictionary<string, PendingRequest> _pending = new();
@@ -82,11 +91,15 @@ public sealed class ToolPermissionGate
     }
 
     /// <summary>
-    /// Drops every cached "Session" approval. Used by the harness reset
-    /// endpoint between tests so a prior test's granted group never
-    /// auto-approves the next test's tool calls.
+    /// Drops every cached "Session" approval — both group- and tool-scoped.
+    /// Used by the harness reset endpoint between tests so a prior test's
+    /// granted group or tool never auto-approves the next test's tool calls.
     /// </summary>
-    public void ClearSessionGrants() => _sessionAllow.Clear();
+    public void ClearSessionGrants()
+    {
+        _sessionAllow.Clear();
+        _sessionAllowTool.Clear();
+    }
 
     public async Task<ToolPermissionDecision> DecideAsync(
         string toolName,
@@ -98,7 +111,12 @@ public sealed class ToolPermissionGate
         var group = ToolGroupClassifier.Classify(toolName);
         if (group == ToolGroup.Safe) return ToolPermissionDecision.Allow;
 
+        var canonical = AuditedMcpToolClient.Canonicalize(toolName);
+
         var doc = await _settings.GetAsync(ct).ConfigureAwait(false);
+
+        // Safety mode beats every static override, including a per-tool
+        // "always": offline mode hard-denies the Web group.
         if (doc.Privacy.OfflineMode && group == ToolGroup.Web)
         {
             _logger.LogInformation(
@@ -107,6 +125,30 @@ public sealed class ToolPermissionGate
             return ToolPermissionDecision.Deny;
         }
 
+        // Per-tool override layer (most-specific wins). Consulted before the
+        // group session cache and the group policy.
+        var toolOverride = ToolGroupPolicy.ResolveToolOverride(doc.Permissions?.ToolOverrides, canonical);
+        switch (toolOverride)
+        {
+            case "off":
+                _logger.LogInformation(
+                    "tool.permission.denied_by_tool_override tool={Tool} group={Group}",
+                    canonical, group);
+                return ToolPermissionDecision.Deny;
+            case "always":
+                return ToolPermissionDecision.Allow;
+            case "ask":
+                // Explicit per-tool "ask" must prompt even when the group was
+                // session-granted — skip the group cache entirely and consult
+                // only the per-tool session cache.
+                if (_sessionAllowTool.TryGetValue(canonical, out var toolCached) && toolCached)
+                    return ToolPermissionDecision.Allow;
+                return await AskUserAsync(
+                    toolName, canonical, argumentsJson, threadId, turnId, group, "tool", ct)
+                    .ConfigureAwait(false);
+        }
+
+        // No per-tool override — fall back to group-level resolution.
         // Session shortcut: if the user approved the group earlier this
         // process, skip the prompt. Offline mode is checked above so it
         // always wins over stale session grants.
@@ -126,18 +168,30 @@ public sealed class ToolPermissionGate
                 return ToolPermissionDecision.Deny;
         }
 
-        // Policy == "ask" — open a prompt and wait.
-        return await AskUserAsync(toolName, argumentsJson, threadId, turnId, group, ct)
+        // Policy == "ask" — open a group-scoped prompt and wait.
+        return await AskUserAsync(
+            toolName, canonical, argumentsJson, threadId, turnId, group, "group", ct)
             .ConfigureAwait(false);
     }
 
     /// <summary>
     /// Called by the REST endpoint when the user answers a prompt. Returns
     /// true if the id matched a live request.
+    ///
+    /// <para><paramref name="scope"/> selects where a Session/Always grant is
+    /// recorded: <c>"group"</c> (default, back-compat) upgrades the whole
+    /// capability group exactly as before; <c>"tool"</c> records the decision
+    /// against the single canonical tool the prompt was raised for. The scope
+    /// carried by the response is honored regardless of the prompt's own
+    /// <see cref="PendingPermission.Scope"/> — a user may answer a per-tool
+    /// prompt with a group-wide grant, or vice versa. Deny/Once never
+    /// persist and never cache, for either scope.</para>
     /// </summary>
-    public bool Respond(string id, ToolPermissionResponse decision)
+    public bool Respond(string id, ToolPermissionResponse decision, string scope = "group")
     {
         if (!_pending.TryRemove(id, out var pending)) return false;
+
+        var toolScoped = string.Equals(scope, "tool", StringComparison.OrdinalIgnoreCase);
 
         switch (decision)
         {
@@ -148,12 +202,21 @@ public sealed class ToolPermissionGate
                 pending.Completion.TrySetResult(ToolPermissionDecision.Allow);
                 break;
             case ToolPermissionResponse.Session:
-                _sessionAllow[pending.Group] = true;
+                if (toolScoped) _sessionAllowTool[pending.Canonical] = true;
+                else _sessionAllow[pending.Group] = true;
                 pending.Completion.TrySetResult(ToolPermissionDecision.Allow);
                 break;
             case ToolPermissionResponse.Always:
-                _sessionAllow[pending.Group] = true;
-                _ = PersistAlwaysAsync(pending.Group); // fire-and-forget
+                if (toolScoped)
+                {
+                    _sessionAllowTool[pending.Canonical] = true;
+                    _ = PersistToolAlwaysAsync(pending.Canonical); // fire-and-forget
+                }
+                else
+                {
+                    _sessionAllow[pending.Group] = true;
+                    _ = PersistAlwaysAsync(pending.Group); // fire-and-forget
+                }
                 pending.Completion.TrySetResult(ToolPermissionDecision.Allow);
                 break;
         }
@@ -165,10 +228,12 @@ public sealed class ToolPermissionGate
 
     private async Task<ToolPermissionDecision> AskUserAsync(
         string toolName,
+        string canonical,
         string argumentsJson,
         string threadId,
         string turnId,
         ToolGroup group,
+        string scope,
         CancellationToken ct)
     {
         var id = Guid.NewGuid().ToString("N");
@@ -177,6 +242,7 @@ public sealed class ToolPermissionGate
         var pending = new PendingRequest(
             Id: id,
             Group: group,
+            Canonical: canonical,
             Completion: tcs,
             Snapshot: new PendingPermission(
                 Id: id,
@@ -185,7 +251,8 @@ public sealed class ToolPermissionGate
                 ArgsJson: Trim(argumentsJson, 2_000),
                 ThreadId: threadId,
                 TurnId: turnId,
-                CreatedAt: DateTimeOffset.UtcNow),
+                CreatedAt: DateTimeOffset.UtcNow,
+                Scope: scope),
             CreatedAt: DateTimeOffset.UtcNow);
         _pending[id] = pending;
 
@@ -236,6 +303,124 @@ public sealed class ToolPermissionGate
         }
     }
 
+    /// <summary>
+    /// Persists a per-tool "always" override for the given canonical tool
+    /// name. Copy-on-write: builds a brand-new override dictionary so the
+    /// cached settings instance is never mutated in place.
+    /// </summary>
+    private async Task PersistToolAlwaysAsync(string canonical)
+    {
+        try
+        {
+            var current = await _settings.GetAsync(CancellationToken.None).ConfigureAwait(false);
+            var existing = current.Permissions ?? new PermissionsSettings(
+                DeveloperOverride: "none",
+                Screen: "ask", Files: "ask", System: "ask", Web: "ask",
+                MemoryRead: "always", MemoryWrite: "ask");
+
+            // Copy-on-write a fresh dictionary; never touch the cached one.
+            var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (existing.ToolOverrides is not null)
+            {
+                foreach (var kvp in existing.ToolOverrides)
+                    merged[kvp.Key] = kvp.Value;
+            }
+
+            if (merged.TryGetValue(canonical, out var alreadySet) &&
+                string.Equals(alreadySet, "always", StringComparison.OrdinalIgnoreCase))
+            {
+                return; // no change needed
+            }
+
+            merged[canonical] = "always";
+
+            var next = current with { Permissions = existing with { ToolOverrides = merged } };
+            await _settings.ReplaceAsync(next, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "tool.permission.persist_tool_failed tool={Tool}", canonical);
+        }
+    }
+
+    /// <summary>
+    /// Builds the static permission catalog for GET /api/permissions/catalog.
+    /// Enumerates every mapped MCP tool, canonicalizes + de-duplicates to
+    /// snake_case names, classifies each with the runtime's
+    /// <see cref="ToolGroupClassifier"/> (the enforcement truth), excludes the
+    /// Safe/meta group (those never prompt), and reports each tool's explicit
+    /// override plus its statically-resolved effective policy. Dynamic safety
+    /// modes (offline / panic / safe) are intentionally NOT factored into
+    /// <c>effective</c>.
+    /// </summary>
+    public PermissionCatalog BuildCatalog(SettingsDocument doc)
+    {
+        var permissions = doc.Permissions;
+        var developerOverride = (permissions?.DeveloperOverride ?? "none").Trim().ToLowerInvariant();
+
+        // Canonical snake_case tool name → its enforced group. De-dupe so each
+        // canonical name appears once even though the registry holds both
+        // snake_case and PascalCase aliases.
+        var canonicalToGroup = new Dictionary<string, ToolGroup>(StringComparer.OrdinalIgnoreCase);
+        foreach (var toolName in ToolCapabilityRegistry.GetMappings().Keys)
+        {
+            var canonical = AuditedMcpToolClient.Canonicalize(toolName);
+            var group = ToolGroupClassifier.Classify(canonical);
+            if (group == ToolGroup.Safe) continue; // never prompts — excluded
+            canonicalToGroup[canonical] = group;
+        }
+
+        var groups = new List<PermissionCatalogGroup>(CatalogGroupOrder.Count);
+        foreach (var (group, key) in CatalogGroupOrder)
+        {
+            var policy = ResolveGroupPolicy(permissions, group);
+
+            var tools = canonicalToGroup
+                .Where(kvp => kvp.Value == group)
+                .Select(kvp => kvp.Key)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .Select(name =>
+                {
+                    var over = ToolGroupPolicy.ResolveToolOverride(permissions?.ToolOverrides, name);
+                    var effective = over ?? ResolveEffectivePolicy(permissions, group);
+                    return new PermissionCatalogTool(name, over, effective);
+                })
+                .ToArray();
+
+            groups.Add(new PermissionCatalogGroup(key, policy, tools));
+        }
+
+        return new PermissionCatalog(developerOverride, groups);
+    }
+
+    // Fixed group order + camelCase keys for stable catalog output.
+    private static readonly IReadOnlyList<(ToolGroup Group, string Key)> CatalogGroupOrder =
+        new (ToolGroup, string)[]
+        {
+            (ToolGroup.Screen, "screen"),
+            (ToolGroup.Files, "files"),
+            (ToolGroup.System, "system"),
+            (ToolGroup.Web, "web"),
+            (ToolGroup.MemoryRead, "memoryRead"),
+            (ToolGroup.MemoryWrite, "memoryWrite"),
+        };
+
+    /// <summary>Raw per-group configured policy from settings (no override applied).</summary>
+    private static string ResolveGroupPolicy(PermissionsSettings? settings, ToolGroup group)
+    {
+        if (settings is null) return "ask";
+        return group switch
+        {
+            ToolGroup.Screen => settings.Screen,
+            ToolGroup.Files => settings.Files,
+            ToolGroup.System => settings.System,
+            ToolGroup.Web => settings.Web,
+            ToolGroup.MemoryRead => settings.MemoryRead,
+            ToolGroup.MemoryWrite => settings.MemoryWrite,
+            _ => "ask",
+        };
+    }
+
     private static string ResolveEffectivePolicy(PermissionsSettings? settings, ToolGroup group)
     {
         if (settings is null) return "ask";
@@ -269,6 +454,7 @@ public sealed class ToolPermissionGate
     private sealed record PendingRequest(
         string Id,
         ToolGroup Group,
+        string Canonical,
         TaskCompletionSource<ToolPermissionDecision> Completion,
         PendingPermission Snapshot,
         DateTimeOffset CreatedAt);
@@ -282,4 +468,28 @@ public sealed record PendingPermission(
     string ArgsJson,
     string ThreadId,
     string TurnId,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    // "group" (the prompt was raised for the whole capability group) or
+    // "tool" (an explicit per-tool "ask" override). The UI uses this to pick
+    // a default response scope; the response may still override it.
+    string Scope = "group");
+
+/// <summary>Wire format for GET /api/permissions/catalog.</summary>
+public sealed record PermissionCatalog(
+    string DeveloperOverride,
+    IReadOnlyList<PermissionCatalogGroup> Groups);
+
+/// <summary>A capability group and its per-tool rows in the catalog.</summary>
+public sealed record PermissionCatalogGroup(
+    string Key,
+    string Policy,
+    IReadOnlyList<PermissionCatalogTool> Tools);
+
+/// <summary>A single tool row in the catalog: its explicit override (or null) and static effective policy.</summary>
+public sealed record PermissionCatalogTool(
+    string Name,
+    // Force serialization even when null so the wire shape always carries
+    // "override": null (the pinned contract the web client builds against),
+    // overriding the context-level WhenWritingNull.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Override,
+    string Effective);

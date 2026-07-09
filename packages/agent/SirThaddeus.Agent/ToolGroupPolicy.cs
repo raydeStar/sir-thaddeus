@@ -26,6 +26,13 @@ public sealed record PolicySnapshot
     public required bool   PanicModeEnabled   { get; init; }
     public required bool   SafeModeEnabled    { get; init; }
     public required string UnknownToolDefault  { get; init; }
+
+    /// <summary>
+    /// Optional per-tool overrides keyed by canonical (snake_case) tool name.
+    /// Values are normalized to "off" / "ask" / "always"; a tool absent from
+    /// the map inherits its group's effective policy. Null when unset.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ToolOverrides { get; init; }
 }
 
 /// <summary>
@@ -177,8 +184,16 @@ public static class ToolGroupPolicy
     /// Computes the effective policy for a group given the current snapshot.
     /// Applies developer override for dangerous groups, memory master off
     /// for memory groups, and the unknown-tool default.
+    ///
+    /// <para>The optional <paramref name="perToolOverride"/> is the
+    /// already-normalized per-tool override ("off" / "ask" / "always") for
+    /// the specific tool being resolved, or null to inherit the group. It
+    /// cascades over the developer override and group policy, but sits BELOW
+    /// the safety force-offs (safe / panic / per-call-only / memory-master)
+    /// which always win — a per-tool override can never loosen those.</para>
     /// </summary>
-    public static string ResolveEffectivePolicy(string group, PolicySnapshot snapshot)
+    public static string ResolveEffectivePolicy(
+        string group, PolicySnapshot snapshot, string? perToolOverride = null)
     {
         // Safe mode fail-closed: no MCP tools should execute.
         if (snapshot.SafeModeEnabled)
@@ -193,7 +208,8 @@ public static class ToolGroupPolicy
         if (group == "meta")
             return "always";
 
-        // Sensitive read tools (e.g., clipboard_read) always prompt.
+        // Sensitive read tools (e.g., clipboard_read) always prompt —
+        // a per-tool override cannot loosen or persist these.
         if (PerCallOnlyGroups.Contains(group))
             return "ask";
 
@@ -201,6 +217,11 @@ public static class ToolGroupPolicy
         if (!snapshot.MemoryEnabled &&
             (group == "memoryRead" || group == "memoryWrite"))
             return "off";
+
+        // Per-tool override wins over both developer override and group policy.
+        var normalizedToolOverride = NormalizeOverrideValue(perToolOverride);
+        if (normalizedToolOverride is not null)
+            return normalizedToolOverride;
 
         // Developer override applies to all overridable groups
         if (OverridableGroups.Contains(group) && snapshot.DeveloperOverride != "none")
@@ -212,6 +233,51 @@ public static class ToolGroupPolicy
 
         // Unknown tool default
         return snapshot.UnknownToolDefault;
+    }
+
+    /// <summary>
+    /// Normalizes a raw per-tool override value to one of "off" / "ask" /
+    /// "always", or null (meaning "inherit the group"). Unlike group
+    /// policies, an unrecognized/empty value is NOT defaulted to "ask" — an
+    /// absent or invalid override simply means the tool inherits its group.
+    /// This is the single source of truth for valid-override semantics; both
+    /// permission gates route through it.
+    /// </summary>
+    public static string? NormalizeOverrideValue(string? raw)
+    {
+        return (raw ?? "").Trim().ToLowerInvariant() switch
+        {
+            "off" => "off",
+            "ask" => "ask",
+            "always" => "always",
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Looks up the normalized per-tool override for a canonical tool name in
+    /// the given override map (case-insensitive), or null when absent/invalid.
+    /// Shared by the runtime gate, the headless gate, and the catalog builder
+    /// so lookup + normalization semantics never diverge.
+    /// </summary>
+    public static string? ResolveToolOverride(
+        IReadOnlyDictionary<string, string>? overrides, string? canonicalToolName)
+    {
+        if (overrides is null || overrides.Count == 0) return null;
+        if (string.IsNullOrWhiteSpace(canonicalToolName)) return null;
+
+        if (overrides.TryGetValue(canonicalToolName, out var raw))
+            return NormalizeOverrideValue(raw);
+
+        // Fall back to a case-insensitive scan for maps that were not built
+        // with an OrdinalIgnoreCase comparer.
+        foreach (var kvp in overrides)
+        {
+            if (string.Equals(kvp.Key, canonicalToolName, StringComparison.OrdinalIgnoreCase))
+                return NormalizeOverrideValue(kvp.Value);
+        }
+
+        return null;
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -246,7 +312,8 @@ public static class ToolGroupPolicy
             MemoryEnabled      = settings.Memory.Enabled,
             PanicModeEnabled   = settings.RuntimeSafety.PanicMode,
             SafeModeEnabled    = settings.RuntimeSafety.SafeMode,
-            UnknownToolDefault = isDebugBuild ? "ask" : "off"
+            UnknownToolDefault = isDebugBuild ? "ask" : "off",
+            ToolOverrides      = NormalizeToolOverrides(perms.ToolOverrides)
         };
     }
 
@@ -355,5 +422,28 @@ public static class ToolGroupPolicy
             "always" => "always",
             _        => "none"   // "off" normalizes to "none" — use per-group settings to disable individual groups
         };
+    }
+
+    /// <summary>
+    /// Normalizes a raw per-tool override map for the snapshot: trims and
+    /// lowercases keys (canonical tool names are snake_case), keeps only
+    /// valid {off, ask, always} values, and returns null when nothing
+    /// survives so the snapshot carries a clean absent state.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string>? NormalizeToolOverrides(
+        IReadOnlyDictionary<string, string>? raw)
+    {
+        if (raw is null || raw.Count == 0) return null;
+
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in raw)
+        {
+            if (string.IsNullOrWhiteSpace(kvp.Key)) continue;
+            var value = NormalizeOverrideValue(kvp.Value);
+            if (value is null) continue;
+            result[kvp.Key.Trim().ToLowerInvariant()] = value;
+        }
+
+        return result.Count == 0 ? null : result;
     }
 }

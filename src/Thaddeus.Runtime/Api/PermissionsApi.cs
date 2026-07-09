@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Thaddeus.Runtime.Settings;
 using Thaddeus.Runtime.Tools;
 
 namespace Thaddeus.Runtime.Api;
@@ -12,7 +13,10 @@ namespace Thaddeus.Runtime.Api;
 ///   <item><c>GET /api/permissions/pending</c> — snapshot of outstanding prompts,
 ///         so the UI can re-sync after a reload.</item>
 ///   <item><c>POST /api/permissions/respond</c> — submit the user's choice
-///         (deny / once / session / always) for a given prompt id.</item>
+///         (deny / once / session / always) for a given prompt id, optionally
+///         scoped to the single tool ("tool") or the whole group ("group").</item>
+///   <item><c>GET /api/permissions/catalog</c> — the static per-tool
+///         permission catalog (group policy, per-tool override, effective).</item>
 /// </list>
 /// The push side lives on the existing <c>/ws</c> channel via the
 /// <c>permission.request</c> and <c>permission.resolved</c> event types.
@@ -36,13 +40,36 @@ public static class PermissionsApi
             if (!TryParseDecision(req.Decision, out var decision))
                 return Results.BadRequest(new { error = $"unknown decision '{req.Decision}'" });
 
-            var matched = gate.Respond(req.Id, decision);
+            if (!TryNormalizeScope(req.Scope, out var scope))
+                return Results.BadRequest(new { error = $"unknown scope '{req.Scope}'" });
+
+            var matched = gate.Respond(req.Id, decision, scope);
             return matched
                 ? Results.Ok(new { applied = true })
                 : Results.NotFound(new { error = "permission request not found (already resolved or cancelled)" });
         });
 
+        app.MapGet("/api/permissions/catalog",
+            async (ToolPermissionGate gate, ISettingsStore store, CancellationToken ct) =>
+        {
+            var doc = await store.GetAsync(ct).ConfigureAwait(false);
+            return Results.Json(
+                gate.BuildCatalog(doc),
+                PermissionsJsonContext.Default.PermissionCatalog);
+        });
+
         return app;
+    }
+
+    private static bool TryNormalizeScope(string? value, out string scope)
+    {
+        switch ((value ?? "").Trim().ToLowerInvariant())
+        {
+            case "":         scope = "group"; return true; // absent → group (back-compat)
+            case "group":    scope = "group"; return true;
+            case "tool":     scope = "tool"; return true;
+            default:         scope = "group"; return false;
+        }
     }
 
     private static bool TryParseDecision(string value, out ToolPermissionResponse decision)
@@ -60,7 +87,7 @@ public static class PermissionsApi
 
 public sealed record PendingPermissionsResponse(IReadOnlyList<PendingPermission> Requests);
 
-public sealed record RespondToPermissionRequest(string Id, string Decision);
+public sealed record RespondToPermissionRequest(string Id, string Decision, string? Scope = null);
 
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
@@ -69,6 +96,9 @@ public sealed record RespondToPermissionRequest(string Id, string Decision);
 [JsonSerializable(typeof(PendingPermissionsResponse))]
 [JsonSerializable(typeof(PendingPermission))]
 [JsonSerializable(typeof(RespondToPermissionRequest))]
+[JsonSerializable(typeof(PermissionCatalog))]
+[JsonSerializable(typeof(PermissionCatalogGroup))]
+[JsonSerializable(typeof(PermissionCatalogTool))]
 public partial class PermissionsJsonContext : JsonSerializerContext
 {
 }

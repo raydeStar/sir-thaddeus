@@ -20,6 +20,7 @@ import {
   Plug,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Sliders,
   Square,
   Terminal,
@@ -75,17 +76,19 @@ import type {
   FilesSettings,
 } from '@thaddeus/shared-types';
 import { ModuleSettingsPanel } from '../components/modules/ModuleSettingsPanel';
+import { PermissionsTab } from '../components/settings/PermissionsTab';
 
 export const Route = createFileRoute('/settings')({
   component: SettingsRoute,
 });
 
-type TabId = 'general' | 'models' | 'audio' | 'files' | 'location' | 'modules' | 'logs' | 'advanced';
+type TabId = 'general' | 'permissions' | 'models' | 'audio' | 'files' | 'location' | 'modules' | 'logs' | 'advanced';
 type LogPaneId = 'traces' | 'runtime';
 type TraceViewMode = 'events' | 'raw';
 
 const TABS: ReadonlyArray<{ id: TabId; label: string; icon: typeof Cog }> = [
   { id: 'general', label: 'General', icon: Cog },
+  { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
   { id: 'models', label: 'Models', icon: Sliders },
   { id: 'audio', label: 'Audio & Voice', icon: Headphones },
   { id: 'files', label: 'Files', icon: FolderOpen },
@@ -352,6 +355,9 @@ function SettingsRoute() {
           <div className="mt-10 pb-32">
             {activeTab === 'general' ? (
               <GeneralTab doc={doc} setDoc={setDoc} />
+            ) : null}
+            {activeTab === 'permissions' ? (
+              <PermissionsTab doc={doc} setDoc={setDoc} />
             ) : null}
             {activeTab === 'models' ? (
               <ModelsTab

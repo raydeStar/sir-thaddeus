@@ -381,6 +381,9 @@ public sealed record GatekeeperStatusResponse(
 [JsonSerializable(typeof(TestLlmRequest))]
 [JsonSerializable(typeof(TestLlmResponse))]
 [JsonSerializable(typeof(GatekeeperStatusResponse))]
+// Per-tool overrides map on PermissionsSettings — register the concrete
+// dictionary so the source generator emits converter metadata for it.
+[JsonSerializable(typeof(Dictionary<string, string>))]
 public partial class SettingsJsonContext : JsonSerializerContext
 {
 }

@@ -85,6 +85,15 @@ public sealed record PrivacySettings(
 /// (screen/files/system/web) only; valid values are <c>none</c>, <c>off</c>,
 /// <c>ask</c>, <c>always</c>. It does NOT affect memory groups — those stay
 /// under their explicit per-group value.
+///
+/// <para><see cref="ToolOverrides"/> is an optional per-tool layer that
+/// cascades over the per-group policy. It maps a canonical snake_case tool
+/// name to <c>off</c> / <c>ask</c> / <c>always</c>; a tool absent from the
+/// map inherits its group's effective policy. Resolution is most-specific
+/// wins: a per-tool override beats the group policy (and the developer
+/// override) so a single tool can be turned off even when its whole group is
+/// <c>always</c>. Dynamic safety modes (offline / panic / safe) still beat
+/// every static override. Absent/empty is serialized as omitted.</para>
 /// </summary>
 public sealed record PermissionsSettings(
     string DeveloperOverride,
@@ -93,7 +102,12 @@ public sealed record PermissionsSettings(
     string System,
     string Web,
     string MemoryRead,
-    string MemoryWrite);
+    string MemoryWrite,
+    // Concrete Dictionary (not IReadOnlyDictionary) so the STJ source
+    // generator that roots SettingsDocument emits converter metadata for it.
+    // CamelCase naming policy does not transform dictionary keys, so the
+    // canonical snake_case tool names round-trip verbatim.
+    Dictionary<string, string>? ToolOverrides = null);
 
 /// <summary>
 /// Local-filesystem access policy. Every path a file tool touches must be
