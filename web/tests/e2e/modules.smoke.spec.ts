@@ -138,8 +138,16 @@ test.describe('modules smoke', () => {
     await expect(page.getByTestId('data-sources-panel')).toContainText('Health Pack');
 
     await page.getByRole('button', { name: 'Provider Status' }).click();
-    await expect(page.getByText('Status')).toBeVisible();
-    await expect(page.getByText('google-health')).toBeVisible();
-    await expect(page.getByText('auth_required', { exact: true })).toBeVisible();
+    // Scope to the health panel and match the result row's <dt> exactly: a
+    // bare getByText('Status') also matches the "Provider Status" button, a
+    // strict-mode violation.
+    // Assert the summarized result cells exactly. Non-exact matches are
+    // ambiguous here: "Status" also hits the "Provider Status" button, and
+    // "google-health"/"auth_required" also appear inside the raw-JSON <pre>
+    // fallback that renders below the summary.
+    const healthPanel = page.getByTestId('data-health-panel');
+    await expect(healthPanel.getByText('Status', { exact: true })).toBeVisible();
+    await expect(healthPanel.getByText('google-health', { exact: true })).toBeVisible();
+    await expect(healthPanel.getByText('auth_required', { exact: true })).toBeVisible();
   });
 });
