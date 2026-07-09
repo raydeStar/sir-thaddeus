@@ -21,6 +21,8 @@ test.describe('settings smoke', () => {
     const pttInput = page.getByTestId('settings-shortcut-ptt');
     await pttInput.fill('Ctrl+Alt+M');
 
+    // Privacy toggles now live under the Permissions tab (right after General).
+    await page.getByTestId('settings-tab-permissions').click();
     const localOnly = page.getByTestId('settings-privacy-local-only');
     const wasChecked = await localOnly.isChecked();
     const localOnlySwitch = page.getByRole('switch', { name: 'Local-only mode' });
@@ -48,6 +50,7 @@ test.describe('settings smoke', () => {
     await page.reload();
     await expect(page.getByTestId('settings-form')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('settings-shortcut-ptt')).toHaveValue('Ctrl+Alt+M');
+    await page.getByTestId('settings-tab-permissions').click();
     if (wasChecked) await expect(page.getByTestId('settings-privacy-local-only')).not.toBeChecked();
     else await expect(page.getByTestId('settings-privacy-local-only')).toBeChecked();
     await page.getByTestId('settings-tab-models').click();
