@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -41,7 +41,7 @@ jobs:
           global-json-file: global.json
 
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nuget/packages
@@ -83,7 +83,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -93,7 +93,7 @@ jobs:
           global-json-file: global.json
 
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nuget/packages
@@ -141,7 +141,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -151,7 +151,7 @@ jobs:
           global-json-file: global.json
 
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nuget/packages
@@ -183,7 +183,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -193,7 +193,7 @@ jobs:
           global-json-file: global.json
 
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nuget/packages

@@ -40,7 +40,7 @@ jobs:
           - tool-contracts
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -50,7 +50,7 @@ jobs:
           global-json-file: global.json
 
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nuget/packages
@@ -99,7 +99,7 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -109,7 +109,7 @@ jobs:
           global-json-file: global.json
 
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nuget/packages
@@ -139,7 +139,7 @@ jobs:
     if: github.event_name == 'schedule' || github.event.inputs.suite == ''
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -149,7 +149,7 @@ jobs:
           global-json-file: global.json
 
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nuget/packages
@@ -189,7 +189,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           lfs: false
 
