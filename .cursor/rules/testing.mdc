@@ -25,4 +25,4 @@ alwaysApply: true
 - Do NOT add new tests unless explicitly asked.
 - Do NOT delete or skip existing tests to make the suite pass.
 - If `dotnet` SDK mismatch occurs, check `global.json` and align.
-- If `./dev/test.ps1` does not exist, create it per `README_TESTING.md`.
+- If `./dev/test.ps1` does not exist, create it per `docs/TESTING.md`.

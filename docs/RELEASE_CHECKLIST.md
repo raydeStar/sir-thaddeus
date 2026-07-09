@@ -186,7 +186,7 @@ If any Beta item is broken in a way that would surprise a power user, either fix
 ## README, Demo, And Docs
 
 - [ ] [README.md](../README.md) describes the v1 product surface accurately.
-- [ ] [V1_SCOPE.md](../V1_SCOPE.md) matches current release intent.
+- [ ] [V1_SCOPE.md](archive/V1_SCOPE.md) matches current release intent.
 - [ ] [DEMO_SCRIPT.md](DEMO_SCRIPT.md) can be followed in 3-5 minutes.
 - [ ] [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) is honest and current.
 - [ ] [ROADMAP.md](ROADMAP.md) reinforces v1 scope.

@@ -1,9 +1,9 @@
 # Sir Thaddeus — Manual QA checklist
 
 A walkthrough of every user-visible feature in the front end, aligned with
-the v1.0 scope contract in [`V1_SCOPE.md`](V1_SCOPE.md).
+the v1.0 scope contract in [`V1_SCOPE.md`](archive/V1_SCOPE.md).
 
-For the v1 release gate, use [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md);
+For the v1 release gate, use [`docs/RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md);
 this file is the longer feature-by-feature reference that covers Beta and
 Deferred items as well.
 
@@ -20,7 +20,7 @@ Deferred items as well.
 
 ## 1. Chat & Conversation **— Core**
 
-- [ ] **Send message to assistant** — Type and submit a chat. *Trigger:* `/chat`, type, Enter. *Expect:* streaming reply. *File:* [chat.$threadId.tsx](web/src/routes/chat.$threadId.tsx)
+- [ ] **Send message to assistant** — Type and submit a chat. *Trigger:* `/chat`, type, Enter. *Expect:* streaming reply. *File:* [chat.$threadId.tsx](../web/src/routes/chat.$threadId.tsx)
 - [ ] **Create new thread** — Start a fresh conversation. *Trigger:* "+" / "New Conversation" in `/chat`. *Expect:* new thread in sidebar.
 - [ ] **Auto-title on first message** — Untitled threads get a 5–8 word summary derived from your first message. *Trigger:* send any first message. *Expect:* sidebar title updates from "Untitled".
 - [ ] **Rename thread** — Edit a conversation title. *Expect:* updates everywhere immediately.
@@ -28,7 +28,7 @@ Deferred items as well.
 - [ ] **Delete thread** — Remove conversation from list and storage.
 - [ ] **Streaming text response** — Reply appears incrementally, not all at once. *Edge case:* watch for visible chunk lag.
 - [ ] **Conversation history persistence** — Refresh the browser; messages survive. Navigate away and back; thread state is preserved.
-- [ ] **Source cards with rich metadata** — Featured + standard cards render below replies that used `web_search`, with favicons, thumbnails, excerpts. *Trigger:* "what's the weather in Portland" or any web-search-driven query. *File:* [SourceCards.tsx](web/src/components/SourceCards.tsx)
+- [ ] **Source cards with rich metadata** — Featured + standard cards render below replies that used `web_search`, with favicons, thumbnails, excerpts. *Trigger:* "what's the weather in Portland" or any web-search-driven query. *File:* [SourceCards.tsx](../web/src/components/SourceCards.tsx)
 - [ ] **Memory-aware greetings** — First message of a new thread can pull shallow profile + memo context. *Trigger:* set "About Me" in Settings, start a new thread, ask a greeting. *Expect:* assistant references something it knows without you re-stating it.
 - [ ] **Tool-call display** — When the agent calls a tool, the call/result is visible in the thread (not silent).
 
@@ -39,7 +39,7 @@ Deferred items as well.
 > Voice is Beta in v1.0. Test rows here are pass-or-skip per the release
 > checklist; v1 ships even if everything in this section is skipped.
 
-- [ ] **Push-to-talk hotkey** — Hold the configured key to record. *Expect:* recording indicator, transcribed text on release. *File:* [WindowsGlobalShortcutAdapter.cs](src/Thaddeus.Shell/Platform/Windows/WindowsGlobalShortcutAdapter.cs)
+- [ ] **Push-to-talk hotkey** — Hold the configured key to record. *Expect:* recording indicator, transcribed text on release. *File:* [WindowsGlobalShortcutAdapter.cs](../src/Thaddeus.Shell/Platform/Windows/WindowsGlobalShortcutAdapter.cs)
 - [ ] **Real-time STT transcription** — Speech is converted to text as you speak (Piper backend).
 - [ ] **TTS playback** — Replies are spoken aloud when voice is on. *Trigger:* enable voice in Settings → Audio & Voice, send a prompt.
 - [ ] **Voice settings (voice / speed / volume)** — Settings → Audio & Voice. *Expect:* dropdown of Piper voices; sliders apply to next playback.
@@ -171,7 +171,7 @@ Deferred items as well.
 - [ ] **Audio & Voice tab** **— Beta** — KokoroSharp voice (default) or Piper (legacy fallback), audio devices, mic test, VoiceHost probe.
 - [ ] **Files tab** — Allowed file roots; add / remove.
 - [ ] **Location tab** — Default city / coords for weather and places fallback.
-- [ ] **Advanced tab** — Tool budgets / limits. *(Saved to settings; not yet enforced by the runtime in v1.0 — see [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) §10.)*
+- [ ] **Advanced tab** — Tool budgets / limits. *(Saved to settings; not yet enforced by the runtime in v1.0 — see [`docs/KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) §10.)*
 - [ ] **Save / apply** — Changes persist across restart.
 - [ ] **Safe mode recovery** — Corrupt `settings.json` → boot with defaults → flag clears on successful load and persists cleared. *(recent fix cde8c05.)*
 
@@ -243,10 +243,10 @@ Launch with `dotnet run --project apps/headless-runtime/SirThaddeus.HeadlessRunt
 
 ## Cross-references
 
-- v1.0 contract: [`V1_SCOPE.md`](V1_SCOPE.md)
-- Honest boundaries: [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)
-- Pre-release gate: [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)
-- Roadmap (where Deferred items land): [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- v1.0 contract: [`V1_SCOPE.md`](archive/V1_SCOPE.md)
+- Honest boundaries: [`docs/KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md)
+- Pre-release gate: [`docs/RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md)
+- Roadmap (where Deferred items land): [`docs/ROADMAP.md`](ROADMAP.md)
 
 ## Known caveats not covered above
 

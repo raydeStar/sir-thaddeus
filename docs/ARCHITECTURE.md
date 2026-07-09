@@ -378,7 +378,7 @@ Use this when evaluating whether the app is complete enough for your target rele
 
 ## Related Docs
 
-- [V1_SCOPE.md](../V1_SCOPE.md)
+- [V1_SCOPE.md](archive/V1_SCOPE.md)
 - [ARCHITECTURE_PUBLIC.md](ARCHITECTURE_PUBLIC.md)
 - [ARCHITECTURE_EXECUTIVE_SUMMARY.md](ARCHITECTURE_EXECUTIVE_SUMMARY.md)
 - [FEATURE_GAP_MATRIX.md](FEATURE_GAP_MATRIX.md)
