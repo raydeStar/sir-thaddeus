@@ -104,8 +104,8 @@ export async function parseRuntimeJson<T>(res: Response): Promise<T> {
     // a user-facing error instead of the raw JSON.parse failure.
     await res.text().catch(() => '');
     throw new Error(
-      'Runtime API unavailable — got a non-JSON response. ' +
-      'Make sure the backend is running and reachable.'
+      "The local runtime isn't reachable right now. " +
+      'Start the Sir Thaddeus app (or its runtime) and try again.'
     );
   }
   return (await res.json()) as T;
