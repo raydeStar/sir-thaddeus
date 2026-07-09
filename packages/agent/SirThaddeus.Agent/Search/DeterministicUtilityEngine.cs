@@ -317,16 +317,16 @@ public static class DeterministicUtilityEngine
         return input;
     }
 
-    private static void EvaluateExtraFunctions(string name, FunctionArgs args)
+    private static void EvaluateExtraFunctions(string name, FunctionEventArgs args)
     {
         // NCalc picks up the first handler that sets args.Result; no need to
-        // toggle HasResult explicitly (the setter is init-only in 5.x).
+        // toggle HasResult explicitly (the setter is init-only).
         switch (name.ToLowerInvariant())
         {
             case "factorial":
-                if (args.Parameters.Length == 1)
+                if (args.Parameters.Count == 1)
                 {
-                    var raw = args.Parameters[0].Evaluate();
+                    var raw = args.Parameters.Evaluate(0);
                     if (raw is not null && double.TryParse(raw.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var n))
                     {
                         if (n < 0 || n > 170 || Math.Abs(n - Math.Round(n)) > 1e-9)
@@ -338,9 +338,9 @@ public static class DeterministicUtilityEngine
                 }
                 break;
             case "cbrt":
-                if (args.Parameters.Length == 1)
+                if (args.Parameters.Count == 1)
                 {
-                    var raw = args.Parameters[0].Evaluate();
+                    var raw = args.Parameters.Evaluate(0);
                     if (raw is not null && double.TryParse(raw.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var x))
                         args.Result = Math.Cbrt(x);
                 }
