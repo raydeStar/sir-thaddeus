@@ -100,7 +100,7 @@ you which of three things broke:
 2. **Event present, but `preview` doesn't contain the expected fact.**
    Retrieval ran but the item didn't rank high enough to make the top-N
    pack. Tune the composite scoring weights in
-   [`Scoring.cs`](packages/memory/SirThaddeus.Memory/Scoring.cs) — start
+   [`Scoring.cs`](../packages/memory/SirThaddeus.Memory/Scoring.cs) — start
    by lowering the lexical-match threshold or raising the recency boost.
 3. **Event present, fact in `preview`, but the model didn't use it.**
    The retrieval worked end-to-end; the model just chose not to surface

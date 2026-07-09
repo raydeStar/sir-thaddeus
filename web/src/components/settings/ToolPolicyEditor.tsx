@@ -13,11 +13,12 @@ import {
 } from '../../lib/permissionsApi';
 
 /**
- * Settings → Permissions. Cascading per-tool permission editor:
- * developer override → group policy → per-tool override. The settings
- * document (`doc.permissions`) is the source of truth for every value; the
- * catalog fetched from the runtime only supplies the tool inventory per
- * group. Saving rides the settings page's existing PUT flow.
+ * Cascading per-tool permission editor rendered inside Settings →
+ * Permissions (below the privacy/approval toggles): developer override →
+ * group policy → per-tool override. The settings document
+ * (`doc.permissions`) is the source of truth for every value; the catalog
+ * fetched from the runtime only supplies the tool inventory per group.
+ * Saving rides the settings page's existing PUT flow.
  */
 
 type GroupKey = 'screen' | 'files' | 'system' | 'web' | 'memoryRead' | 'memoryWrite';
@@ -66,7 +67,7 @@ const DEV_OVERRIDE_OPTIONS: ReadonlyArray<{ value: PermissionDeveloperOverride; 
 const selectCls =
   'block w-full appearance-none rounded-xl border border-line bg-canvas-raised px-3.5 py-2 pr-9 text-sm text-ink transition-colors focus:border-accent-ring focus:outline-none focus:ring-2 focus:ring-accent/20';
 
-export function PermissionsTab({
+export function ToolPolicyEditor({
   doc,
   setDoc,
 }: {
@@ -150,12 +151,7 @@ export function PermissionsTab({
   );
 
   return (
-    <div
-      className="space-y-6"
-      role="tabpanel"
-      aria-labelledby="settings-tab-permissions"
-      data-testid="settings-permissions-panel"
-    >
+    <div className="space-y-6" data-testid="settings-permissions-panel">
       <section className="space-y-5 border-b border-line pb-10">
         <header>
           <h2 className="text-[15px] font-semibold tracking-tight text-ink">Developer override</h2>

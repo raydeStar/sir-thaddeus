@@ -18,22 +18,22 @@ If it acts, you see it. If you press **STOP**, it stops.
 
 The v1 product surface is limited to:
 
-- [src/Thaddeus.Shell/](src/Thaddeus.Shell/)
-- [src/Thaddeus.Runtime/](src/Thaddeus.Runtime/)
-- [web/](web/)
-- [apps/mcp-server/](apps/mcp-server/)
-- [packages/mcp-shared/](packages/mcp-shared/)
-- [packages/mcp-tools-core/](packages/mcp-tools-core/)
-- [packages/mcp-tools-windows/](packages/mcp-tools-windows/)
-- [packages/wiki/](packages/wiki/)
+- [src/Thaddeus.Shell/](../../src/Thaddeus.Shell/)
+- [src/Thaddeus.Runtime/](../../src/Thaddeus.Runtime/)
+- [web/](../../web/)
+- [apps/mcp-server/](../../apps/mcp-server/)
+- [packages/mcp-shared/](../../packages/mcp-shared/)
+- [packages/mcp-tools-core/](../../packages/mcp-tools-core/)
+- [packages/mcp-tools-windows/](../../packages/mcp-tools-windows/)
+- [packages/wiki/](../../packages/wiki/)
 - supporting runtime/tool/storage packages used by the hybrid surface
 
-The legacy runtime in [apps/headless-runtime/](apps/headless-runtime/) may remain for harness and transitional workflows, but it is not the public v1 product.
+The legacy runtime in [apps/headless-runtime/](../../apps/headless-runtime/) may remain for harness and transitional workflows, but it is not the public v1 product.
 
 ## Core v1 Features
 
 Each row must work end-to-end on v1 day one. The corresponding step in
-[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) is the gate.
+[docs/RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md) is the gate.
 
 - Hybrid shell/runtime launch.
 - Local loopback workspace hosting.
@@ -106,5 +106,5 @@ v1 ships when **all** of the following are true. If any row fails, v1 does not s
 - [ ] `dotnet build SirThaddeus.sln` is green at Release.
 - [ ] `dev/test.ps1 -Configuration Release -SkipScreenObserveHarness` is green.
 - [ ] `cd web && npm install && npm run build && npm run typecheck && npm run lint` is green.
-- [ ] [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) walked end-to-end with sign-off.
-- [ ] Any skipped GPU, voice, harness, or live integration work is recorded in [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
+- [ ] [docs/RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md) walked end-to-end with sign-off.
+- [ ] Any skipped GPU, voice, harness, or live integration work is recorded in [docs/RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md).

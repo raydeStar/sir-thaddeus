@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronRight, Loader2, MessageSquare, Mic, Sparkles, Square } from 'lucide-react';
+import { ChevronRight, Loader2, MessageSquare, Mic, Sparkles, Square, Unplug } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
+import { useRuntimeStore } from '../stores/runtimeStore';
 import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
 import { acquireMicStream, isStreamLive, prepareMicCapture, stopMicStream } from '../lib/micCapture';
 import { trimSilenceToWav } from '../lib/audioTrim';
@@ -12,6 +13,15 @@ export const Route = createFileRoute('/')({
 });
 
 const MIN_VOICE_HOLD_MS = 350;
+
+// Shown only on a fresh, connected workspace (no threads yet). Each one maps
+// to a capability the runtime actually ships — chat, permissioned tools, and
+// the wiki — so the first click demonstrates the product, not a canned demo.
+const STARTER_PROMPTS = [
+  'What can you do on this machine?',
+  'Summarize a document in my workspace',
+  'Search the web for something recent',
+];
 
 function HomeRoute() {
   const navigate = useNavigate();
@@ -190,7 +200,11 @@ function HomeRoute() {
     }
   }, [start]);
 
-  const displayError = localError ?? storeError;
+  const connected = useRuntimeStore((s) => s.connected);
+  // While disconnected the designed notice below owns the "runtime is not
+  // reachable" story; piping the store's raw fetch error into a red alert
+  // would say the same thing twice, the second time in debug-speak.
+  const displayError = localError ?? (connected ? storeError : null);
   const recent = threads.slice(0, 6);
 
   return (
@@ -268,6 +282,43 @@ function HomeRoute() {
             className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] text-red-700 dark:text-red-300"
           >
             {displayError}
+          </div>
+        ) : null}
+
+        {!connected ? (
+          <div
+            data-testid="home-disconnected-notice"
+            className="mt-6 flex items-start gap-3 rounded-xl border border-line bg-canvas-raised px-4 py-3.5"
+          >
+            <span
+              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-canvas-sunken text-ink-subtle"
+              aria-hidden
+            >
+              <Unplug className="h-4 w-4" strokeWidth={1.75} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[13.5px] font-medium text-ink">Waiting for the local runtime</p>
+              <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-muted">
+                Sir Thaddeus runs entirely on this machine. Start the desktop app (or its
+                runtime) and this workspace will connect on the next refresh.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {connected && recent.length === 0 ? (
+          <div className="mt-8 flex flex-wrap justify-center gap-2" data-testid="home-starter-prompts">
+            {STARTER_PROMPTS.map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                disabled={busy}
+                onClick={() => void start(prompt)}
+                className="rounded-full border border-line bg-canvas-raised px-3.5 py-2 text-[13px] text-ink-muted transition-colors hover:border-accent/60 hover:text-accent disabled:opacity-50"
+              >
+                {prompt}
+              </button>
+            ))}
           </div>
         ) : null}
       </div>

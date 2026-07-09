@@ -2,7 +2,7 @@
 
 Sir Thaddeus v1 is a local-first AI workspace for controlled agentic workflows. The architecture separates the desktop shell, loopback runtime, React workspace, assistant pipeline, MCP tool boundary, permission gate, local storage, wiki/canvas, and beta voice sidecar so each part has a narrow responsibility.
 
-This document is the short public version. For deeper subsystem detail, read [ARCHITECTURE.md](ARCHITECTURE.md). For release scope, read [../V1_SCOPE.md](../V1_SCOPE.md). For completion status by subsystem, read [FEATURE_GAP_MATRIX.md](FEATURE_GAP_MATRIX.md).
+This document is the short public version. For deeper subsystem detail, read [ARCHITECTURE.md](ARCHITECTURE.md). For release scope, read [V1_SCOPE.md](archive/V1_SCOPE.md). For completion status by subsystem, read [FEATURE_GAP_MATRIX.md](FEATURE_GAP_MATRIX.md).
 
 ## System Shape
 

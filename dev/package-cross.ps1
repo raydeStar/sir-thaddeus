@@ -229,17 +229,21 @@ foreach ($kvp in $projects.GetEnumerator()) {
 
 # ─── Copy ancillary files ─────────────────────────────────────────────────────
 
+# Source is the repo path; Dest (optional) is the name inside the package.
+# The first-run guide lives at docs/FIRST_RUN.md in the repo but ships to
+# end users as README_FIRST_RUN.md at the ZIP root.
 $filesToCopy = @(
-    @{ Source = "README_FIRST_RUN.md";                  Required = $true  }
+    @{ Source = "docs/FIRST_RUN.md";                     Dest = "README_FIRST_RUN.md"; Required = $true  }
     @{ Source = "DISCLAIMER.md";                         Required = $false }
     @{ Source = "SirThaddeus.Settings.template.json";   Required = $false }
 )
 
 foreach ($entry in $filesToCopy) {
     $srcPath = Join-Path $RepoRoot $entry.Source
+    $destName = if ($entry.Dest) { $entry.Dest } else { Split-Path $entry.Source -Leaf }
     if (Test-Path $srcPath) {
-        Copy-Item -Path $srcPath -Destination (Join-Path $stageDir $entry.Source) -Force
-        Write-Host "  Staged: $($entry.Source)"
+        Copy-Item -Path $srcPath -Destination (Join-Path $stageDir $destName) -Force
+        Write-Host "  Staged: $destName"
     } elseif ($entry.Required) {
         Fail "Required file missing: $($entry.Source)"
     } else {

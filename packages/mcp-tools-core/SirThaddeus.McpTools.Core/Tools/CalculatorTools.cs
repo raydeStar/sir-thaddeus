@@ -132,7 +132,7 @@ public static class CalculatorTools
 
     // Functions NCalc doesn't provide out of the box. Built-ins (sqrt, abs,
     // round, floor, min, max, pow, log10, …) are handled by NCalc itself.
-    private static void EvaluateExtraFunctions(string name, FunctionArgs args)
+    private static void EvaluateExtraFunctions(string name, FunctionEventArgs args)
     {
         switch (name.ToLowerInvariant())
         {
@@ -174,7 +174,7 @@ public static class CalculatorTools
                 if (TryArg(args, 0, out var lnv)) args.Result = Math.Log(lnv);
                 break;
             case "log":
-                if (args.Parameters.Length == 1 && TryArg(args, 0, out var lg)) args.Result = Math.Log10(lg);
+                if (args.Parameters.Count == 1 && TryArg(args, 0, out var lg)) args.Result = Math.Log10(lg);
                 break;
             case "ceil":
                 if (TryArg(args, 0, out var ce)) args.Result = Math.Ceiling(ce);
@@ -182,7 +182,7 @@ public static class CalculatorTools
             case "sum":
                 {
                     double total = 0;
-                    for (var i = 0; i < args.Parameters.Length; i++)
+                    for (var i = 0; i < args.Parameters.Count; i++)
                     {
                         if (!TryArg(args, i, out var value))
                             return;
@@ -230,12 +230,12 @@ public static class CalculatorTools
         return a;
     }
 
-    private static bool TryArg(FunctionArgs args, int index, out double value)
+    private static bool TryArg(FunctionEventArgs args, int index, out double value)
     {
         value = 0;
-        if (args.Parameters.Length <= index)
+        if (args.Parameters.Count <= index)
             return false;
-        var raw = args.Parameters[index].Evaluate();
+        var raw = args.Parameters.Evaluate(index);
         return raw is not null &&
                double.TryParse(raw.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }

@@ -76,7 +76,7 @@ import type {
   FilesSettings,
 } from '@thaddeus/shared-types';
 import { ModuleSettingsPanel } from '../components/modules/ModuleSettingsPanel';
-import { PermissionsTab } from '../components/settings/PermissionsTab';
+import { ToolPolicyEditor } from '../components/settings/ToolPolicyEditor';
 
 export const Route = createFileRoute('/settings')({
   component: SettingsRoute,
@@ -187,9 +187,11 @@ function SettingsRoute() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestLlmResponse | null>(null);
   const [gatekeeperStatus, setGatekeeperStatus] = useState<GatekeeperStatusResponse | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>(() =>
-    typeof window !== 'undefined' && window.location.hash === '#modules' ? 'modules' : 'general',
-  );
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
+    if (typeof window === 'undefined') return 'general';
+    const fromHash = window.location.hash.replace('#', '') as TabId;
+    return TABS.some((t) => t.id === fromHash) ? fromHash : 'general';
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -313,7 +315,9 @@ function SettingsRoute() {
   const changeTab = (tab: TabId) => {
     setActiveTab(tab);
     if (typeof window === 'undefined') return;
-    const hash = tab === 'modules' ? '#modules' : '';
+    // Only the deep-linkable tabs write a hash; others clear it so a reload
+    // returns to General (preserving the original behavior).
+    const hash = tab === 'modules' || tab === 'permissions' ? `#${tab}` : '';
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
   };
 
@@ -503,13 +507,6 @@ function GeneralTab({
           onChange={(v) => setDoc({ ...doc, uiPrefs: { ...ui, sendOnEnter: v } })}
         />
         <Toggle
-          testId="settings-ui-auto-switch-permissions"
-          label="Auto-switch to Permissions on approval request"
-          description="Jumps to the permissions view when the runtime asks for approval."
-          checked={ui.autoSwitchToPermissions}
-          onChange={(v) => setDoc({ ...doc, uiPrefs: { ...ui, autoSwitchToPermissions: v } })}
-        />
-        <Toggle
           testId="settings-ui-auto-connect"
           label="Auto-connect on startup"
           description="Reconnect to the last-known runtime as soon as the app opens."
@@ -559,7 +556,26 @@ function GeneralTab({
         </div>
       </Section>
 
-      <Section title="Privacy" description="Defaults are private. Opt in only to what you need.">
+    </div>
+  );
+}
+
+// ───────────────────────── Permissions ─────────────────────────
+
+function PermissionsTab({
+  doc,
+  setDoc,
+}: {
+  doc: SettingsDocument;
+  setDoc: (d: SettingsDocument) => void;
+}) {
+  const ui = doc.uiPrefs ?? DEFAULT_UI_PREFS;
+  return (
+    <div className="space-y-6" role="tabpanel" aria-labelledby="settings-tab-permissions">
+      <Section
+        title="Network access"
+        description="Defaults are private. Opt in only to what you need."
+      >
         <Toggle
           testId="settings-privacy-offline-mode"
           label="Offline mode"
@@ -574,6 +590,12 @@ function GeneralTab({
           checked={doc.privacy.localOnly}
           onChange={(v) => setDoc({ ...doc, privacy: { ...doc.privacy, localOnly: v } })}
         />
+      </Section>
+
+      <Section
+        title="Device &amp; data"
+        description="What Sir Thaddeus may access on this machine, and what leaves it."
+      >
         <Toggle
           testId="settings-privacy-screen-capture"
           label="Allow screen capture for context"
@@ -593,6 +615,21 @@ function GeneralTab({
           }
         />
       </Section>
+
+      <Section
+        title="Approval flow"
+        description="How the app behaves when the runtime asks to run a tool."
+      >
+        <Toggle
+          testId="settings-ui-auto-switch-permissions"
+          label="Auto-switch to Permissions on approval request"
+          description="Jumps to the permissions view when the runtime asks for approval."
+          checked={ui.autoSwitchToPermissions}
+          onChange={(v) => setDoc({ ...doc, uiPrefs: { ...ui, autoSwitchToPermissions: v } })}
+        />
+      </Section>
+
+      <ToolPolicyEditor doc={doc} setDoc={setDoc} />
     </div>
   );
 }
