@@ -28,6 +28,18 @@ public static class ToolArgumentValidator
         ToolDefinition toolDef)
     {
         ArgumentNullException.ThrowIfNull(call);
+        return Validate(call.ArgumentsJson, toolDef);
+    }
+
+    /// <summary>
+    /// Validates raw tool-call argument JSON against the tool's schema. Same
+    /// checks as the <see cref="ProposedToolCall"/> overload; used by the tool
+    /// loop to pre-validate arguments before dispatching to the MCP server.
+    /// </summary>
+    public static ToolArgumentValidationResult Validate(
+        string argumentsJson,
+        ToolDefinition toolDef)
+    {
         ArgumentNullException.ThrowIfNull(toolDef);
 
         var issues = new List<string>();
@@ -36,7 +48,7 @@ public static class ToolArgumentValidator
         JsonElement argsRoot;
         try
         {
-            using var doc = JsonDocument.Parse(call.ArgumentsJson);
+            using var doc = JsonDocument.Parse(argumentsJson);
             argsRoot = doc.RootElement.Clone();
         }
         catch (JsonException ex)

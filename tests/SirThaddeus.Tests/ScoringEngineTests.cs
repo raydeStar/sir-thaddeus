@@ -358,6 +358,27 @@ public class ScoringEngineTests
     }
 
     [Fact]
+    public void Score_DoesNotHardFailGenericHowCanIHelpCloserAsUnnecessaryClarification()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "smoke_casual_no_tools",
+            "Hey, how are you doing today? Just wanted to say thanks for helping me out.");
+
+        var response = new AgentResponse
+        {
+            Text = "Good day to you, friend! I'm functioning smoothly and ready to assist with whatever you need. How can I help you today?",
+            Success = true
+        };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.True(score.HardPass);
+        Assert.DoesNotContain(score.HardGateFailures, failure =>
+            failure.Contains("asking unnecessary clarification", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Score_DoesNotHardFailGenericCloserAsUnnecessaryClarification()
     {
         var scorer = new ScoringEngine();
@@ -727,6 +748,125 @@ public class ScoringEngineTests
     }
 
     [Fact]
+    public void Score_CreditsToolPingHealthResponseAsGrounded()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "smoke_tool_ping",
+            "Ping the tools and tell me if they are healthy.",
+            rubricProfile: "health");
+        test = test with
+        {
+            AllowedTools = ["tool_ping"],
+            Assertions = test.Assertions with
+            {
+                RequiredTools = ["tool_ping"]
+            }
+        };
+
+        const string result = "tool_ping healthy: MCP server is responding; status=ok; health details: version 0.3.0, protocol 2024-11-05, contract_version 1.0, tool_count 58.";
+        var response = new AgentResponse
+        {
+            Text = result,
+            Success = true,
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "tool_ping",
+                    Arguments = "{}",
+                    Result = result,
+                    Success = true
+                }
+            ]
+        };
+
+        var steps = new List<TraceStep>
+        {
+            new()
+            {
+                StepIndex = 1,
+                StepType = "tool_result",
+                ToolName = "tool_ping",
+                Result = result
+            }
+        };
+
+        var score = scorer.Score(test, response, steps, judgeResult: null);
+
+        Assert.Equal(4, score.Scores["toolCorrectness"]);
+        Assert.Equal(4, score.Scores["groundingFactuality"]);
+        Assert.True(score.Passed);
+    }
+
+    [Fact]
+    public void Score_CreditsHonestNoResultsFallbackAsGroundedToolUse()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "quality_no_bare_answers",
+            "Is McDonalds in Portland OR open right now?",
+            requiredKeywords: ["mcdonalds"],
+            rubricProfile: "ragGrounded");
+        test = test with
+        {
+            AllowedTools = ["places_lookup", "web_search"]
+        };
+
+        var response = new AgentResponse
+        {
+            Text = """
+                I could not confirm whether McDonalds in Portland OR is open right now from this live lookup.
+                The returned pages did not provide a trustworthy current-hours answer.
+                Sources checked: places_lookup/Google Places, web_search.
+                Best next step: Use the McDonalds store finder or call the location before visiting.
+                """,
+            Success = true,
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "places_lookup",
+                    Arguments = "{}",
+                    Result = "[Places lookup error: Google Places API key is not configured.]",
+                    Success = false
+                },
+                new ToolCallRecord
+                {
+                    ToolName = "web_search",
+                    Arguments = "{}",
+                    Result = "[search: 0 result(s) returned]",
+                    Success = true
+                }
+            ]
+        };
+
+        var steps = new List<TraceStep>
+        {
+            new()
+            {
+                StepIndex = 1,
+                StepType = "tool_result",
+                ToolName = "places_lookup",
+                Result = "[Places lookup error: Google Places API key is not configured.]"
+            },
+            new()
+            {
+                StepIndex = 2,
+                StepType = "tool_result",
+                ToolName = "web_search",
+                Result = "[search: 0 result(s) returned]"
+            }
+        };
+
+        var score = scorer.Score(test, response, steps, judgeResult: null);
+
+        Assert.Equal(4, score.Scores["groundingFactuality"]);
+        Assert.Equal(4, score.Scores["toolCorrectness"]);
+        Assert.True(score.Passed);
+    }
+
+    [Fact]
     public void Score_DoesNotPenalizeOpaqueDocumentReadSummary_AsMissingIncorporation()
     {
         var scorer = new ScoringEngine();
@@ -934,6 +1074,117 @@ public class ScoringEngineTests
         Assert.False(score.HardPass);
         Assert.Contains(score.HardFailures, failure =>
             failure.Contains("local-business fallback non-answer", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Score_DoesNotPenalizeStrictDecimalOnlyAnswerForMissingProse()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "strict_decimal_contract",
+            "A bag has 5 red marbles and 5 blue marbles. Two marbles are drawn without replacement. What is the probability both are red? Reply with only the decimal number.",
+            requiredKeywords: ["0.2222222222222222"]);
+
+        var response = new AgentResponse
+        {
+            Text = "0.222222222222",
+            Success = true
+        };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.True(score.Passed);
+        Assert.Equal(0, score.KeywordPenalty);
+        Assert.Equal(0, score.AssertionDensityPenalty);
+        Assert.Equal(0, score.HedgeRatio);
+        Assert.Equal(0, score.RequiredKeywordsTotal);
+        Assert.InRange(score.OverallScore, 0.85, 1.0);
+    }
+
+    [Fact]
+    public void Score_DoesNotPenalizeStrictMultipleChoiceLetterForMissingExplanation()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "strict_choice_contract",
+            "Choose the best answer. A chi-square goodness-of-fit test is commonly used to compare: A) activation energy against pH B) observed counts against expected counts C) speed against distance without categories D) two DNA codons by mass only Reply with only A, B, C, or D.",
+            // Real multiple-choice fixtures carry the expected letter alongside
+            // the answer text, so a bare correct letter can be verified.
+            requiredKeywords: ["observed counts", "B"]);
+
+        var response = new AgentResponse
+        {
+            Text = "B",
+            Success = true
+        };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.True(score.Passed);
+        Assert.Equal(0, score.KeywordPenalty);
+        Assert.Equal(0, score.AssertionDensityPenalty);
+        Assert.Equal(0, score.HedgeRatio);
+        Assert.Equal(0, score.RequiredKeywordsTotal);
+        Assert.InRange(score.OverallScore, 0.85, 1.0);
+    }
+
+    [Fact]
+    public void Score_HardFailsStrictNumericAnswerWithWrongValue()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "strict_numeric_wrong",
+            "How many 5-person committees can be chosen from 12 people? Reply with only the integer.",
+            requiredKeywords: ["792"]);
+
+        var response = new AgentResponse { Text = "60", Success = true };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.False(score.Passed);
+        Assert.Equal(0.0, score.OverallScore);
+        Assert.Contains(score.DeterministicChecks, check =>
+            check.Name == "strict_answer_correct" && !check.Passed);
+        Assert.Contains(score.HardGateFailures, failure =>
+            failure.Contains("Strict answer is incorrect", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Score_PassesStrictNumericAnswerWithCorrectValue()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "strict_numeric_right",
+            "How many 5-person committees can be chosen from 12 people? Reply with only the integer.",
+            requiredKeywords: ["792"]);
+
+        var response = new AgentResponse { Text = "792", Success = true };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.True(score.Passed);
+        Assert.Contains(score.DeterministicChecks, check =>
+            check.Name == "strict_answer_correct" && check.Passed);
+        Assert.InRange(score.OverallScore, 0.85, 1.0);
+    }
+
+    [Fact]
+    public void Score_HardFailsStrictMultipleChoiceWithWrongLetter()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest(
+            "strict_choice_wrong",
+            "Choose the best answer. A chi-square goodness-of-fit test compares: A) activation energy B) observed counts against expected counts C) speed against distance D) DNA codons by mass. Reply with only A, B, C, or D.",
+            requiredKeywords: ["observed counts", "B"]);
+
+        var response = new AgentResponse { Text = "A", Success = true };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.False(score.Passed);
+        Assert.Equal(0.0, score.OverallScore);
+        Assert.Contains(score.HardGateFailures, failure =>
+            failure.Contains("Strict answer is incorrect", StringComparison.OrdinalIgnoreCase));
     }
 
     private static HarnessTestCase BasicTest(

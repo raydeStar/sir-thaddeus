@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Text.Json;
 
 namespace SirThaddeus.Agent;
 
@@ -37,6 +38,54 @@ public static class AssistantResponseSanitizer
         text = StripThinkingScaffold(text);
         text = StripRawTemplateTokens(text);
         return text;
+    }
+
+    public static string NormalizeJsonOnlyReply(string text, string? latestUserMessage)
+    {
+        if (string.IsNullOrWhiteSpace(text) || !PromptRequestsJsonOnly(latestUserMessage))
+            return text;
+
+        var trimmed = text.Trim();
+        var candidate = ExtractFencedJson(trimmed) ?? trimmed;
+        if (!IsValidJson(candidate))
+            return text;
+
+        return candidate.Trim();
+    }
+
+    private static bool PromptRequestsJsonOnly(string? latestUserMessage)
+    {
+        if (string.IsNullOrWhiteSpace(latestUserMessage))
+            return false;
+
+        var lower = latestUserMessage.ToLowerInvariant();
+        return lower.Contains("json", StringComparison.Ordinal) &&
+               (lower.Contains("return only", StringComparison.Ordinal) ||
+                lower.Contains("reply only", StringComparison.Ordinal) ||
+                lower.Contains("only valid json", StringComparison.Ordinal) ||
+                lower.Contains("json only", StringComparison.Ordinal));
+    }
+
+    private static string? ExtractFencedJson(string text)
+    {
+        var match = Regex.Match(
+            text,
+            @"^\s*```(?:json)?\s*(?<json>[\s\S]*?)\s*```\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success ? match.Groups["json"].Value : null;
+    }
+
+    private static bool IsValidJson(string text)
+    {
+        try
+        {
+            using var _ = JsonDocument.Parse(text);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     // Phrases a small model defaults to when it thinks it has no tools —

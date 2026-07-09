@@ -1,0 +1,28 @@
+id: probe_set_union
+name: Solver Probe - Inclusion-Exclusion
+rubric_profile: general
+user_message: "In a group, 22 people know Python, 19 know JavaScript, and 8 know both. How many know at least one of the two? Reply with only the integer."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "33"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/PostProcessing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

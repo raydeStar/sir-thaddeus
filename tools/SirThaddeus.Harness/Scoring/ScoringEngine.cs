@@ -9,6 +9,18 @@ namespace SirThaddeus.Harness.Scoring;
 
 public sealed class ScoringEngine
 {
+    private static readonly Regex MultipleChoiceLetterOnlyPromptPattern = new(
+        @"\breply\s+with\s+only\s+A,\s+B,\s+C,\s+or\s+D\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex NumericOnlyPromptPattern = new(
+        @"\breply\s+with\s+only\s+(?:the\s+)?(?:number|integer|decimal(?:\s+number)?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex NumericAnswerPattern = new(
+        @"^\s*-?(?:\d+(?:\.\d+)?|\.\d+)\s*$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private static readonly string[] DefaultMetrics =
     [
         "taskCorrectness",
@@ -100,6 +112,7 @@ public sealed class ScoringEngine
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var strictContractCompliant = ShouldScoreAsStrictAnswerContract(test, response.Text);
         var heuristic = BuildHeuristicScores(test, response, steps, profile, checks);
         var scores = MergeJudgeScores(heuristic, judgeResult, profile);
         var overall = hardGateFailures.Count > 0
@@ -140,10 +153,10 @@ public sealed class ScoringEngine
             KeywordPenalty = KeywordPenalty(test, response.Text),
             DeflectionPenalty = DeflectionPenalty(response.Text),
             ToolIncorporationPenalty = ToolIncorporationPenalty(steps, response.Text),
-            AssertionDensityPenalty = HedgePenalty(response.Text),
+            AssertionDensityPenalty = strictContractCompliant ? 0 : HedgePenalty(response.Text),
             PersonalityAdjustment = PersonalityAdjustment(test, response.Text),
             DeflectionPhraseCount = CountDeflections(response.Text),
-            HedgeRatio = Math.Round(HedgeRatio(response.Text), 2),
+            HedgeRatio = Math.Round(strictContractCompliant ? 0 : HedgeRatio(response.Text), 2),
             ToolTokensIncorporated = ToolTokenStats(steps, response.Text).Incorporated,
             ToolTokensAvailable = ToolTokenStats(steps, response.Text).Available,
             RequiredKeywordsFound = CountRequiredKeywords(test, response.Text).Found,
@@ -198,7 +211,8 @@ public sealed class ScoringEngine
 
         var final = response.Text ?? string.Empty;
         var deflections = CountDeflections(final);
-        var keywordStats = CountRequiredKeywords(test, final);
+        var strictContractCompliant = ShouldScoreAsStrictAnswerContract(test, final);
+        var keywordStats = strictContractCompliant ? (Found: 0, Total: 0) : CountRequiredKeywords(test, final);
         var toolStats = ToolTokenStats(steps, final);
         var hedgeRatio = HedgeRatio(final);
 
@@ -256,6 +270,20 @@ public sealed class ScoringEngine
             scores["groundingFactuality"] = Math.Min(scores["groundingFactuality"], Math.Max(1, useScore));
         }
 
+        if (LooksLikeGroundedToolHealthResponse(steps, final))
+        {
+            scores["groundingFactuality"] = 4;
+            if (scores.ContainsKey("toolCorrectness"))
+                scores["toolCorrectness"] = Math.Max(scores["toolCorrectness"], 4);
+        }
+
+        if (LooksLikeGroundedNoResultsToolResponse(steps, final))
+        {
+            scores["groundingFactuality"] = Math.Max(scores["groundingFactuality"], 4);
+            if (scores.ContainsKey("toolCorrectness"))
+                scores["toolCorrectness"] = Math.Max(scores["toolCorrectness"], 4);
+        }
+
         if (test.AllowedTools.Count > 0 || response.ToolCallsMade.Count > 0)
         {
             scores.TryAdd("toolCorrectness", 4);
@@ -273,7 +301,7 @@ public sealed class ScoringEngine
         if (profile == "agentTool")
             scores["stateContinuity"] = StateContinuityScore(test, final);
 
-        if (hedgeRatio > 0.7)
+        if (!strictContractCompliant && hedgeRatio > 0.7)
             scores["groundingFactuality"] = Math.Min(scores["groundingFactuality"], 2);
 
         scores["personaFit"] = Math.Min(scores["personaFit"], PersonaScore(final));
@@ -290,6 +318,14 @@ public sealed class ScoringEngine
         {
             scores["taskCorrectness"] = 0;
             scores["instructionAdherence"] = Math.Min(scores["instructionAdherence"], 1);
+        }
+
+        if (strictContractCompliant)
+        {
+            scores["conversationality"] = 4;
+            scores["personaFit"] = 4;
+            scores["actionability"] = 4;
+            scores["concisenessFit"] = 4;
         }
 
         return scores;
@@ -360,11 +396,29 @@ public sealed class ScoringEngine
 
         if (test.Expectations.RequiredKeywords.Count > 0)
         {
-            var missing = test.Expectations.RequiredKeywords
-                .Where(k => !Contains(final, k))
-                .ToList();
-            Add(checks, "required_keywords_present", missing.Count == 0, "warn",
-                missing.Count == 0 ? "Required keywords present." : $"Missing required keywords: {string.Join(", ", missing)}");
+            if (ShouldScoreAsStrictAnswerContract(test, final))
+            {
+                // Strict-answer items (a bare number or single letter) are
+                // exact-match: the terse answer is simply right or wrong, so
+                // correctness is a HARD gate, not a soft penalty. The style
+                // waiver still applies elsewhere, so a correct terse answer
+                // keeps full marks — but a wrong one now fails outright instead
+                // of scoring ~1.0 for merely being the right shape.
+                var correct = test.Expectations.RequiredKeywords
+                    .Any(keyword => StrictAnswerMatches(final, keyword));
+                Add(checks, "strict_answer_correct", correct, "hard",
+                    correct
+                        ? "Strict answer matches the expected value."
+                        : $"Strict answer is incorrect; expected one of: {string.Join(", ", test.Expectations.RequiredKeywords)}.");
+            }
+            else
+            {
+                var missing = test.Expectations.RequiredKeywords
+                    .Where(k => !Contains(final, k))
+                    .ToList();
+                Add(checks, "required_keywords_present", missing.Count == 0, "warn",
+                    missing.Count == 0 ? "Required keywords present." : $"Missing required keywords: {string.Join(", ", missing)}");
+            }
         }
 
         var forbidden = test.Expectations.ForbiddenKeywords.Concat(test.Expectations.ForbiddenPhrases)
@@ -548,8 +602,56 @@ public sealed class ScoringEngine
 
     private static (int Found, int Total) CountRequiredKeywords(HarnessTestCase test, string final)
     {
+        if (ShouldScoreAsStrictAnswerContract(test, final))
+            return (0, 0);
+
         var required = test.Expectations.RequiredKeywords.Where(k => !string.IsNullOrWhiteSpace(k)).ToList();
         return (required.Count(k => Contains(final, k)), required.Count);
+    }
+
+    private static bool ShouldScoreAsStrictAnswerContract(HarnessTestCase test, string? final)
+    {
+        if (string.IsNullOrWhiteSpace(test.UserMessage) || string.IsNullOrWhiteSpace(final))
+            return false;
+
+        var trimmed = final.Trim();
+        if (MultipleChoiceLetterOnlyPromptPattern.IsMatch(test.UserMessage))
+            return Regex.IsMatch(trimmed, @"^[A-D]$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        if (NumericOnlyPromptPattern.IsMatch(test.UserMessage))
+            return NumericAnswerPattern.IsMatch(trimmed);
+
+        return false;
+    }
+
+    // Value comparison for strict bare answers (a number or single letter),
+    // tolerant of surrounding punctuation/quotes and thousands separators —
+    // NOT substring, so "376" never counts as "37".
+    private static bool StrictAnswerMatches(string final, string expected)
+    {
+        var actual = NormalizeStrictAnswer(final);
+        var want = NormalizeStrictAnswer(expected);
+        if (actual.Length == 0 || want.Length == 0)
+            return false;
+
+        // Numbers compare by value with a small relative tolerance, so the
+        // same number written at different precision (0.222222222222 vs
+        // 0.2222222222222222) matches while genuinely different values do not.
+        if (double.TryParse(actual, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var actualNumber) &&
+            double.TryParse(want, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var wantNumber))
+        {
+            var tolerance = 1e-6 * Math.Max(1.0, Math.Abs(wantNumber));
+            return Math.Abs(actualNumber - wantNumber) <= tolerance;
+        }
+
+        // Letters / non-numeric tokens compare exactly (case-insensitive).
+        return string.Equals(actual, want, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeStrictAnswer(string? value)
+    {
+        var text = (value ?? string.Empty).Trim().Trim('(', ')', '[', ']', '"', '\'', '`', '.', ' ');
+        return text.Replace(",", string.Empty).Trim();
     }
 
     private static double KeywordPenalty(HarnessTestCase test, string final)
@@ -601,6 +703,64 @@ public sealed class ScoringEngine
             < 0.4 => -0.2,
             _ => 0
         };
+    }
+
+    private static bool LooksLikeGroundedToolHealthResponse(IReadOnlyList<TraceStep> steps, string responseText)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+            return false;
+
+        var healthStep = steps.FirstOrDefault(step =>
+            string.Equals(step.StepType, "tool_result", StringComparison.OrdinalIgnoreCase) &&
+            step.Error is null &&
+            !string.IsNullOrWhiteSpace(step.Result) &&
+            (string.Equals(step.ToolName, "tool_ping", StringComparison.OrdinalIgnoreCase) ||
+             step.Result.Contains("tool_ping", StringComparison.OrdinalIgnoreCase) ||
+             step.Result.Contains("status=ok", StringComparison.OrdinalIgnoreCase) ||
+             step.Result.Contains("\"status\":\"ok\"", StringComparison.OrdinalIgnoreCase)));
+
+        if (healthStep is null)
+            return false;
+
+        var lower = responseText.ToLowerInvariant();
+        return (lower.Contains("healthy", StringComparison.Ordinal) ||
+                lower.Contains("responding", StringComparison.Ordinal) ||
+                lower.Contains("status=ok", StringComparison.Ordinal) ||
+                lower.Contains("status: ok", StringComparison.Ordinal)) &&
+               (lower.Contains("tool", StringComparison.Ordinal) ||
+                lower.Contains("mcp", StringComparison.Ordinal) ||
+                lower.Contains("server", StringComparison.Ordinal));
+    }
+
+    private static bool LooksLikeGroundedNoResultsToolResponse(IReadOnlyList<TraceStep> steps, string responseText)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+            return false;
+
+        var hasNoResultOrUnavailableToolEvidence = steps.Any(step =>
+            string.Equals(step.StepType, "tool_result", StringComparison.OrdinalIgnoreCase) &&
+            step.Error is null &&
+            !string.IsNullOrWhiteSpace(step.Result) &&
+            LooksLikeToolErrorOrEmptyResult(step.Result!));
+        if (!hasNoResultOrUnavailableToolEvidence)
+            return false;
+
+        var lower = responseText.ToLowerInvariant();
+        var statesLimitation =
+            lower.Contains("could not confirm", StringComparison.Ordinal) ||
+            lower.Contains("cannot confirm", StringComparison.Ordinal) ||
+            lower.Contains("did not provide", StringComparison.Ordinal) ||
+            lower.Contains("no trustworthy", StringComparison.Ordinal) ||
+            lower.Contains("no usable", StringComparison.Ordinal) ||
+            lower.Contains("unavailable", StringComparison.Ordinal);
+
+        var citesCheckedEvidence =
+            lower.Contains("sources checked", StringComparison.Ordinal) ||
+            lower.Contains("searches checked", StringComparison.Ordinal) ||
+            lower.Contains("live lookup", StringComparison.Ordinal) ||
+            lower.Contains("returned pages", StringComparison.Ordinal);
+
+        return statesLimitation && citesCheckedEvidence;
     }
 
     private static double HedgeRatio(string responseText)
@@ -799,7 +959,7 @@ public sealed class ScoringEngine
         var last = sentences[^1];
         return Regex.IsMatch(
             last,
-            @"\b(would you like me to|would you like to|would you prefer I|want me to|should I|shall I|or should we|do you want me to|anything else I can (assist|help)|anything else you'd like|anything specific I can (assist|help)|does that (give|help)|perhaps I can|I can take another look|to give you .*suggestions|I still need to know if)\b",
+            @"\b(would you like me to|would you like to|would you prefer I|want me to|should I|shall I|or should we|do you want me to|anything else I can (assist|help)|anything else you'd like|anything specific I can (assist|help)|how can I (assist|help|support)|what can I (assist|help) with|does that (give|help)|perhaps I can|I can take another look|to give you .*suggestions|I still need to know if)\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 

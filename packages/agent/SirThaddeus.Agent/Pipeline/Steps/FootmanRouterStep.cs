@@ -119,6 +119,7 @@ public sealed class FootmanRouterStep : ITurnStep
         if (context.ToolDefs.Count == 0) return true;
         if (HarnessAllowsOnlyMemoryRetrieve()) return true;
         if (HasWeatherGeocode(context) && HasWeatherCue(context.UserText)) return true;
+        if (HasTimeNow(context) && HasTimezoneLookup(context) && HasLocationScopedTimeCue(context.UserText)) return true;
         if (HasMemoryRetrieve(context) && HasPersonalContextCue(context.UserText)) return true;
         if (context.Features is null) return true;
         return false;
@@ -145,6 +146,38 @@ public sealed class FootmanRouterStep : ITurnStep
         => context.ToolDefs.Any(def =>
             string.Equals(def.Function?.Name, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(def.Function?.Name, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasTimeNow(TurnContext context)
+        => context.ToolDefs.Any(def =>
+            string.Equals(def.Function?.Name, ToolNames.TimeNow, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(def.Function?.Name, ToolNames.TimeNowAlt, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasTimezoneLookup(TurnContext context)
+        => context.ToolDefs.Any(def =>
+            string.Equals(def.Function?.Name, ToolNames.ResolveTimezone, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(def.Function?.Name, ToolNames.ResolveTimezoneAlt, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasLocationScopedTimeCue(string? userText)
+    {
+        if (string.IsNullOrWhiteSpace(userText))
+            return false;
+
+        var lower = " " + userText.Trim().ToLowerInvariant() + " ";
+        var asksForCurrentTime =
+            lower.Contains(" current time ", StringComparison.Ordinal) ||
+            lower.Contains(" current date and time ", StringComparison.Ordinal) ||
+            lower.Contains(" time there ", StringComparison.Ordinal) ||
+            lower.Contains(" time in ", StringComparison.Ordinal) ||
+            lower.Contains(" time at ", StringComparison.Ordinal) ||
+            lower.Contains(" time for ", StringComparison.Ordinal);
+        if (!asksForCurrentTime)
+            return false;
+
+        return lower.Contains(" in ", StringComparison.Ordinal) ||
+               lower.Contains(" at ", StringComparison.Ordinal) ||
+               lower.Contains(" for ", StringComparison.Ordinal) ||
+               lower.Contains(" there ", StringComparison.Ordinal);
+    }
 
     private static bool HasPersonalContextCue(string? userText)
     {

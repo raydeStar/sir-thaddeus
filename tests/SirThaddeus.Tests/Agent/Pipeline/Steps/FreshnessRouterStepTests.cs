@@ -229,6 +229,37 @@ public class FreshnessRouterStepTests
     }
 
     [Fact]
+    public async Task Forces_weather_geocode_for_natural_location_time_request()
+    {
+        var step = new FreshnessRouterStep();
+        var ctx = WithTools(
+            "I am scheduling a call with someone in Tokyo. Use the available time tools if needed and tell me the current date and time there in one short sentence.",
+            "weather_geocode",
+            "resolve_timezone",
+            "time_now");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("weather_geocode", cont.Next.ForcedTool);
+    }
+
+    [Fact]
+    public async Task Forces_resolve_timezone_for_location_time_request_when_geocode_unavailable()
+    {
+        var step = new FreshnessRouterStep();
+        var ctx = WithTools(
+            "What is the current time in Tokyo right now?",
+            "resolve_timezone",
+            "time_now");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("resolve_timezone", cont.Next.ForcedTool);
+    }
+
+    [Fact]
     public async Task Weather_router_no_op_when_weather_geocode_unavailable()
     {
         // If weather tools are filtered out, fall through — don't force

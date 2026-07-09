@@ -160,6 +160,26 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         return await ChatCoreAsync(messages, tools, maxTokensOverride, forcedToolName, cancellationToken);
     }
 
+    /// <summary>
+    /// Chat with an explicit max_tokens cap and a per-call sampling temperature
+    /// that overrides the configured temperature for this request only.
+    /// </summary>
+    public async Task<LlmResponse> ChatAsync(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        int maxTokensOverride,
+        double temperatureOverride,
+        CancellationToken cancellationToken = default)
+    {
+        return await ChatCoreAsync(
+            messages,
+            tools,
+            maxTokensOverride,
+            forcedToolName: null,
+            new LlmRequestContext { TemperatureOverride = temperatureOverride },
+            cancellationToken);
+    }
+
     private async Task<LlmResponse> ChatCoreAsync(
         IReadOnlyList<ChatMessage> messages,
         IReadOnlyList<ToolDefinition>? tools,
@@ -235,6 +255,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
                     tools,
                     maxTokensOverride,
                     forcedToolName,
+                    requestContext.TemperatureOverride,
                     requestCts.Token)
                 .ConfigureAwait(false);
 
@@ -269,6 +290,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         IReadOnlyList<ToolDefinition>? tools,
         int? maxTokensOverride,
         string? forcedToolName,
+        double? temperatureOverride,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(messages);
@@ -285,7 +307,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
             new LlmRequestContext { TaskKind = _requestTaskKind.Value });
 
         // ── Attempt 1: full request with stop + repetition_penalty ───
-        var body = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, includeExtras: true);
+        var body = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, temperatureOverride, includeExtras: true);
 
         var response = await _http.PostAsJsonAsync(
             NormalizePath(GetOptionsSnapshot().ChatCompletionPath), body, _json, cancellationToken);
@@ -300,7 +322,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         if ((int)response.StatusCode == 400 &&
             errorBody.Contains("Failed to process regex", StringComparison.OrdinalIgnoreCase))
         {
-            var bare = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, includeExtras: false);
+            var bare = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, temperatureOverride, includeExtras: false);
 
             response = await _http.PostAsJsonAsync(
                 NormalizePath(GetOptionsSnapshot().ChatCompletionPath), bare, _json, cancellationToken);
@@ -436,6 +458,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         IReadOnlyList<ToolDefinition>? tools,
         int? maxTokensOverride,
         string? forcedToolName,
+        double? temperatureOverride,
         bool includeExtras)
     {
         var options = GetOptionsSnapshot();
@@ -446,7 +469,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
             ["model"] = routedModel,
             ["messages"] = messages,
             ["max_tokens"] = options.EffectiveMaxTokens(maxTokensOverride),
-            ["temperature"] = options.Temperature,
+            ["temperature"] = temperatureOverride ?? options.Temperature,
             ["stream"] = false
         };
 

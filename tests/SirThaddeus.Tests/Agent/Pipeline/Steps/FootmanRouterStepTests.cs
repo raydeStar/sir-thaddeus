@@ -93,6 +93,24 @@ public class FootmanRouterStepTests
     }
 
     [Fact]
+    public async Task Skips_for_location_scoped_current_time_so_clock_tool_survives()
+    {
+        var sink = new CapturingSink();
+        var footman = new StubFootman(AgentState.SearchFact, 0.95, false, "fact_lookup");
+        var step = NewStep(footman: footman, sink: sink);
+        var prompt = "I am scheduling a call with someone in Tokyo. Use the available time tools if needed and tell me the current date and time there in one short sentence.";
+        var ctx = WithTools(prompt, false, "weather_geocode", "resolve_timezone", "time_now");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(0, footman.CallCount);
+        Assert.Same(ctx.ToolDefs, cont.Next.ToolDefs);
+        Assert.Contains(cont.Next.ToolDefs, def => def.Function.Name == "time_now");
+        Assert.Empty(sink.FootmanEvents);
+    }
+
+    [Fact]
     public async Task Emits_decision_event_and_narrows_tools_on_authoritative_chat_verdict()
     {
         // Authoritative Chat verdict → tool list should be filtered down

@@ -1,0 +1,28 @@
+id: probe_function_iteration
+name: Solver Probe - Function Iteration
+rubric_profile: general
+user_message: "Let f(x) = 2x + 5. Starting with x = 1, apply f three times. What final value do you get? Reply with only the integer."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "43"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/PostProcessing/
+  tier2_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier3_targets:
+    - packages/

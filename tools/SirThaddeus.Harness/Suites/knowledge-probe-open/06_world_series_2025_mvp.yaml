@@ -1,0 +1,29 @@
+# answers verified via web 2026-07-03; open-book lane — never compare to closed-book numbers
+id: probe_open_world_series_2025_mvp
+name: Knowledge Probe (Open) - 2025 World Series MVP
+rubric_profile: general
+user_message: "Use the web_search tool to find this. Which pitcher was named Most Valuable Player of the 2025 World Series, in which the Los Angeles Dodgers beat the Toronto Blue Jays in seven games? Reply with only the player's full name."
+allowed_tools: [web_search]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - python_eval
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "Yamamoto"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/

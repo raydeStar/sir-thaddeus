@@ -173,6 +173,55 @@ public sealed class ToolBackedResponseQualityGuardsTests
     }
 
     [Fact]
+    public void Apply_WhenRetryInstructionEchoedForOpenStatus_StripsInternalEnvelope()
+    {
+        const string retryEnvelope = """
+            User request: Is McDonalds in Portland OR open right now?
+            Retry strategy: official_source_search
+            Guidance: Prioritize official/first-party documentation and policy pages.
+            Previous answer for verification:
+            I cannot access real-time restaurant information.
+            Return concise, evidence-grounded output and call out uncertainty when unresolved.
+            """;
+        const string echoedResponse = """
+            **User request: Is McDonalds in Portland OR open right now?
+            Retry strategy: official_source_search
+            Guidance: Prioritize official/first-party documentation and policy pages.
+            Previous answer for verification:
+            I cannot access real-time restaurant information.
+            Return concise, evidence-grounded output and call out uncertainty when unresolved**
+            Verification recommended
+            The live search fallback did not surface a trustworthy hours page in this run.
+            """;
+
+        var response = ToolBackedResponseQualityGuards.Apply(
+            echoedResponse,
+            retryEnvelope,
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.PlacesLookup,
+                    Arguments = "{\"query\":\"McDonalds Portland OR\"}",
+                    Result = "[Places lookup error: Google Places API key is not configured.]",
+                    Success = false
+                },
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\"McDonalds Portland OR open right now\"}",
+                    Result = "[search: 0 result(s) returned]",
+                    Success = true
+                }
+            ]);
+
+        Assert.Contains("I could not confirm whether", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("McDonalds", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Portland", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Retry strategy:", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Previous answer for verification", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Apply_WhenPlacesDiscoverAnswerOmitsSourceDetails_AppendsLookupEvidence()
     {
         const string goodButUngroundedResponse = "I found four florist candidates near Olympia, WA: The Popinjay Flower and Gift Shop, Fleure Floral Design, Capitol Florist, and Artistry in Flowers.";

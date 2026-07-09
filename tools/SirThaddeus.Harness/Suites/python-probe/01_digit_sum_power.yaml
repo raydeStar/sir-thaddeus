@@ -1,0 +1,28 @@
+id: probe_py_digit_sum_power
+name: Python Probe - Digit Sum of a Power
+rubric_profile: general
+user_message: "Use the python_eval tool to compute this. What is the sum of the decimal digits of 2^30? Reply with only the integer."
+allowed_tools: [python_eval]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "37"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/

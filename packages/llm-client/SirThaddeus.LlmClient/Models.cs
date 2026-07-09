@@ -200,6 +200,13 @@ public sealed record LlmRequestContext
     public LlmTaskKind TaskKind { get; init; } = LlmTaskKind.Chat;
     public LlmRequestPriority Priority { get; init; } = LlmRequestPriority.UserFacing;
     public string? OperationName { get; init; }
+
+    /// <summary>
+    /// Per-request sampling temperature. When set, overrides the client's
+    /// configured temperature for this call only (used by self-consistency to
+    /// guarantee diverse samples). Null = use the configured temperature.
+    /// </summary>
+    public double? TemperatureOverride { get; init; }
 }
 
 public sealed record LlmRuntimeHealthSnapshot

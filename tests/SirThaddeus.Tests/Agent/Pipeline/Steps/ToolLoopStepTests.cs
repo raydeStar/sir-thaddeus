@@ -170,12 +170,13 @@ public class ToolLoopStepTests
         var result = await step.ExecuteAsync(ctx, CancellationToken.None);
 
         var cont = Assert.IsType<StepResult.Continue>(result);
-        Assert.Equal(2, cont.Next.ToolCallsMade.Count);
+        Assert.Equal(3, cont.Next.ToolCallsMade.Count);
+        Assert.Contains(cont.Next.ToolCallsMade, call => string.Equals(call.ToolName, ToolNames.TimeNow, StringComparison.OrdinalIgnoreCase));
         Assert.Contains("currently", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Tokyo, Japan", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Asia/Tokyo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("open-meteo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("clock=system UTC", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("time_now=", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -209,6 +210,48 @@ public class ToolLoopStepTests
         Assert.Contains("Tokyo, Japan", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Asia/Tokyo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("open-meteo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cannot provide", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Chains_timezone_and_time_now_for_natural_location_time_request()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool(ToolNames.WeatherGeocode, "{\"location\":\"Tokyo\"}"),
+            LlmReply.Tool(ToolNames.ResolveTimezone, "{\"countryCode\":\"JP\",\"latitude\":35.6768601,\"longitude\":139.7638947}"),
+            LlmReply.Final("I cannot provide the live time."));
+        var mcp = new StubMcp((tool, _) => tool switch
+        {
+            var name when string.Equals(name, ToolNames.WeatherGeocode, StringComparison.OrdinalIgnoreCase) =>
+                "{\"results\":[{\"name\":\"Tokyo\",\"latitude\":35.6768601,\"longitude\":139.7638947}],\"source\":\"photon\"}",
+            var name when string.Equals(name, ToolNames.ResolveTimezone, StringComparison.OrdinalIgnoreCase) =>
+                "{\"timezone\":\"Asia/Tokyo\",\"source\":\"open-meteo\"}",
+            var name when string.Equals(name, ToolNames.TimeNow, StringComparison.OrdinalIgnoreCase) =>
+                "{\"iso\":\"2026-05-07T20:29:14.0325030-06:00\",\"unix_ms\":1778207354032,\"timezone\":\"Mountain Standard Time\",\"offset\":\"-06:00\"}",
+            _ => "ok"
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var prompt = "I am scheduling a call with someone in Tokyo. Use the available time tools if needed and tell me the current date and time there in one short sentence.";
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = new[] { ChatMessage.System("sys"), ChatMessage.User(prompt) },
+            ToolDefs = new[]
+            {
+                new ToolDefinition { Function = new FunctionDefinition { Name = ToolNames.WeatherGeocode, Description = "geocode", Parameters = new { } } },
+                new ToolDefinition { Function = new FunctionDefinition { Name = ToolNames.ResolveTimezone, Description = "timezone", Parameters = new { } } },
+                new ToolDefinition { Function = new FunctionDefinition { Name = ToolNames.TimeNow, Description = "time", Parameters = new { } } },
+            }
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(3, cont.Next.ToolCallsMade.Count);
+        Assert.Contains("Tokyo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Asia/Tokyo", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("time_now=", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("one short sentence", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cannot provide", cont.Next.AssistantDraft, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -284,6 +327,152 @@ public class ToolLoopStepTests
     }
 
     [Fact]
+    public async Task Calculator_parse_error_nudges_model_to_retry_with_expression()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("calculator", "{\"expression\":\"sum of all positive multiples of 6 less than 50\"}"),
+            LlmReply.Tool("calculator", "{\"expression\":\"6+12+18+24+30+36+42+48\"}"),
+            LlmReply.Final("216"));
+        var mcp = new StubMcp((_, args) =>
+            args.Contains("6+12+18+24+30+36+42+48", StringComparison.Ordinal)
+                ? "{\"expression\":\"6+12+18+24+30+36+42+48\",\"result\":\"216\"}"
+                : "{\"error\":\"Could not evaluate expression: Error parsing the expression. The calculator only accepts a pure arithmetic expression, not prose or a word problem.\"}");
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = NewContext() with
+        {
+            UserText = "What is the sum of all positive multiples of 6 that are less than 50?",
+            LlmMessages =
+            [
+                ChatMessage.System("sys"),
+                ChatMessage.User("What is the sum of all positive multiples of 6 that are less than 50?"),
+            ],
+            ToolDefs =
+            [
+                new ToolDefinition { Function = new FunctionDefinition { Name = "calculator", Description = "calc", Parameters = new { } } },
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("216", cont.Next.AssistantDraft);
+        Assert.Equal(3, llm.ReceivedMessages.Count);
+        Assert.Contains(
+            llm.ReceivedMessages[1],
+            message => message.Role == "system" &&
+                (message.Content?.Contains("Call calculator again with only a pure expression", StringComparison.OrdinalIgnoreCase) ?? false));
+        Assert.Equal("calculator", llm.ForcedToolNames[1]);
+    }
+
+    [Fact]
+    public async Task Calculator_turn_adds_setup_hint_before_first_model_call()
+    {
+        var llm = new FakeLlm(LlmReply.Final("37"));
+        var step = BuildStep(llm);
+        var prompt = "Use the calculator tool for each arithmetic step. Let b1 = 2, b2 = 5, and b_n = b_{n-1} + 2b_{n-2} for n >= 3. What is b5? Reply with only the integer.";
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = new[] { ChatMessage.System("sys"), ChatMessage.User(prompt) },
+            ToolDefs = new[]
+            {
+                new ToolDefinition { Function = new FunctionDefinition { Name = "calculator", Description = "calc", Parameters = new { } } },
+            },
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var firstRound = Assert.Single(llm.ReceivedMessages);
+        Assert.Contains(
+            firstRound,
+            message => message.Role == "system" &&
+                (message.Content?.Contains("Preserve operand order exactly from formulas", StringComparison.OrdinalIgnoreCase) ?? false) &&
+                (message.Content?.Contains("recurrences or indexed sequences", StringComparison.OrdinalIgnoreCase) ?? false));
+    }
+
+    [Fact]
+    public async Task Strict_calculator_integer_turn_uses_latest_successful_tool_result()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("calculator", "{\"expression\":\"6+12+18+24+30+36+42+48\"}"),
+            LlmReply.Final("48"));
+        var mcp = new StubMcp(_ => "{\"expression\":\"6+12+18+24+30+36+42+48\",\"result\":\"216\"}");
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = NewContext() with
+        {
+            UserText = "Use the calculator tool to compute the arithmetic. What is the sum of all positive multiples of 6 that are less than 50? Reply with only the integer.",
+            LlmMessages =
+            [
+                ChatMessage.System("sys"),
+                ChatMessage.User("Use the calculator tool to compute the arithmetic. What is the sum of all positive multiples of 6 that are less than 50? Reply with only the integer."),
+            ],
+            ToolDefs =
+            [
+                new ToolDefinition { Function = new FunctionDefinition { Name = "calculator", Description = "calc", Parameters = new { } } },
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("216", cont.Next.AssistantDraft);
+    }
+
+    [Fact]
+    public async Task Strict_python_integer_turn_uses_latest_successful_stdout()
+    {
+        // Observed live: the model's second python attempt printed the correct
+        // 111 (exit 0) and the model still answered "1". The latest successful
+        // bare-number stdout must win the strict-integer turn.
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(collatz(27))\"}"),
+            LlmReply.Final("1"));
+        var mcp = new StubMcp(_ => "{\"stdout\":\"111\\n\",\"exit_code\":0}");
+        var step = BuildStep(llm, mcp: mcp);
+        var prompt = "Use the python_eval tool to compute this. Starting from 27, how many Collatz steps does it take to reach 1? Reply with only the integer.";
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs =
+            [
+                new ToolDefinition { Function = new FunctionDefinition { Name = "python_eval", Description = "sandbox", Parameters = new { } } },
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("111", cont.Next.AssistantDraft);
+    }
+
+    [Fact]
+    public async Task Failed_python_script_stdout_is_never_adopted_as_strict_answer()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(x)\"}"),
+            LlmReply.Final("42"));
+        var mcp = new StubMcp(_ => "{\"stdout\":\"13\\n\",\"stderr\":\"NameError\",\"exit_code\":1}");
+        var step = BuildStep(llm, mcp: mcp);
+        var prompt = "Use the python_eval tool to compute this. Reply with only the integer.";
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs =
+            [
+                new ToolDefinition { Function = new FunctionDefinition { Name = "python_eval", Description = "sandbox", Parameters = new { } } },
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Exit code 1 → the printed 13 is from a broken script; keep the model's draft.
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("42", cont.Next.AssistantDraft);
+    }
+
+    [Fact]
     public async Task Places_discover_success_builds_local_business_draft_without_second_llm_round()
     {
         var llm = new FakeLlm(
@@ -321,6 +510,312 @@ public class ToolLoopStepTests
         Assert.All(term.Response.Sources, source => Assert.Equal("openstreetmap.org", source.Domain));
         Assert.Single(llm.MaxTokenOverrides);
     }
+
+    // ── compute interventions ─────────────────────────────────────────
+
+    // Intervention 1(a): python exit-1 SyntaxError → repair nudge injected
+    // (mentions multi-line + print) and python_eval forced next round; the
+    // model's fixed second script wins.
+    [Fact]
+    public async Task Python_syntax_error_injects_repair_nudge_and_forces_retry()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"def f(): x=0; for i in range(10): x+=i; return x\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"x = 0\\nfor i in range(10):\\n    x += i\\nprint(x)\"}"),
+            LlmReply.Final("45"));
+        var mcp = new StubMcp((_, args) =>
+            args.Contains("print(x)", StringComparison.Ordinal)
+                ? "{\"stdout\":\"45\\n\",\"exit_code\":0}"
+                : "{\"stdout\":\"\",\"stderr\":\"SyntaxError: invalid syntax\",\"exit_code\":1}");
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use the python_eval tool to compute this. Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("45", cont.Next.AssistantDraft);
+        // The repair nudge must land before the second model call.
+        Assert.Contains(
+            llm.ReceivedMessages[1],
+            message => message.Role == "system" &&
+                (message.Content?.Contains("MULTI-LINE", StringComparison.OrdinalIgnoreCase) ?? false) &&
+                (message.Content?.Contains("print(", StringComparison.OrdinalIgnoreCase) ?? false));
+        // python_eval was forced for the repair round.
+        Assert.Equal("python_eval", llm.ForcedToolNames[1]);
+    }
+
+    // Intervention 1(b): exit-0 with empty stdout → same repair nudge.
+    [Fact]
+    public async Task Python_empty_stdout_injects_repair_nudge_and_forces_retry()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"x = 1 + 1\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"print(2)\"}"),
+            LlmReply.Final("2"));
+        var mcp = new StubMcp((_, args) =>
+            args.Contains("print(2)", StringComparison.Ordinal)
+                ? "{\"stdout\":\"2\\n\",\"exit_code\":0}"
+                : "{\"stdout\":\"\",\"exit_code\":0}");
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use the python_eval tool to compute this. Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("2", cont.Next.AssistantDraft);
+        Assert.Contains(
+            llm.ReceivedMessages[1],
+            message => message.Role == "system" &&
+                (message.Content?.Contains("printed nothing", StringComparison.OrdinalIgnoreCase) ?? false));
+        Assert.Equal("python_eval", llm.ForcedToolNames[1]);
+    }
+
+    // Intervention 1(c): three consecutive failures → only 2 repair nudges,
+    // then the loop proceeds normally (no infinite loop).
+    [Fact]
+    public async Task Python_repair_nudge_is_capped_at_two_per_turn()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"boom1\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"boom2\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"boom3\"}"),
+            LlmReply.Final("I could not compute a clean result."));
+        var mcp = new StubMcp(_ => "{\"stdout\":\"\",\"stderr\":\"SyntaxError\",\"exit_code\":1}");
+        var step = BuildStep(llm, mcp: mcp, maxRoundTrips: 6);
+        var ctx = ComputeContext("Use the python_eval tool to compute this. Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Loop terminated cleanly on the model's final text — no runaway.
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("I could not compute a clean result.", cont.Next.AssistantDraft);
+        Assert.Equal(3, cont.Next.ToolCallsMade.Count);
+        // Exactly two rounds were force-directed to python_eval by the repair
+        // nudge (after the 1st and 2nd failures); the 3rd failure does not nudge.
+        Assert.Equal(2, llm.ForcedToolNames.Count(name => name == "python_eval"));
+    }
+
+    // Intervention 2(d): digit_sum_power incident. call1 prints "37" (exit 0),
+    // call2 prints "1" (exit 0), model finalizes → reconciliation message names
+    // 37 and 1, one forced python round returns "37" → final draft "37".
+    [Fact]
+    public async Task Compute_disagreement_triggers_reconciliation_and_adopts_reconciled_value()
+    {
+        var callIndex = 0;
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(sum(int(d) for d in str(2**30)))\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"print(str(2**30)[0::-1])\"}"),
+            LlmReply.Final("1"),
+            LlmReply.Tool("python_eval", "{\"code\":\"n = 2**30\\nprint(sum(int(d) for d in str(n)))\"}"),
+            LlmReply.Final("37"));
+        var mcp = new StubMcp(_ =>
+        {
+            callIndex++;
+            return callIndex switch
+            {
+                1 => "{\"stdout\":\"37\\n\",\"exit_code\":0}",
+                2 => "{\"stdout\":\"1\\n\",\"exit_code\":0}",
+                _ => "{\"stdout\":\"37\\n\",\"exit_code\":0}",
+            };
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use the python_eval tool. What is the digit sum of 2**30? Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("37", cont.Next.AssistantDraft);
+        // The reconciliation message named both disagreeing values.
+        Assert.Contains(
+            llm.ReceivedMessages.SelectMany(round => round),
+            message => message.Role == "system" &&
+                (message.Content?.Contains("returned different values", StringComparison.OrdinalIgnoreCase) ?? false) &&
+                (message.Content?.Contains("37", StringComparison.Ordinal) ?? false) &&
+                (message.Content?.Contains("1", StringComparison.Ordinal) ?? false));
+        // Exactly one reconciliation round was forced to python_eval after the finalize.
+        Assert.Equal("python_eval", llm.ForcedToolNames[^2]);
+        Assert.Equal(3, cont.Next.ToolCallsMade.Count);
+    }
+
+    // Intervention 2(e): agreement case — two successful calls both "111", model
+    // finalizes → NO reconciliation round, draft "111".
+    [Fact]
+    public async Task Compute_agreement_skips_reconciliation()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(111)\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"print(100+11)\"}"),
+            LlmReply.Final("wrong transcription"));
+        var mcp = new StubMcp(_ => "{\"stdout\":\"111\\n\",\"exit_code\":0}");
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use the python_eval tool to compute this. Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("111", cont.Next.AssistantDraft);
+        // Only two tool calls — no forced reconciliation round happened.
+        Assert.Equal(2, cont.Next.ToolCallsMade.Count);
+        Assert.DoesNotContain(
+            llm.ReceivedMessages.SelectMany(round => round),
+            message => message.Role == "system" &&
+                (message.Content?.Contains("returned different values", StringComparison.OrdinalIgnoreCase) ?? false));
+    }
+
+    // Regression (measured live, divisibility_count 3/5 -> 0/5): the repair
+    // nudge must NOT fire when a successful compute value already exists.
+    // Call 1 printed the correct 401; the model's redundant sympy "verify"
+    // then failed. Nudging the model to "fix" that doomed verify goaded it
+    // into a wrong-but-successful competitor (201) that tied against the
+    // right answer. With the gate, the failed verify is ignored and the
+    // turn keeps 401.
+    [Fact]
+    public async Task Repair_nudge_does_not_fire_once_a_successful_value_exists()
+    {
+        var callIndex = 0;
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"count = sum(1 for i in range(1,1001) if (i%3==0 or i%5==0) and i%15!=0)\\nprint(count)\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"from sympy import lcm; print(...)\"}"),
+            LlmReply.Final("201"));
+        var mcp = new StubMcp(_ =>
+        {
+            callIndex++;
+            return callIndex == 1
+                ? "{\"stdout\":\"401\\n\",\"exit_code\":0}"
+                : "{\"stdout\":\"\",\"stderr\":\"ModuleNotFoundError: No module named 'sympy'\",\"exit_code\":1}";
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use the python_eval tool to compute this. Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("401", cont.Next.AssistantDraft);
+        Assert.Equal(2, cont.Next.ToolCallsMade.Count);
+        Assert.DoesNotContain(
+            llm.ReceivedMessages.SelectMany(round => round),
+            message => message.Role == "system" &&
+                (message.Content?.Contains("printed nothing", StringComparison.OrdinalIgnoreCase) ?? false));
+    }
+
+    // Regression companion: when the vote is split 1-1 (reconciliation cap
+    // already spent, model declines the forced round), the OLDEST value wins —
+    // the taxonomy showed corrupted values come from later verify calls.
+    [Fact]
+    public async Task Split_vote_resolves_to_oldest_value()
+    {
+        var callIndex = 0;
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(401)\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"print(201)\"}"),
+            LlmReply.Final("201"),
+            LlmReply.Final("201"));
+        var mcp = new StubMcp(_ =>
+        {
+            callIndex++;
+            return callIndex == 1
+                ? "{\"stdout\":\"401\\n\",\"exit_code\":0}"
+                : "{\"stdout\":\"201\\n\",\"exit_code\":0}";
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use the python_eval tool to compute this. Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Reconciliation fired once (cap 1); the model declined to compute a
+        // tiebreaker, so the split resolves to the first computation.
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("401", cont.Next.AssistantDraft);
+    }
+
+    // Intervention 2(f): majority rule after the reconciliation cap is used.
+    // call1=111, call2=13 → finalize triggers the single reconciliation round →
+    // reconciliation call3=111 → finalize with the cap now spent. Collected
+    // successful results are 111, 13, 111 → draft "111" (majority beats newest).
+    [Fact]
+    public async Task Compute_majority_value_wins_over_newest()
+    {
+        var callIndex = 0;
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(111)\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"print(13)\"}"),
+            LlmReply.Final("first finalize"),
+            LlmReply.Tool("python_eval", "{\"code\":\"print(111)\"}"),
+            LlmReply.Final("second finalize"));
+        var mcp = new StubMcp(_ =>
+        {
+            callIndex++;
+            return callIndex switch
+            {
+                1 => "{\"stdout\":\"111\\n\",\"exit_code\":0}",
+                2 => "{\"stdout\":\"13\\n\",\"exit_code\":0}",
+                _ => "{\"stdout\":\"111\\n\",\"exit_code\":0}",
+            };
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use the python_eval tool to compute this. Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        // Values collected oldest→newest: 111, 13, 111. Majority (2) = 111.
+        Assert.Equal("111", cont.Next.AssistantDraft);
+        Assert.Equal(3, cont.Next.ToolCallsMade.Count);
+    }
+
+    // Both interventions in one turn: python first fails (repair nudge, class B),
+    // the retry succeeds with 37, a redundant "verify" call succeeds with 1
+    // (disagreement), the model finalizes → reconciliation nudge (class C) forces
+    // one clean round returning 37 → draft 37. Confirms the two budgets are
+    // independent and the forced rounds stay within the round-trip cap.
+    [Fact]
+    public async Task Both_interventions_can_fire_in_one_turn()
+    {
+        var callIndex = 0;
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"def f(): return\"}"),        // fails
+            LlmReply.Tool("python_eval", "{\"code\":\"print(sum(int(d) for d in str(2**30)))\"}"), // 37
+            LlmReply.Tool("python_eval", "{\"code\":\"print(str(2**30)[0::-1])\"}"), // 1 (corrupted verify)
+            LlmReply.Final("1"),
+            LlmReply.Tool("python_eval", "{\"code\":\"n=2**30\\nprint(sum(int(d) for d in str(n)))\"}"), // reconcile 37
+            LlmReply.Final("37"));
+        var mcp = new StubMcp(_ =>
+        {
+            callIndex++;
+            return callIndex switch
+            {
+                1 => "{\"stdout\":\"\",\"stderr\":\"SyntaxError\",\"exit_code\":1}",
+                2 => "{\"stdout\":\"37\\n\",\"exit_code\":0}",
+                3 => "{\"stdout\":\"1\\n\",\"exit_code\":0}",
+                _ => "{\"stdout\":\"37\\n\",\"exit_code\":0}",
+            };
+        });
+        var step = BuildStep(llm, mcp: mcp, maxRoundTrips: 8);
+        var ctx = ComputeContext("Use the python_eval tool. What is the digit sum of 2**30? Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("37", cont.Next.AssistantDraft);
+        var allMessages = llm.ReceivedMessages.SelectMany(round => round).ToList();
+        // Intervention 1 (repair) and Intervention 2 (reconciliation) both landed.
+        Assert.Contains(allMessages, m => m.Role == "system" &&
+            (m.Content?.Contains("MULTI-LINE", StringComparison.OrdinalIgnoreCase) ?? false));
+        Assert.Contains(allMessages, m => m.Role == "system" &&
+            (m.Content?.Contains("returned different values", StringComparison.OrdinalIgnoreCase) ?? false));
+        // 4 tool calls total: fail, 37, 1, reconcile-37.
+        Assert.Equal(4, cont.Next.ToolCallsMade.Count);
+    }
+
+    private static TurnContext ComputeContext(string prompt) => NewContext() with
+    {
+        UserText = prompt,
+        LlmMessages = new[] { ChatMessage.System("sys"), ChatMessage.User(prompt) },
+        ToolDefs = new[]
+        {
+            new ToolDefinition { Function = new FunctionDefinition { Name = "python_eval", Description = "sandbox", Parameters = new { } } },
+        },
+    };
 
     // ── helpers ──────────────────────────────────────────────────────
 
@@ -361,6 +856,7 @@ public class ToolLoopStepTests
         private readonly Queue<LlmReply> _replies;
         public List<int> MaxTokenOverrides { get; } = new();
         public List<string?> ForcedToolNames { get; } = new();
+        public List<IReadOnlyList<ChatMessage>> ReceivedMessages { get; } = new();
 
         public FakeLlm(params LlmReply[] replies) => _replies = new(replies);
 
@@ -368,9 +864,10 @@ public class ToolLoopStepTests
             IReadOnlyList<ChatMessage> messages,
             IReadOnlyList<ToolDefinition>? tools = null,
             CancellationToken cancellationToken = default) => Task.FromResult(
+                Record(messages,
                 _replies.Count > 0
                     ? _replies.Dequeue().ToResponse()
-                    : new LlmResponse { IsComplete = true, Content = "(ran out)", FinishReason = "stop" });
+                    : new LlmResponse { IsComplete = true, Content = "(ran out)", FinishReason = "stop" }));
 
         public Task<LlmResponse> ChatAsync(
             IReadOnlyList<ChatMessage> messages,
@@ -393,6 +890,12 @@ public class ToolLoopStepTests
 
         public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<string?>("fake-model");
+
+        private LlmResponse Record(IReadOnlyList<ChatMessage> messages, LlmResponse response)
+        {
+            ReceivedMessages.Add(messages.ToArray());
+            return response;
+        }
     }
 
     private abstract record LlmReply

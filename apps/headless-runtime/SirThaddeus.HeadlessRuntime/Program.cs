@@ -10,6 +10,7 @@ using SirThaddeus.Agent.Guardrails;
 using SirThaddeus.Agent.Memory;
 using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Pipeline.Steps;
+using SirThaddeus.Agent.PostProcessing;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 using SirThaddeus.Agent.Utilities;
@@ -264,7 +265,9 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
 
     var sanitize = new Func<TurnContext, string, string>(
         (ctx, draft) => ApplyHeadlessQualityGuards(
-            AssistantResponseSanitizer.CleanChatReply(draft),
+            AssistantResponseSanitizer.NormalizeJsonOnlyReply(
+                AssistantResponseSanitizer.CleanChatReply(draft),
+                ctx.UserText),
             ctx));
 
     // Memory context read (user profile facts, preferences). Uses the
@@ -380,6 +383,15 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         // chat and opinion prompts pass through untouched.
         new FreshnessRouterStep(),
 
+        // Self-consistency (opt-in via ST_SELF_CONSISTENCY=N): for strict-answer
+        // reasoning items, sample the model N times step-by-step and return the
+        // majority-vote answer — stabilizes the variance a single sample shows
+        // on multi-step problems. No-op when disabled or for non-strict prompts.
+        // The tool loop is passed as an optional collaborator so tool-aware mode
+        // (ST_SELF_CONSISTENCY_TOOLS=1) can vote over full tool-loop runs for
+        // compute-bound problems. It stays inert unless that flag is also set.
+        new SelfConsistencyStep(llm, toolLoop: toolLoop),
+
         toolLoop,
         new PostProcessStep(sanitize, "PostProcess:Sanitize"),
 
@@ -460,6 +472,12 @@ static string ApplyHeadlessQualityGuards(string text, TurnContext context)
 {
     text = GeneralResponseQualityGuards.Apply(text, context.UserText);
     text = ToolBackedResponseQualityGuards.Apply(text, context.UserText, context.ToolCallsMade);
+
+    if (DeterministicChatPostProcessor.TryNormalizeStrictAnswerOnlyReply(context.UserText, text) is { Length: > 0 } strictReply)
+        return strictReply;
+
+    if (DeterministicChatPostProcessor.TryNormalizeMultipleChoiceLetterOnlyReply(context.UserText, text) is { Length: > 0 } multipleChoiceReply)
+        return multipleChoiceReply;
 
     if (TryBuildToolPingSummary(context) is { Length: > 0 } pingSummary)
         return pingSummary;

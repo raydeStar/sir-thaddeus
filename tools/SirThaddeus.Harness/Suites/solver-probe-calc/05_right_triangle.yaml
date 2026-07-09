@@ -1,0 +1,28 @@
+id: probe_calc_right_triangle
+name: Solver Probe (calculator) - Hypotenuse
+rubric_profile: general
+user_message: "Use the calculator tool to compute the arithmetic. A right triangle has legs 8 and 15. What is the hypotenuse length? Reply with only the integer."
+allowed_tools: [calculator]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "17"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/

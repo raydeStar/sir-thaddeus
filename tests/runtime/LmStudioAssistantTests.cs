@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using SirThaddeus.Agent;
+using SirThaddeus.Agent.Pipeline;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using Thaddeus.Runtime.Chat;
@@ -179,5 +181,131 @@ public class LmStudioAssistantTests : IDisposable
         Assert.DoesNotContain(sentTools, t => t.Function?.Name == "web_search");
         Assert.Contains(sentTools, t => t.Function?.Name == "memory_retrieve");
         Assert.Contains("Offline mode is ON", fake.Calls.Single()[0].Content);
+    }
+
+    // ── Self-consistency composition (roadmap 4.3) ────────────────────
+
+    [Fact]
+    public void BuildTurnPipeline_places_self_consistency_immediately_before_the_tool_loop()
+    {
+        // Production parity: the benchmark runtime (BuildPipelineBackedOrchestrator)
+        // wires SelfConsistencyStep right before ToolLoopStep. The desktop/chat
+        // pipeline must mirror that position so the honest-tooling lever is
+        // reachable in normal chat, not just in the harness. The step is inert
+        // unless ST_SELF_CONSISTENCY is set, so default behavior is unchanged.
+        var (_, assistant, _, _) = NewSut();
+
+        var pipeline = assistant.BuildTurnPipeline(
+            new FakeMcpClient(),
+            NullChatEventSink.Instance,
+            new AlwaysGrantGate());
+
+        var stepNames = pipeline.Steps.Select(s => s.Name).ToList();
+        var scIndex = stepNames.IndexOf("SelfConsistency");
+        var toolLoopIndex = stepNames.IndexOf("ToolLoop");
+
+        Assert.True(scIndex >= 0, "SelfConsistency step must be composed into the chat pipeline.");
+        Assert.True(toolLoopIndex >= 0, "ToolLoop step must be present in the chat pipeline.");
+        Assert.Equal(toolLoopIndex - 1, scIndex);
+    }
+
+    // ── Production tool exposure (roadmap 4.3 step 3) ─────────────────
+
+    [Fact]
+    public async Task RespondAsync_exposes_calculator_and_python_eval_to_the_model_on_a_plain_chat_turn()
+    {
+        // calculator and python_eval are registered as always-allowed "meta"
+        // tools (ToolGroupPolicy / ToolCapabilityRegistry). A normal chat turn
+        // with no footman must hand both to the model.
+        var tools = new[]
+        {
+            McpTool("calculator"),
+            McpTool("python_eval"),
+            McpTool("memory_retrieve"),
+        };
+        var (store, assistant, _, fake) = NewSut(tools: tools);
+        var thread = await store.CreateAsync("t", CancellationToken.None);
+
+        await assistant.RespondAsync(thread.Id, "hello there", CancellationToken.None);
+
+        var sentTools = fake.ToolCalls.Single();
+        Assert.Contains(sentTools, t => t.Function?.Name == "calculator");
+        Assert.Contains(sentTools, t => t.Function?.Name == "python_eval");
+    }
+
+    [Fact]
+    public async Task RespondAsync_keeps_calculator_and_python_eval_when_footman_narrows_to_chat()
+    {
+        // The footman classifies a greeting as AgentState.Chat, which narrows
+        // the tool list to the Chat family (MemoryRead | Meta). calculator and
+        // python_eval map to ToolCapability.Meta, so they must survive the
+        // narrowing — the same always-allowed class that keeps meta tools
+        // reachable regardless of intent. web_search (WebSearch) is dropped.
+        var tools = new[]
+        {
+            McpTool("calculator"),
+            McpTool("python_eval"),
+            McpTool("web_search"),
+            McpTool("memory_retrieve"),
+        };
+        var (store, assistant, _, fake) = NewSutWithFootman(
+            footman: new StubFootman(AgentState.Chat, confidence: 0.95),
+            tools: tools);
+        var thread = await store.CreateAsync("t", CancellationToken.None);
+
+        await assistant.RespondAsync(thread.Id, "hi", CancellationToken.None);
+
+        var sentTools = fake.ToolCalls.Single();
+        Assert.Contains(sentTools, t => t.Function?.Name == "calculator");
+        Assert.Contains(sentTools, t => t.Function?.Name == "python_eval");
+        Assert.DoesNotContain(sentTools, t => t.Function?.Name == "web_search");
+    }
+
+    private static McpToolInfo McpTool(string name) => new()
+    {
+        Name = name,
+        Description = name,
+        InputSchema = new { type = "object" },
+    };
+
+    private (JsonFileThreadStore store, LmStudioAssistant assistant, List<RuntimeEvent<object?>> captured, FakeLlmClient fake)
+        NewSutWithFootman(IFootmanRouter footman, IReadOnlyList<McpToolInfo> tools)
+    {
+        var store = new JsonFileThreadStore(_root, NullLogger<JsonFileThreadStore>.Instance);
+        var bus = new EventBus(NullLogger<EventBus>.Instance);
+        var publisher = new ChatTurnPublisher(bus);
+        var fake = new FakeLlmClient { Reply = "ok" };
+        var mcp = new FakeMcpClient { Tools = tools };
+        var gate = new ToolPermissionGate(new FakeSettingsStore(), bus, NullLogger<ToolPermissionGate>.Instance);
+        var audit = new TestAuditLogger();
+        var assistant = new LmStudioAssistant(fake, mcp, gate, store, publisher, audit, NullLogger<LmStudioAssistant>.Instance)
+        {
+            DeltaDelay = TimeSpan.Zero,
+            Footman = footman,
+        };
+        var captured = new List<RuntimeEvent<object?>>();
+        bus.Subscribe((evt, _) => { captured.Add(evt); return Task.CompletedTask; });
+        return (store, assistant, captured, fake);
+    }
+
+    private sealed class StubFootman : IFootmanRouter
+    {
+        private readonly RoutingDecision _decision;
+
+        public StubFootman(AgentState state, double confidence)
+        {
+            _decision = new RoutingDecision
+            {
+                SchemaVersion = 1,
+                RequestId = "stub",
+                NextState = state,
+                Confidence = confidence,
+                Abstain = false,
+                ReasonCode = "heuristic_chat",
+            };
+        }
+
+        public Task<RoutingDecision> RouteAsync(string userMessage, RoutingFeatures features, CancellationToken cancellationToken = default)
+            => Task.FromResult(_decision);
     }
 }

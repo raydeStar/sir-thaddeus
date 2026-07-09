@@ -1,0 +1,28 @@
+id: probe_py_nonlinear_recurrence
+name: Python Probe - Nonlinear Recurrence Term
+rubric_profile: general
+user_message: "Use the python_eval tool to compute this. Let a1 = 2 and a_n = a_{n-1}^2 - a_{n-1} + 1 for n >= 2. What is a5? Reply with only the integer."
+allowed_tools: [python_eval]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "1807"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/

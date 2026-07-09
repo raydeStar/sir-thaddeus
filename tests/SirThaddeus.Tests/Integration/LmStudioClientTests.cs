@@ -55,6 +55,46 @@ public class LmStudioClientSelfHealingTests : IDisposable
     }
 
     [Fact]
+    public async Task TemperatureOverride_isSentInRequestBody()
+    {
+        string? capturedBody = null;
+        var handler = new SequenceHttpHandler(
+            [MakeSuccessResponse("ok")],
+            onRequest: body => capturedBody = body);
+
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        await client.ChatAsync(SimpleMessages, tools: null, maxTokensOverride: 64, temperatureOverride: 0.9);
+
+        Assert.NotNull(capturedBody);
+        using var doc = JsonDocument.Parse(capturedBody!);
+        Assert.Equal(0.9, doc.RootElement.GetProperty("temperature").GetDouble(), 3);
+    }
+
+    [Fact]
+    public async Task NoTemperatureOverride_usesConfiguredTemperature()
+    {
+        string? capturedBody = null;
+        var handler = new SequenceHttpHandler(
+            [MakeSuccessResponse("ok")],
+            onRequest: body => capturedBody = body);
+
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        await client.ChatAsync(SimpleMessages, tools: null, maxTokensOverride: 64);
+
+        Assert.NotNull(capturedBody);
+        using var doc = JsonDocument.Parse(capturedBody!);
+        Assert.Equal(DefaultOptions.Temperature, doc.RootElement.GetProperty("temperature").GetDouble(), 3);
+    }
+
+    [Fact]
     public async Task RegexFailure_RetriesWithoutExtras_Succeeds()
     {
         var handler = new SequenceHttpHandler([

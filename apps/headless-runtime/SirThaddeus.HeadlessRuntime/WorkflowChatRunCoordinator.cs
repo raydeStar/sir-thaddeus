@@ -124,6 +124,25 @@ internal sealed class WorkflowChatRunCoordinator
                 ShouldRetry = false
             };
         }
+        else if (firstResponse.FromConsensusVote)
+        {
+            // A self-consistency vote already sampled this answer N times and
+            // returned the majority. The confidence-gated retry would re-run the
+            // ENTIRE N-sample vote a second time behind a "please re-check"
+            // preamble — redundant work on exactly the turn that already spent
+            // the most compute, and a consensus answer does not get more
+            // reliable by voting again. Preserve it the same way the other
+            // deterministic responses above short-circuit the retry gate: raise
+            // the confidence floor + ShouldRetry=false so RetryGateEvaluator
+            // disallows the retry. Non-voted turns are untouched.
+            firstConfidence = new ConfidenceSnapshot
+            {
+                Score = Math.Max(firstConfidence.Score, 0.85),
+                Band = "High",
+                Summary = "Consensus-voted answer preserved without retry.",
+                ShouldRetry = false
+            };
+        }
         workflowState.LatestConfidence = firstConfidence;
         var selectedConfidence = firstConfidence;
 
@@ -182,7 +201,23 @@ internal sealed class WorkflowChatRunCoordinator
             retryState.Evidence.AddRange(workflowState.Evidence);
             CaptureEvidence(retryState, retryResponse, "retry");
 
-            var retryConfidence = _confidenceEvaluator.Evaluate(retryState);
+            // Judge the retry on its OWN evidence, not the accumulated
+            // first+retry set. firstConfidence was computed on the first
+            // attempt's evidence alone, so the comparison must be
+            // like-for-like. Folding the first attempt's failed tool calls
+            // into the retry's score charges them a second time as
+            // contradictions — which means a retry that recovers from a
+            // tool error (fail → fix → correct answer) can never out-score
+            // the first attempt, and its correct answer gets discarded.
+            var retryOnlyState = new TaskRunState
+            {
+                Envelope = workflowState.Envelope,
+                DraftAnswer = retryResponse.Text,
+                RuntimeState = TaskLifecycleState.Retrying
+            };
+            CaptureEvidence(retryOnlyState, retryResponse, "retry");
+
+            var retryConfidence = _confidenceEvaluator.Evaluate(retryOnlyState);
             if (retryConfidence.Score >= firstConfidence.Score)
             {
                 selectedResponse = retryResponse;

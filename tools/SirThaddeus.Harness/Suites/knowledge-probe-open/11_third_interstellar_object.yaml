@@ -1,0 +1,29 @@
+# answers verified via web 2026-07-03; open-book lane — never compare to closed-book numbers
+id: probe_open_third_interstellar_object
+name: Knowledge Probe (Open) - Third Interstellar Object
+rubric_profile: general
+user_message: "Use the web_search tool to find this. What is the official interstellar-object designation of the third confirmed interstellar object, a comet discovered by the ATLAS survey in Chile on 1 July 2025 (following 1I/Oumuamua and 2I/Borisov)? Reply with only the designation."
+allowed_tools: [web_search]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - python_eval
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "3I/ATLAS"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/

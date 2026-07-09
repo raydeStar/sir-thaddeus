@@ -1,0 +1,28 @@
+id: probe_py_tribonacci_term
+name: Python Probe - Tribonacci Term
+rubric_profile: general
+user_message: "Use the python_eval tool to compute this. The tribonacci sequence starts T1 = T2 = T3 = 1, and each later term is the sum of the previous three: T_n = T_{n-1} + T_{n-2} + T_{n-3}. What is T20? Reply with only the integer."
+allowed_tools: [python_eval]
+mode: live
+assertions:
+  required_tools: []
+  forbidden_tools:
+    - web_search
+    - system_execute
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords:
+    - "46499"
+  forbidden_keywords:
+    - as an ai
+  max_response_chars: 400
+min_score: 5.0
+patch_targets:
+  tier1_targets:
+    - packages/agent/SirThaddeus.Agent/
+  tier2_targets:
+    - packages/
+  tier3_targets:
+    - packages/

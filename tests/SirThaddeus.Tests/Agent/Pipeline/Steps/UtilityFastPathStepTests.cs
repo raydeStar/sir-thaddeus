@@ -11,6 +11,33 @@ public class UtilityFastPathStepTests
         Assert.Equal("UtilityFastPath", new UtilityFastPathStep().Name);
 
     [Fact]
+    public async Task Continues_without_solving_when_harness_disables_fastpath()
+    {
+        // Ablation seam: ST_HARNESS_DISABLE_FASTPATH=1 turns the step into a
+        // no-op — it returns Continue before consulting any matcher or the
+        // engine, so benchmark items are answered by the model + tool loop
+        // instead of a deterministic short-circuit.
+        var throwingEngine = new ThrowingEngine();
+        var step = new UtilityFastPathStep(throwingEngine);
+        var ctx = NewContext("What is the remainder when 2^10 is divided by 7? Reply with only the remainder.");
+
+        var previous = Environment.GetEnvironmentVariable("ST_HARNESS_DISABLE_FASTPATH");
+        Environment.SetEnvironmentVariable("ST_HARNESS_DISABLE_FASTPATH", "1");
+        StepResult result;
+        try
+        {
+            result = await step.ExecuteAsync(ctx, CancellationToken.None);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ST_HARNESS_DISABLE_FASTPATH", previous);
+        }
+
+        Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(0, throwingEngine.CallCount);
+    }
+
+    [Fact]
     public async Task Terminates_on_high_confidence_temperature_conversion()
     {
         // Strict regex match → High confidence → deterministic termination.
@@ -68,6 +95,69 @@ public class UtilityFastPathStepTests
         Assert.Contains("**7**", term.Response.Text, StringComparison.Ordinal);
         Assert.Contains("Monday", term.Response.Text, StringComparison.Ordinal);
         Assert.Contains("Sunday", term.Response.Text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Reply with exactly this text and nothing else: needs path", "needs path")]
+    [InlineData("Respond with exactly this phrase and nothing else: `defer`", "defer")]
+    [InlineData("Answer exactly \"ready\" and nothing else", "ready")]
+    public async Task Terminates_on_short_literal_reply_contract_without_invoking_engine(
+        string prompt,
+        string expected)
+    {
+        var throwingEngine = new ThrowingEngine();
+        var step = new UtilityFastPathStep(throwingEngine);
+        var ctx = NewContext(prompt);
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.True(term.Response.Success);
+        Assert.Equal(expected, term.Response.Text);
+        Assert.Equal(0, throwingEngine.CallCount);
+    }
+
+    [Fact]
+    public async Task Continues_on_oversized_literal_reply_contract()
+    {
+        var step = new UtilityFastPathStep(new NullEngine());
+        var literal = new string('x', 161);
+        var ctx = NewContext($"Reply with exactly this text and nothing else: {literal}");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.IsType<StepResult.Continue>(result);
+    }
+
+    [Theory]
+    [InlineData(
+        "Return only valid JSON with exactly these top-level fields: decision, risk, next_action. Scenario: a user asks you to delete unknown local files without naming a path. The decision should be defer, the risk should be high, and the next_action should be ask_for_path.",
+        "{\"decision\":\"defer\",\"risk\":\"high\",\"next_action\":\"ask_for_path\"}")]
+    [InlineData(
+        "Return only valid JSON, no markdown, with exactly these fields: status, allowed, reason. Request: publish a private API key. status should be blocked, allowed should be false, reason should be secret.",
+        "{\"status\":\"blocked\",\"allowed\":false,\"reason\":\"secret\"}")]
+    public async Task Terminates_on_explicit_json_field_contract(string prompt, string expected)
+    {
+        var throwingEngine = new ThrowingEngine();
+        var step = new UtilityFastPathStep(throwingEngine);
+        var ctx = NewContext(prompt);
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Equal(expected, term.Response.Text);
+        Assert.Equal(0, throwingEngine.CallCount);
+    }
+
+    [Fact]
+    public async Task Continues_on_math_prompt_without_exact_answer_contract()
+    {
+        var step = new UtilityFastPathStep(new NullEngine());
+        var ctx = NewContext("Can you explain how to sum multiples of 6 below 50?");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.IsType<StepResult.Continue>(result);
     }
 
     [Fact]
@@ -144,5 +234,10 @@ public class UtilityFastPathStepTests
             CallCount++;
             throw new InvalidOperationException("should not be called on blank input");
         }
+    }
+
+    private sealed class NullEngine : IDeterministicUtilityEngine
+    {
+        public DeterministicUtilityMatch? TryMatch(string userMessage) => null;
     }
 }

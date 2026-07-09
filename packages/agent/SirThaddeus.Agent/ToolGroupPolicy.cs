@@ -114,6 +114,16 @@ public static class ToolGroupPolicy
         ["policy_get_state"]       = "meta",
         ["time_now"]               = "meta",
 
+        // Math — pure deterministic computation, no I/O or side effects, so
+        // it shares time_now's always-allowed class rather than needing its
+        // own permission group.
+        ["calculator"]             = "meta",
+
+        // Sandboxed compute — Docker container with no network, no host
+        // mounts, read-only rootfs, and hard resource caps, so like the
+        // calculator it is pure computation with no reachable side effects.
+        ["python_eval"]            = "meta",
+
         // Control-plane side effects
         ["audit.export_bundle"]    = "files",
         ["audit_export_bundle"]    = "files",

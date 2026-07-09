@@ -76,6 +76,11 @@ public sealed class FreshnessRouterStep : ITurnStep
         @"(?:the\s+)?[a-z][\w\s,.'-]{1,80}(?:\?|\s+right\s+now|\s+now)?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex LocationThenThereTimePattern = new(
+        @"\b(?:in|at|for|with\s+someone\s+in)\s+[a-z][\w\s,.'-]{1,80}?[.!?]\s+" +
+        @".*\b(?:current\s+)?(?:date\s+and\s+time|time\s+and\s+date|time)\s+(?:there|in\s+that\s+(?:city|place|location))\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static readonly Regex PersonalContextPattern = new(
         @"\b(?:my|our|i'm|im|i've|ive|we)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -164,14 +169,24 @@ public sealed class FreshnessRouterStep : ITurnStep
             }));
         }
 
-        if (HasTool(context, WeatherGeocodeToolName) &&
-            HasTool(context, ResolveTimezoneToolName) &&
-            TimeInLocationPattern.IsMatch(userText))
+        if (LooksLikeLocationScopedTimeRequest(userText))
         {
-            return Task.FromResult<StepResult>(new StepResult.Continue(context with
+            if (HasTool(context, WeatherGeocodeToolName) &&
+                HasTool(context, ResolveTimezoneToolName))
             {
-                ForcedTool = WeatherGeocodeToolName,
-            }));
+                return Task.FromResult<StepResult>(new StepResult.Continue(context with
+                {
+                    ForcedTool = WeatherGeocodeToolName,
+                }));
+            }
+
+            if (HasTool(context, ResolveTimezoneToolName))
+            {
+                return Task.FromResult<StepResult>(new StepResult.Continue(context with
+                {
+                    ForcedTool = ResolveTimezoneToolName,
+                }));
+            }
         }
 
         // ── Weather intent ───────────────────────────────────────────────
@@ -227,6 +242,10 @@ public sealed class FreshnessRouterStep : ITurnStep
         }
         return false;
     }
+
+    private static bool LooksLikeLocationScopedTimeRequest(string userText)
+        => TimeInLocationPattern.IsMatch(userText) ||
+           LocationThenThereTimePattern.IsMatch(userText);
 
     private static bool HasOnlyTool(TurnContext context, string toolName)
     {
