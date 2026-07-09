@@ -419,9 +419,19 @@ public sealed class ToolLoopStep : ITurnStep
                 // the traceback — they fabricate an answer. Inject a targeted
                 // rewrite nudge and force python_eval next round. Capped at 2 per
                 // turn so a truly stuck problem can't spin the loop.
+                //
+                // GATE (measured regression, divisibility_count 3/5 -> 0/5): the
+                // nudge exists to rescue turns with NO usable output. When a
+                // successful bare-numeric value already exists this turn, the
+                // failing call is a redundant self-"verification" — repairing it
+                // goads the model into producing a wrong-but-successful
+                // competitor (401 then a "fixed" verify printing 201) that then
+                // ties against the correct value. Ignore it, like the pipeline
+                // always did before the nudge existed.
                 if (LooksLikePythonEvalTool(toolName) &&
                     LooksLikeFailedOrEmptyPythonResult(outcome) &&
-                    pythonRepairNudges < 2)
+                    pythonRepairNudges < 2 &&
+                    CollectSuccessfulComputeValues(context.UserText, toolCallsMade).Count == 0)
                 {
                     pythonRepairNudges++;
                     messages.Add(ChatMessage.System(
@@ -1354,11 +1364,15 @@ public sealed class ToolLoopStep : ITurnStep
             return null;
 
         var values = CollectSuccessfulComputeValues(userText, toolCallsMade);
-        return SelectMajorityThenNewest(values);
+        return SelectMajorityThenOldest(values);
     }
 
-    // Majority wins; on a tie the newest (last appended) of the tied values wins.
-    private static string? SelectMajorityThenNewest(IReadOnlyList<string> valuesOldestFirst)
+    // Majority wins; on a tie the OLDEST (first computed) of the tied values
+    // wins. The failure taxonomy showed corrupted values come from LATER
+    // redundant "verification" calls (37 then "1"; 401 then a "fixed" verify
+    // printing 201) — the first computation is empirically the trustworthy one
+    // when the vote is split.
+    private static string? SelectMajorityThenOldest(IReadOnlyList<string> valuesOldestFirst)
     {
         if (valuesOldestFirst.Count == 0)
             return null;
@@ -1369,15 +1383,15 @@ public sealed class ToolLoopStep : ITurnStep
 
         var maxCount = counts.Values.Max();
 
-        // Walk newest→oldest and return the first value that hits the max
-        // count, so a tie resolves to the most recent computation.
-        for (var i = valuesOldestFirst.Count - 1; i >= 0; i--)
+        // Walk oldest→newest and return the first value that hits the max
+        // count, so a tie resolves to the earliest computation.
+        foreach (var value in valuesOldestFirst)
         {
-            if (counts[valuesOldestFirst[i]] == maxCount)
-                return valuesOldestFirst[i];
+            if (counts[value] == maxCount)
+                return value;
         }
 
-        return valuesOldestFirst[^1];
+        return valuesOldestFirst[0];
     }
 
     // INTERVENTION 2 trigger: names the disagreement when the turn's successful

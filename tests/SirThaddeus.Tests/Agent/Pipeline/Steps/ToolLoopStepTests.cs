@@ -662,6 +662,72 @@ public class ToolLoopStepTests
                 (message.Content?.Contains("returned different values", StringComparison.OrdinalIgnoreCase) ?? false));
     }
 
+    // Regression (measured live, divisibility_count 3/5 -> 0/5): the repair
+    // nudge must NOT fire when a successful compute value already exists.
+    // Call 1 printed the correct 401; the model's redundant sympy "verify"
+    // then failed. Nudging the model to "fix" that doomed verify goaded it
+    // into a wrong-but-successful competitor (201) that tied against the
+    // right answer. With the gate, the failed verify is ignored and the
+    // turn keeps 401.
+    [Fact]
+    public async Task Repair_nudge_does_not_fire_once_a_successful_value_exists()
+    {
+        var callIndex = 0;
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"count = sum(1 for i in range(1,1001) if (i%3==0 or i%5==0) and i%15!=0)\\nprint(count)\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"from sympy import lcm; print(...)\"}"),
+            LlmReply.Final("201"));
+        var mcp = new StubMcp(_ =>
+        {
+            callIndex++;
+            return callIndex == 1
+                ? "{\"stdout\":\"401\\n\",\"exit_code\":0}"
+                : "{\"stdout\":\"\",\"stderr\":\"ModuleNotFoundError: No module named 'sympy'\",\"exit_code\":1}";
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use the python_eval tool to compute this. Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("401", cont.Next.AssistantDraft);
+        Assert.Equal(2, cont.Next.ToolCallsMade.Count);
+        Assert.DoesNotContain(
+            llm.ReceivedMessages.SelectMany(round => round),
+            message => message.Role == "system" &&
+                (message.Content?.Contains("printed nothing", StringComparison.OrdinalIgnoreCase) ?? false));
+    }
+
+    // Regression companion: when the vote is split 1-1 (reconciliation cap
+    // already spent, model declines the forced round), the OLDEST value wins —
+    // the taxonomy showed corrupted values come from later verify calls.
+    [Fact]
+    public async Task Split_vote_resolves_to_oldest_value()
+    {
+        var callIndex = 0;
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(401)\"}"),
+            LlmReply.Tool("python_eval", "{\"code\":\"print(201)\"}"),
+            LlmReply.Final("201"),
+            LlmReply.Final("201"));
+        var mcp = new StubMcp(_ =>
+        {
+            callIndex++;
+            return callIndex == 1
+                ? "{\"stdout\":\"401\\n\",\"exit_code\":0}"
+                : "{\"stdout\":\"201\\n\",\"exit_code\":0}";
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use the python_eval tool to compute this. Reply with only the integer.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Reconciliation fired once (cap 1); the model declined to compute a
+        // tiebreaker, so the split resolves to the first computation.
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("401", cont.Next.AssistantDraft);
+    }
+
     // Intervention 2(f): majority rule after the reconciliation cap is used.
     // call1=111, call2=13 → finalize triggers the single reconciliation round →
     // reconciliation call3=111 → finalize with the cap now spent. Collected
