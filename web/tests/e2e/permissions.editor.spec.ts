@@ -61,8 +61,13 @@ test.describe('permissions editor', () => {
     // Catalog-fed counts for the web group.
     await expect(page.getByTestId('settings-permissions-counts-web')).toHaveText('2 tools · 0 overrides');
 
-    // Pin the group policy, then check the cascade: inherit rows follow it live.
+    // A direct dangerous-group edit must disable the global developer
+    // override; otherwise the visible group selection saves but has no effect.
+    await page.getByTestId('settings-permissions-developer-override').selectOption('always');
     await page.getByTestId('settings-permissions-policy-web').selectOption('ask');
+    await expect(page.getByTestId('settings-permissions-developer-override')).toHaveValue('none');
+
+    // Pin the group policy, then check the cascade: inherit rows follow it live.
     await page.getByTestId('settings-permissions-expand-web').click();
     const searchRow = page.getByTestId('settings-permissions-tool-web-web_search');
     await expect(searchRow).toContainText('inherits Ask');
@@ -85,9 +90,11 @@ test.describe('permissions editor', () => {
     await expect(page.getByTestId('settings-saved')).toBeVisible({ timeout: 5_000 });
     expect(savedDocs.length).toBe(1);
     const firstSave = savedDocs[0].permissions as {
+      developerOverride: string;
       web: string;
       toolOverrides?: Record<string, string>;
     };
+    expect(firstSave.developerOverride).toBe('none');
     expect(firstSave.web).toBe('always');
     expect(firstSave.toolOverrides).toEqual({ web_search: 'off' });
 

@@ -102,6 +102,15 @@ export function ToolPolicyEditor({
     setDoc({ ...doc, permissions: { ...(doc.permissions ?? DEFAULT_PERMISSIONS), ...patch } });
   };
 
+  const setGroupPolicy = (groupKey: GroupKey, policy: PermissionPolicy) => {
+    const clearDeveloperOverride =
+      perms.developerOverride !== 'none' && DANGEROUS_GROUPS.has(groupKey);
+    updatePermissions({
+      [groupKey]: policy,
+      ...(clearDeveloperOverride ? { developerOverride: 'none' } : {}),
+    } as Partial<PermissionsSettings>);
+  };
+
   /** Sets/clears one tool override; drops `toolOverrides` entirely when empty. */
   const setToolOverride = (toolName: string, policy: PermissionPolicy | null) => {
     const next: Record<string, PermissionPolicy> = { ...overrides };
@@ -214,7 +223,7 @@ export function ToolPolicyEditor({
             overrides={overrides}
             expanded={expanded.has(key)}
             onToggleExpanded={() => toggleExpanded(key)}
-            onPolicyChange={(v) => updatePermissions({ [key]: v } as Partial<PermissionsSettings>)}
+            onPolicyChange={(v) => setGroupPolicy(key, v)}
             onToolOverride={setToolOverride}
             onResetOverrides={resetGroupOverrides}
             effectiveFor={effectiveFor}

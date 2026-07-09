@@ -326,7 +326,7 @@ public sealed class LmStudioAssistant : IAssistant
             gateAdapter,
             sessionId: messageId);
 
-        var pipeline = BuildTurnPipeline(auditedMcp, sink, gateAdapter);
+        var pipeline = BuildTurnPipeline(auditedMcp, sink);
 
         var initialContext = new TurnContext
         {
@@ -431,8 +431,7 @@ public sealed class LmStudioAssistant : IAssistant
 
     /// <summary>
     /// Builds the per-turn chat pipeline. Steps are stateless so most are
-    /// cheap to construct; the permission-gate adapter is per-turn because
-    /// it captures (threadId, turnId) at construction. Step order matters:
+    /// cheap to construct. Step order matters:
     /// feature extraction before the puzzle scaffold, scaffold before the
     /// footman, footman before the tool loop, post-process before the
     /// composer.
@@ -443,14 +442,16 @@ public sealed class LmStudioAssistant : IAssistant
     /// notably that <see cref="SelfConsistencyStep"/> sits immediately before
     /// the tool loop — without spinning up a full turn.
     /// </remarks>
-    internal ChatPipeline BuildTurnPipeline(IMcpToolClient mcp, IChatEventSink sink, IToolPermissionGate permissionGate)
+    internal ChatPipeline BuildTurnPipeline(IMcpToolClient mcp, IChatEventSink sink)
     {
         var sanitize = new Func<TurnContext, string, string>((_, draft) =>
             AssistantResponseSanitizer.CleanChatReply(draft));
 
         var toolLoop = new ToolLoopStep(
             _llm, mcp, sink,
-            permissionGate: permissionGate,
+            // AuditedMcpToolClient is the single permission-enforcement
+            // boundary. Gating again here would prompt twice for every tool.
+            permissionGate: null,
             groupClassifier: RuntimeToolGroupClassifier.Instance,
             interceptors: Array.Empty<IToolCallInterceptor>(),
             argsRewriters:
