@@ -34,18 +34,17 @@
     <path d="M294 232 C382 232 364 267 452 267"/>
   </g>
 
-  <!-- Butler-bird crest -->
+  <!-- Sir Thaddeus signet: the primary identity stays distinct from the raven familiar. -->
   <g transform="translate(184 159)" filter="url(#shadow)">
     <circle r="78" fill="#091421" stroke="url(#brass)" stroke-width="2"/>
     <circle r="67" fill="none" stroke="#F4D590" stroke-opacity="0.16"/>
-    <path d="M-36 -7 Q-23 -44 18 -38 Q38 -34 45 -15 L72 -7 L43 4 Q35 35 2 38 Q-28 37 -42 17 Q-49 6 -36 -7Z" fill="#F3E7CF"/>
-    <path d="M31 -14 L72 -7 L37 7 Q44 -2 31 -14Z" fill="url(#brass)"/>
-    <path d="M-31 -28 Q-6 -56 27 -35 Q-2 -39 -31 -28Z" fill="#C89038"/>
-    <circle cx="7" cy="-11" r="17" fill="#0B1725" stroke="#D7A34A" stroke-width="5"/>
-    <circle cx="7" cy="-11" r="5" fill="#F08B68"/>
-    <path d="M24 3 Q37 23 24 39" fill="none" stroke="#D7A34A" stroke-width="3"/>
-    <path d="M-8 42 L-37 28 Q-43 25 -43 33 L-43 50 Q-43 57 -37 53 L-8 42Z M8 42 L37 28 Q43 25 43 33 L43 50 Q43 57 37 53 L8 42Z" fill="url(#brass)"/>
-    <rect x="-9" y="34" width="18" height="16" rx="3" fill="#E3B458"/>
+    <circle r="59" fill="none" stroke="#D3A24E" stroke-opacity="0.2" stroke-dasharray="2 6"/>
+    <g font-family="Georgia, 'Times New Roman', serif" font-size="82" font-weight="700">
+      <text x="-23" y="28" text-anchor="middle" fill="#F5EBD8">S</text>
+      <text x="24" y="28" text-anchor="middle" fill="url(#brass)">T</text>
+    </g>
+    <path d="M-5 -3 L0 -9 L5 -3 L0 3Z" fill="#F08B68"/>
+    <path d="M-15 59 L0 51 L15 59 L0 67Z" fill="url(#brass)"/>
   </g>
 
   <line x1="344" y1="61" x2="344" y2="259" stroke="#D3A24E" stroke-opacity="0.28"/>

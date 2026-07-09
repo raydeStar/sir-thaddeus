@@ -30,7 +30,9 @@
   </p>
 </div>
 
-![A cinematic private AI workstation with local compute, a memory vault, permission controls, evidence, and a Sir Thaddeus crest](assets/images/local-first-workspace-v2.png)
+![The private study of Sir Thaddeus, with the real application on the monitor, local compute, a memory vault, permission controls, evidence, and a watchful raven familiar](assets/images/local-first-workspace-v3.png)
+
+<p align="center"><em>Your model. Your memory. Your permission.</em></p>
 
 **Sir Thaddeus is an open-source, local-first AI assistant for Windows.** Connect [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/), or another OpenAI-compatible endpoint, then give your model a private workspace: threaded chat, permissioned tools, durable memory, a Markdown wiki, routines, sources, traces, and an emergency stop.
 
@@ -225,6 +227,6 @@ If something feels wrong, [open an issue](https://github.com/raydeStar/sir-thadd
 
 ## Documentation, Contributing, and License
 
-[Documentation](docs/README.md) · [First run](docs/FIRST_RUN.md) · [Architecture](docs/ARCHITECTURE_PUBLIC.md) · [Testing](docs/TESTING.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md)
+[Documentation](docs/README.md) · [First run](docs/FIRST_RUN.md) · [Architecture](docs/ARCHITECTURE_PUBLIC.md) · [Testing](docs/TESTING.md) · [Brand system](assets/BRAND.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md)
 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [SECURITY.md](SECURITY.md) for vulnerability reporting. Sir Thaddeus is licensed under the [Apache License 2.0](LICENSE).
