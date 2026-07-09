@@ -76,6 +76,7 @@ import type {
   FilesSettings,
 } from '@thaddeus/shared-types';
 import { ModuleSettingsPanel } from '../components/modules/ModuleSettingsPanel';
+import { ToolPolicyEditor } from '../components/settings/ToolPolicyEditor';
 
 export const Route = createFileRoute('/settings')({
   component: SettingsRoute,
@@ -627,6 +628,8 @@ function PermissionsTab({
           onChange={(v) => setDoc({ ...doc, uiPrefs: { ...ui, autoSwitchToPermissions: v } })}
         />
       </Section>
+
+      <ToolPolicyEditor doc={doc} setDoc={setDoc} />
     </div>
   );
 }

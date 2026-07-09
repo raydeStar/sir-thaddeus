@@ -192,6 +192,7 @@ public sealed class JsonFileSettingsStore : ISettingsStore
                 Web = NormalizePolicy(permissions.Web, defaults.Permissions!.Web),
                 MemoryRead = NormalizePolicy(permissions.MemoryRead, defaults.Permissions!.MemoryRead),
                 MemoryWrite = NormalizePolicy(permissions.MemoryWrite, defaults.Permissions!.MemoryWrite),
+                ToolOverrides = NormalizeToolOverrides(permissions.ToolOverrides),
             },
             Files = files with
             {
@@ -228,6 +229,32 @@ public sealed class JsonFileSettingsStore : ISettingsStore
     {
         var v = (value ?? "").Trim().ToLowerInvariant();
         return v is "off" or "ask" or "always" ? v : fallback;
+    }
+
+    /// <summary>
+    /// Normalizes the optional per-tool override map: drops null/empty keys,
+    /// canonicalizes keys via <c>AuditedMcpToolClient.Canonicalize</c> so only
+    /// canonical snake_case names are stored, keeps only valid {off, ask,
+    /// always} values (invalid entries are dropped, not defaulted), dedupes
+    /// case-insensitively, and returns null for an empty result so the file
+    /// (WhenWritingNull) never contains an empty "toolOverrides": {}.
+    /// </summary>
+    private static Dictionary<string, string>? NormalizeToolOverrides(
+        Dictionary<string, string>? overrides)
+    {
+        if (overrides is null || overrides.Count == 0) return null;
+
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in overrides)
+        {
+            if (string.IsNullOrWhiteSpace(kvp.Key)) continue;
+            var value = (kvp.Value ?? "").Trim().ToLowerInvariant();
+            if (value is not ("off" or "ask" or "always")) continue;
+            var canonical = SirThaddeus.Agent.AuditedMcpToolClient.Canonicalize(kvp.Key);
+            result[canonical] = value;
+        }
+
+        return result.Count == 0 ? null : result;
     }
 
     private static string NormalizeTtsProvider(string? value, string fallback, string? piperVoicePath)

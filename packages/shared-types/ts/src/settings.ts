@@ -87,6 +87,11 @@ export interface PermissionsSettings {
   web: PermissionPolicy;
   memoryRead: PermissionPolicy;
   memoryWrite: PermissionPolicy;
+  /**
+   * Per-tool policy overrides keyed by canonical snake_case tool name.
+   * Absent key (or absent/null map) = the tool inherits its group policy.
+   */
+  toolOverrides?: Record<string, PermissionPolicy> | null;
 }
 
 export interface FilesSettings {

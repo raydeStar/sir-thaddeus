@@ -38,7 +38,12 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
     {
         var canonical = AuditedMcpToolClient.Canonicalize(toolName);
         var group = ToolGroupPolicy.ResolveGroup(canonical);
-        var policy = ToolGroupPolicy.ResolveEffectivePolicy(group, _snapshot);
+
+        // Per-tool override layer: consulted inside the resolver (most-specific
+        // wins) but the resolved value is also needed here to mirror the
+        // runtime gate's ordering around the session-grant shortcut.
+        var toolOverride = ToolGroupPolicy.ResolveToolOverride(_snapshot.ToolOverrides, canonical);
+        var policy = ToolGroupPolicy.ResolveEffectivePolicy(group, _snapshot, toolOverride);
 
         if (policy == "off")
         {
@@ -53,7 +58,11 @@ internal sealed class ApiPermissionGate : IToolPermissionGate
                     : ToolPermissionAuditMode.ToolExempt));
         }
 
-        if (!ToolGroupPolicy.PerCallOnlyGroups.Contains(group) &&
+        // Group session-grant shortcut. An explicit per-tool "ask" override
+        // must prompt even when the whole group was session-granted, so it
+        // bypasses this shortcut (mirrors the runtime gate).
+        if (toolOverride != "ask" &&
+            !ToolGroupPolicy.PerCallOnlyGroups.Contains(group) &&
             _sessionGrants.TryGetValue(group, out var granted) && granted)
         {
             return Task.FromResult(ToolPermissionResult.NotRequired(ToolPermissionAuditMode.SessionGrant));

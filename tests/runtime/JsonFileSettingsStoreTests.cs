@@ -263,6 +263,64 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
         Assert.Equal("Ctrl+Alt+Esc", doc.Shortcuts.StopAll);
     }
 
+    [Fact]
+    public async Task ReplaceAsync_roundtrips_and_normalizes_toolOverrides()
+    {
+        var store = NewStore();
+        var defaults = SettingsDocument.Defaults();
+        var updated = defaults with
+        {
+            Permissions = defaults.Permissions! with
+            {
+                ToolOverrides = new Dictionary<string, string>
+                {
+                    ["web_search"] = "off",       // kept as-is
+                    ["WeatherGeocode"] = "always", // key canonicalized to snake_case
+                    ["file_read"] = "GARBAGE",     // invalid value → dropped
+                    [""] = "off",                  // empty key → dropped
+                },
+            },
+        };
+
+        await store.ReplaceAsync(updated, CancellationToken.None);
+
+        var fresh = NewStore();
+        var roundTripped = await fresh.GetAsync(CancellationToken.None);
+        var overrides = roundTripped.Permissions!.ToolOverrides;
+
+        Assert.NotNull(overrides);
+        Assert.Equal("off", overrides!["web_search"]);
+        Assert.Equal("always", overrides["weather_geocode"]); // canonicalized
+        Assert.False(overrides.ContainsKey("WeatherGeocode"));
+        Assert.False(overrides.ContainsKey("file_read")); // invalid value dropped
+        Assert.Equal(2, overrides.Count);
+    }
+
+    [Fact]
+    public async Task ReplaceAsync_collapses_empty_toolOverrides_to_null()
+    {
+        var store = NewStore();
+        var defaults = SettingsDocument.Defaults();
+        var updated = defaults with
+        {
+            Permissions = defaults.Permissions! with
+            {
+                // All entries invalid → normalizes to an empty map → null.
+                ToolOverrides = new Dictionary<string, string> { ["file_read"] = "nope" },
+            },
+        };
+
+        await store.ReplaceAsync(updated, CancellationToken.None);
+
+        // The persisted file must not contain an empty "toolOverrides": {}.
+        var raw = await File.ReadAllTextAsync(store.FilePath);
+        Assert.DoesNotContain("toolOverrides", raw);
+
+        var fresh = NewStore();
+        var roundTripped = await fresh.GetAsync(CancellationToken.None);
+        Assert.Null(roundTripped.Permissions!.ToolOverrides);
+    }
+
     private JsonFileSettingsStore NewStore() =>
         new(Path.Combine(_tempDir, "runtime-settings.json"), NullLogger<JsonFileSettingsStore>.Instance);
 }

@@ -333,6 +333,131 @@ public class EffectivePolicyResolutionTests
         Assert.Equal("ask",
             ToolGroupPolicy.ResolveEffectivePolicy("sensitiveRead", snapshot));
     }
+
+    // ── Per-tool overrides ────────────────────────────────────────────
+
+    [Fact]
+    public void PerToolOverride_Off_BeatsGroupAlways()
+    {
+        var snapshot = MakeSnapshot(web: "always");
+        Assert.Equal("off",
+            ToolGroupPolicy.ResolveEffectivePolicy("web", snapshot, perToolOverride: "off"));
+    }
+
+    [Fact]
+    public void PerToolOverride_Always_BeatsGroupOff()
+    {
+        var snapshot = MakeSnapshot(web: "off");
+        Assert.Equal("always",
+            ToolGroupPolicy.ResolveEffectivePolicy("web", snapshot, perToolOverride: "always"));
+    }
+
+    [Fact]
+    public void PerToolOverride_BeatsDeveloperOverride()
+    {
+        // Developer override "always" would normally win for the web group;
+        // an explicit per-tool "off" must still beat it.
+        var snapshot = MakeSnapshot(web: "ask", devOverride: "always");
+        Assert.Equal("off",
+            ToolGroupPolicy.ResolveEffectivePolicy("web", snapshot, perToolOverride: "off"));
+    }
+
+    [Fact]
+    public void PerToolOverride_InvalidValue_InheritsGroup()
+    {
+        // An unrecognized override is "inherit", NOT "ask" — the group policy
+        // ("always") must show through.
+        var snapshot = MakeSnapshot(web: "always");
+        Assert.Equal("always",
+            ToolGroupPolicy.ResolveEffectivePolicy("web", snapshot, perToolOverride: "garbage"));
+    }
+
+    [Fact]
+    public void SafeMode_BeatsPerToolAlways()
+    {
+        var snapshot = MakeSnapshot(web: "off") with { SafeModeEnabled = true };
+        Assert.Equal("off",
+            ToolGroupPolicy.ResolveEffectivePolicy("web", snapshot, perToolOverride: "always"));
+    }
+
+    [Fact]
+    public void PanicMode_BeatsPerToolAlways_ForSideEffectGroup()
+    {
+        var snapshot = MakeSnapshot(web: "ask") with { PanicModeEnabled = true };
+        Assert.Equal("off",
+            ToolGroupPolicy.ResolveEffectivePolicy("web", snapshot, perToolOverride: "always"));
+    }
+
+    [Fact]
+    public void SensitiveRead_IgnoresPerToolOverride()
+    {
+        var snapshot = MakeSnapshot();
+        Assert.Equal("ask",
+            ToolGroupPolicy.ResolveEffectivePolicy("sensitiveRead", snapshot, perToolOverride: "always"));
+    }
+
+    [Fact]
+    public void MemoryMasterOff_BeatsPerToolAlways()
+    {
+        var snapshot = MakeSnapshot(memoryRead: "always", memoryEnabled: false);
+        Assert.Equal("off",
+            ToolGroupPolicy.ResolveEffectivePolicy("memoryRead", snapshot, perToolOverride: "always"));
+    }
+
+    [Fact]
+    public void TwoArgOverload_IgnoresOverrides_UnchangedBehavior()
+    {
+        // The 2-arg form must behave exactly as before (no per-tool layer).
+        var snapshot = MakeSnapshot(web: "always");
+        Assert.Equal("always", ToolGroupPolicy.ResolveEffectivePolicy("web", snapshot));
+    }
+
+    [Theory]
+    [InlineData("off", "off")]
+    [InlineData("ASK", "ask")]
+    [InlineData("  Always ", "always")]
+    [InlineData("", null)]
+    [InlineData("inherit", null)]
+    [InlineData(null, null)]
+    public void NormalizeOverrideValue_NormalizesOrInherits(string? raw, string? expected)
+    {
+        Assert.Equal(expected, ToolGroupPolicy.NormalizeOverrideValue(raw));
+    }
+
+    [Fact]
+    public void ResolveToolOverride_IsCaseInsensitive_OnKey()
+    {
+        var overrides = new Dictionary<string, string> { ["web_search"] = "off" };
+        Assert.Equal("off",
+            ToolGroupPolicy.ResolveToolOverride(overrides, "web_search"));
+        Assert.Equal("off",
+            ToolGroupPolicy.ResolveToolOverride(overrides, "WEB_SEARCH"));
+        Assert.Null(ToolGroupPolicy.ResolveToolOverride(overrides, "browser_navigate"));
+        Assert.Null(ToolGroupPolicy.ResolveToolOverride(null, "web_search"));
+    }
+
+    [Fact]
+    public void BuildSnapshot_PopulatesAndNormalizes_ToolOverrides()
+    {
+        var snapshot = ToolGroupPolicy.BuildSnapshot(new AppSettings
+        {
+            Mcp = new McpSettings
+            {
+                Permissions = new McpPermissionsSettings
+                {
+                    ToolOverrides = new Dictionary<string, string>
+                    {
+                        ["web_search"] = "OFF",       // upper-cased value normalizes
+                        ["weather_geocode"] = "bogus" // invalid value dropped
+                    }
+                }
+            }
+        }, isDebugBuild: true);
+
+        Assert.NotNull(snapshot.ToolOverrides);
+        Assert.Equal("off", snapshot.ToolOverrides!["web_search"]);
+        Assert.False(snapshot.ToolOverrides!.ContainsKey("weather_geocode"));
+    }
 }
 
 public class RedactedPurposeTests
