@@ -31,8 +31,8 @@ provider preset (LM Studio / Ollama / OpenAI / Custom), confirm the base
 URL, and click **Test connection**.
 
 > **Personality admin and display-name / about-me UI are Deferred from
-> v1.0.** See [`V1_SCOPE.md`](V1_SCOPE.md) and
-> [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md).
+> v1.0.** See [`archive/V1_SCOPE.md`](archive/V1_SCOPE.md) and
+> [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md).
 
 After setup, the app is fully operational and works **offline** for all
 subsequent launches (unless you chose a hosted provider like OpenAI).

@@ -8,7 +8,7 @@ This roadmap keeps v1 focused. It does not turn beta or deferred features into v
 
 Goal: present Sir Thaddeus publicly as a credible local-first AI workspace for controlled agentic workflows.
 
-- Lock scope in [V1_SCOPE.md](../V1_SCOPE.md).
+- Lock scope in [V1_SCOPE.md](archive/V1_SCOPE.md).
 - Keep the hybrid shell/runtime/workspace as the only public product surface.
 - Validate chat, model settings, MCP permissioning, tool activity, wiki/canvas, manual routines, diagnostics, and stop controls.
 - Keep voice, push-to-talk, tray, global shortcuts, compact panel, clipboard/screen tools, and Windows desktop observation hooks clearly labeled beta.

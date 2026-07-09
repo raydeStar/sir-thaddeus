@@ -169,6 +169,19 @@ public sealed class ModuleRuntimeServiceTests : IDisposable
     {
         var manifest = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "thaddeus-health-pack", "manifest.json"));
         Assert.True(File.Exists(manifest), $"Expected Health Pack manifest at {manifest}");
+
+        // This test spawns the real Health Pack MCP sidecar over stdio via
+        // `npm run mcp` (tsx). Its node_modules are gitignored, so a fresh
+        // clone (or an isolated git worktree) that hasn't run `npm install`
+        // in thaddeus-health-pack can't boot the sidecar — which otherwise
+        // surfaces as a cryptic "MCP stdout stream closed unexpectedly".
+        // Turn that into an actionable precondition instead.
+        var packRoot = Path.GetDirectoryName(manifest)!;
+        Assert.True(
+            Directory.Exists(Path.Combine(packRoot, "node_modules")),
+            $"Health Pack sidecar dependencies are missing. Run `npm install` in {packRoot} " +
+            "before running this integration test (its node_modules are gitignored).");
+
         var service = NewService(manifest);
         await service.ApproveAsync(ModuleRuntimeService.HealthPackModuleId, CancellationToken.None);
 

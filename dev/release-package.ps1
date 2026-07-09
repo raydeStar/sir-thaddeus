@@ -117,7 +117,7 @@ $archivePath = Join-Path $releaseDir $archiveName
 $checksumPath = "$archivePath.sha256.txt"
 $contentsChecksumsPath = Join-Path $releaseDir "$archiveStem-contents.sha256.txt"
 
-$firstRunReadmeSource = Join-Path $RepoRoot "README_FIRST_RUN.md"
+$firstRunReadmeSource = Join-Path $RepoRoot "docs/FIRST_RUN.md"
 $settingsTemplateSource = Join-Path $RepoRoot "SirThaddeus.Settings.template.json"
 
 Write-Section "Package Settings"

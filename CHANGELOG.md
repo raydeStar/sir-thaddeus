@@ -4,7 +4,7 @@
 
 The v1.0 release. The hybrid Shell + Runtime + workspace surface is now
 the product Sir Thaddeus ships as. Scope is locked in
-[`V1_SCOPE.md`](V1_SCOPE.md); the release-readiness gate is in
+[`V1_SCOPE.md`](docs/archive/V1_SCOPE.md); the release-readiness gate is in
 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
 
 This release does not introduce major new product features beyond what
