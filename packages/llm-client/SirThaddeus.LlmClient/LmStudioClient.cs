@@ -487,21 +487,21 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
 
         if (tools is { Count: > 0 })
         {
-            body["tools"] = tools;
-
             // LM Studio / llama.cpp only support the string-form tool_choice
             // values (none / auto / required). The per-function object form
             // that OpenAI ships is rejected with HTTP 400 ("Invalid
-            // tool_choice type: 'object'"). Use "required" when a caller
-            // wants to force a tool and rely on:
-            //   - a narrow tool list (post-footman),
-            //   - a system-prompt hint that named the intended tool,
-            // to steer the model to the correct specific tool. This is
-            // the same pattern the legacy orchestrator used.
-            var forced = !string.IsNullOrWhiteSpace(forcedToolName)
-                && tools.Any(t => string.Equals(t.Function?.Name, forcedToolName, StringComparison.Ordinal));
+            // tool_choice type: 'object'"). When a caller forces a specific
+            // tool, advertise only that definition and use "required". This
+            // preserves LM Studio compatibility while making the forced-tool
+            // contract deterministic instead of allowing any visible tool.
+            var forcedTool = !string.IsNullOrWhiteSpace(forcedToolName)
+                ? tools.FirstOrDefault(t =>
+                    string.Equals(t.Function?.Name, forcedToolName, StringComparison.Ordinal))
+                : null;
 
-            body["tool_choice"] = forced ? "required" : "auto";
+            body["tools"] = forcedTool is null ? tools : new[] { forcedTool };
+
+            body["tool_choice"] = forcedTool is null ? "auto" : "required";
         }
         // When tools is null/empty, intentionally omit both fields.
         // Sending tools:[] or tool_choice:"none" can trigger LM Studio's

@@ -197,8 +197,7 @@ public class LmStudioAssistantTests : IDisposable
 
         var pipeline = assistant.BuildTurnPipeline(
             new FakeMcpClient(),
-            NullChatEventSink.Instance,
-            new AlwaysGrantGate());
+            NullChatEventSink.Instance);
 
         var stepNames = pipeline.Steps.Select(s => s.Name).ToList();
         var scIndex = stepNames.IndexOf("SelfConsistency");
@@ -207,6 +206,11 @@ public class LmStudioAssistantTests : IDisposable
         Assert.True(scIndex >= 0, "SelfConsistency step must be composed into the chat pipeline.");
         Assert.True(toolLoopIndex >= 0, "ToolLoop step must be present in the chat pipeline.");
         Assert.Equal(toolLoopIndex - 1, scIndex);
+
+        var permissionGateField = typeof(SirThaddeus.Agent.Pipeline.Steps.ToolLoopStep)
+            .GetField("_permissionGate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(permissionGateField);
+        Assert.Null(permissionGateField.GetValue(pipeline.Steps[toolLoopIndex]));
     }
 
     // ── Production tool exposure (roadmap 4.3 step 3) ─────────────────

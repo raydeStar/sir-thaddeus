@@ -187,6 +187,37 @@ public sealed class ToolArgumentValidatorTests
         Assert.True(result.IsValid);
     }
 
+    [Fact]
+    public void UnionTypeSchema_AcceptsMatchingType_WithoutThrowing()
+    {
+        var tool = MakeToolWithSchema("weather_geocode",
+            new { location = new { type = new[] { "string", "null" } } },
+            ["location"]);
+
+        var result = ToolArgumentValidator.Validate(
+            Call("weather_geocode", """{"location": "Olympia, WA"}"""),
+            tool);
+
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
+    }
+
+    [Fact]
+    public void UnionTypeSchema_ReportsMismatch_AgainstAllAllowedTypes()
+    {
+        var tool = MakeToolWithSchema("weather_geocode",
+            new { location = new { type = new[] { "string", "null" } } },
+            ["location"]);
+
+        var result = ToolArgumentValidator.Validate(
+            Call("weather_geocode", """{"location": ["Olympia, WA"]}"""),
+            tool);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, issue =>
+            issue.Contains("string or null", StringComparison.Ordinal));
+    }
+
     // ── Unknown parameters ───────────────────────────────────────────
 
     [Fact]

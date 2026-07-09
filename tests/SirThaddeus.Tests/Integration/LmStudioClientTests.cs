@@ -33,6 +33,20 @@ public class LmStudioClientSelfHealingTests : IDisposable
         ChatMessage.User("Hello!")
     ];
 
+    private static ToolDefinition MakeToolDefinition(string name) => new()
+    {
+        Function = new FunctionDefinition
+        {
+            Name = name,
+            Description = $"Test tool {name}",
+            Parameters = new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["properties"] = new Dictionary<string, object>()
+            }
+        }
+    };
+
     public void Dispose() { }
 
     [Fact]
@@ -359,6 +373,41 @@ public class LmStudioClientSelfHealingTests : IDisposable
         var sentMessages = doc.RootElement.GetProperty("messages");
         Assert.Contains(sentMessages.EnumerateArray(),
             m => string.Equals(m.GetProperty("role").GetString(), "tool", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ForcedTool_AdvertisesOnlyTheNamedTool()
+    {
+        string? capturedBody = null;
+        var handler = new SequenceHttpHandler(
+            [MakeSuccessResponse("ok")],
+            onRequest: body => capturedBody = body);
+
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        var tools = new[]
+        {
+            MakeToolDefinition("weather_geocode"),
+            MakeToolDefinition("weather_forecast")
+        };
+
+        await client.ChatAsync(
+            SimpleMessages,
+            tools,
+            forcedToolName: "weather_geocode");
+
+        Assert.NotNull(capturedBody);
+        using var doc = JsonDocument.Parse(capturedBody);
+        Assert.Equal("required", doc.RootElement.GetProperty("tool_choice").GetString());
+
+        var advertisedTools = doc.RootElement.GetProperty("tools").EnumerateArray().ToArray();
+        var advertised = Assert.Single(advertisedTools);
+        Assert.Equal(
+            "weather_geocode",
+            advertised.GetProperty("function").GetProperty("name").GetString());
     }
 
     // ── Response Builders ──────────────────────────────────────────────

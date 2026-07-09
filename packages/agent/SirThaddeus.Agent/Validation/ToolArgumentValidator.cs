@@ -101,6 +101,7 @@ public static class ToolArgumentValidator
         {
             foreach (var req in requiredProp.EnumerateArray())
             {
+                if (req.ValueKind != JsonValueKind.String) continue;
                 var paramName = req.GetString();
                 if (paramName is null) continue;
 
@@ -140,10 +141,13 @@ public static class ToolArgumentValidator
                 if (!schemaProp.TryGetProperty("type", out var typeProp))
                     continue;
 
-                var expectedType = typeProp.GetString();
-                if (expectedType is not null && !IsTypeCompatible(prop.Value, expectedType))
+                var expectedTypes = GetExpectedTypes(typeProp);
+                if (expectedTypes.Count > 0 &&
+                    !expectedTypes.Any(expectedType => IsTypeCompatible(prop.Value, expectedType)))
                 {
-                    issues.Add($"Parameter '{prop.Name}' has type {prop.Value.ValueKind} but schema expects {expectedType}");
+                    issues.Add(
+                        $"Parameter '{prop.Name}' has type {prop.Value.ValueKind} but schema expects " +
+                        string.Join(" or ", expectedTypes));
                 }
             }
         }
@@ -166,6 +170,27 @@ public static class ToolArgumentValidator
             "null" => value.ValueKind == JsonValueKind.Null,
             _ => true // Unknown type — accept
         };
+
+    private static IReadOnlyList<string> GetExpectedTypes(JsonElement typeProp)
+    {
+        if (typeProp.ValueKind == JsonValueKind.String)
+        {
+            var expectedType = typeProp.GetString();
+            return string.IsNullOrWhiteSpace(expectedType) ? [] : [expectedType];
+        }
+
+        if (typeProp.ValueKind != JsonValueKind.Array)
+            return [];
+
+        return typeProp
+            .EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString())
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
 }
 
 /// <summary>
