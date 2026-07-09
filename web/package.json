@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty",
     "lint": "eslint . --max-warnings=0",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "capture:readme-demo": "node scripts/capture-readme-demo.mjs"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",

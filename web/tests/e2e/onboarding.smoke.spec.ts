@@ -8,6 +8,10 @@ test('user can complete the onboarding wizard', async ({ page, context }) => {
   await page.goto(`${baseUrl}/onboarding`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('route-onboarding')).toBeVisible();
   await expect(page.getByTestId('onboarding-step-welcome')).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.getByTestId('onboarding-step-welcome').getByTestId('thaddeus-signet'),
+  ).toBeVisible();
+  await expect(page.getByTestId('onboarding-step-welcome')).toContainText('At your service.');
 
   await page.getByTestId('onboarding-next').click();
   await expect(page.getByTestId('onboarding-step-privacy')).toBeVisible();

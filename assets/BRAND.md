@@ -6,7 +6,7 @@ Sir Thaddeus is an unseen magical butler: intelligent, discreet, capable, and al
 
 ## Identity hierarchy
 
-1. **Primary identity — the signet.** The `ST` seal and wordmark carry recognition, trust, and small-format applications.
+1. **Primary identity — the Steward's Seal.** The readable `ST` signet and wordmark carry recognition, trust, and small-format applications. It was selected over more abstract threshold/permission variants because it remains unmistakable at 16 px.
 2. **Character — the raven familiar.** The raven belongs to Sir Thaddeus. It represents observation, retrieval, boundaries, and returning with evidence.
 3. **Product proof — the interface.** Marketing scenes should connect the magical world to the real application rather than replacing it with imagined UI.
 
@@ -38,4 +38,5 @@ Prefer blackened steel, smoked glass, walnut, aged brass, paper, and controlled 
 - [`svg/signet.svg`](svg/signet.svg) — primary compact mark.
 - [`svg/banner.svg`](svg/banner.svg) — README wordmark lockup.
 - [`images/raven-familiar.png`](images/raven-familiar.png) — character reference.
-- [`images/local-first-workspace-v3.png`](images/local-first-workspace-v3.png) — definitive product-world hero.
+- [`images/local-first-workspace-final.png`](images/local-first-workspace-final.png) — definitive product-world hero with a pixel-authentic UI composite.
+- [`images/permission-flow-demo.gif`](images/permission-flow-demo.gif) — deterministic real-UI permission-flow demonstration.

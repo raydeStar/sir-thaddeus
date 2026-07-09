@@ -19,6 +19,7 @@ import { useToolActivityStore } from '../stores/toolActivityStore';
 import { RuntimeStateBadge } from '../components/RuntimeStateBadge';
 import { KillAppButton } from '../components/KillAppButton';
 import { PermissionModal } from '../components/PermissionModal';
+import { ThaddeusSignet } from '../components/ThaddeusSignet';
 import { readRuntimeMetadata } from '../lib/runtime';
 
 export const Route = createRootRoute({
@@ -77,7 +78,7 @@ function RootLayout() {
           className="mx-3 mb-5 flex h-9 items-center gap-2.5 text-ink"
           aria-label="Sir Thaddeus home"
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-white">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center">
             <ThaddeusMark />
           </span>
           <span className="pointer-events-none overflow-hidden whitespace-nowrap text-[15px] font-semibold opacity-0 transition-opacity duration-150 group-hover/aside:opacity-100">
@@ -159,15 +160,6 @@ function NavGroup({ items }: { items: ReadonlyArray<NavEntry> }) {
 }
 
 function ThaddeusMark() {
-  // Tiny 4-point spark — geometric and calm. Sits well inside a rounded square.
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className="h-4 w-4"
-      aria-hidden
-    >
-      <path d="M12 3.5l1.7 5 5 1.7-5 1.7L12 17l-1.7-5.1-5-1.7 5-1.7z" />
-    </svg>
-  );
+  // The compact signet carries identity at navigation scale.
+  return <ThaddeusSignet />;
 }

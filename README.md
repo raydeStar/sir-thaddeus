@@ -30,7 +30,7 @@
   </p>
 </div>
 
-![The private study of Sir Thaddeus, with the real application on the monitor, local compute, a memory vault, permission controls, evidence, and a watchful raven familiar](assets/images/local-first-workspace-v3.png)
+![The private study of Sir Thaddeus, with the pixel-authentic application on the monitor, local compute, a memory vault, permission controls, evidence, and a watchful raven familiar](assets/images/local-first-workspace-final.png)
 
 <p align="center"><em>Your model. Your memory. Your permission.</em></p>
 
@@ -49,24 +49,21 @@ Most assistants ask for trust. Sir Thaddeus gives you a boundary you can inspect
 
 ![Permission, scoped action, and evidence flow in Sir Thaddeus](assets/svg/trust-flow.svg)
 
-<table>
-  <tr>
-    <td width="48%" valign="top">
-      <img src="assets/images/permission-decision.png" alt="Sir Thaddeus asking permission before a web search and showing the exact query" />
-    </td>
-    <td width="52%" valign="middle">
-      <h3>Nothing vague. Nothing buried.</h3>
-      <p>When a protected capability is set to <strong>Ask</strong>, the turn pauses. You see the tool, its arguments, and the scope of the decision.</p>
-      <ul>
-        <li><strong>Deny</strong> — stop this call.</li>
-        <li><strong>Allow once</strong> — approve only this action.</li>
-        <li><strong>For session</strong> — remember it until you leave.</li>
-        <li><strong>Always</strong> — update the visible policy.</li>
-      </ul>
-      <p>File, web, system, screen, and memory capabilities stay independently configurable. Individual tools can override their group.</p>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="assets/images/permission-flow-demo.gif" alt="Sir Thaddeus asks before geolocation, asks again before web search, then reveals an evidence-backed answer" width="960" />
+</p>
+
+<p align="center"><sub>Actual Sir Thaddeus UI · deterministic Playwright capture · no simulated product screens</sub></p>
+
+### Nothing vague. Nothing buried.
+
+When a protected capability is set to **Ask**, the turn pauses. You see the tool, its arguments, and the scope of the decision.
+
+| **Deny** | **Allow once** | **For session** | **Always** |
+| --- | --- | --- | --- |
+| Stop this call. | Approve only this action. | Remember it until you leave. | Update the visible policy. |
+
+File, web, system, screen, and memory capabilities stay independently configurable. Individual tools can override their group.
 
 ## Answers Should Show Their Work
 

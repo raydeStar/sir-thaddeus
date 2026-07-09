@@ -1,12 +1,13 @@
 import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronRight, Loader2, MessageSquare, Mic, Sparkles, Square, Unplug } from 'lucide-react';
+import { ChevronRight, Loader2, MessageSquare, Mic, Square, Unplug } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { useRuntimeStore } from '../stores/runtimeStore';
 import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
 import { acquireMicStream, isStreamLive, prepareMicCapture, stopMicStream } from '../lib/micCapture';
 import { trimSilenceToWav } from '../lib/audioTrim';
 import { transcribeSpeech, warmVoiceHost } from '../lib/voiceApi';
+import { ThaddeusSignet } from '../components/ThaddeusSignet';
 
 export const Route = createFileRoute('/')({
   component: HomeRoute,
@@ -213,11 +214,8 @@ function HomeRoute() {
       className="mx-auto flex min-h-full w-full max-w-[680px] flex-col px-6 pt-20 pb-16 md:pt-28"
     >
       {/* Hero mark — small, calm. Signals identity without being loud. */}
-      <div
-        className="mx-auto mb-10 flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent shadow-[0_8px_24px_-12px_rgba(217,119,87,0.55)]"
-        aria-hidden
-      >
-        <Sparkles className="h-5 w-5" strokeWidth={1.6} />
+      <div className="mx-auto mb-9 drop-shadow-[0_10px_22px_rgba(201,146,57,0.18)]">
+        <ThaddeusSignet className="h-14 w-14" />
       </div>
 
       {/* Single-line headline. The app's strongest surface — one big sentence. */}
