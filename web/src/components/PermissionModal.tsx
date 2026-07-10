@@ -84,9 +84,9 @@ export function PermissionModal() {
       aria-modal="true"
       aria-labelledby="permission-modal-title"
       data-testid="permission-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/60 px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/72 px-4 backdrop-blur-md"
     >
-      <div className="w-full max-w-md rounded-2xl border border-line bg-canvas-raised p-6 shadow-lift">
+      <div className="w-full max-w-md rounded-3xl border border-line-strong bg-canvas-raised p-6 shadow-lift">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
             <Icon className="h-5 w-5" strokeWidth={1.75} />
@@ -176,7 +176,7 @@ export function PermissionModal() {
             data-testid="permission-always"
             onClick={() => act('always')}
             disabled={!!submitting}
-            className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+            className="btn-primary"
           >
             Always
           </button>

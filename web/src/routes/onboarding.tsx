@@ -337,7 +337,7 @@ function OnboardingRoute() {
                 type="button"
                 data-testid="onboarding-next"
                 onClick={next}
-                className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                className="btn-primary"
               >
                 Next
               </button>
@@ -347,7 +347,7 @@ function OnboardingRoute() {
                 data-testid="onboarding-finish"
                 onClick={() => void finish()}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+                className="btn-primary"
               >
                 {busy ? 'Saving…' : 'Finish'}
               </button>

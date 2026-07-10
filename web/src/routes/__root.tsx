@@ -68,20 +68,21 @@ function RootLayout() {
   }, [connect, disconnect, startPermissions, startToolActivity]);
 
   return (
-    <div className="flex h-full bg-canvas text-ink" data-testid="workspace-root">
+    <div className="workspace-shell flex h-full text-ink" data-testid="workspace-root">
       <aside
-        className="group/aside hidden w-[68px] shrink-0 flex-col border-r border-line bg-canvas py-4 transition-[width] duration-200 hover:w-56 md:flex"
+        className="shell-sidebar group/aside hidden w-[72px] shrink-0 flex-col border-r border-line py-4 transition-[width] duration-200 hover:w-56 md:flex"
         aria-label="Workspace"
+        data-testid="desktop-sidebar"
       >
         <Link
           to="/"
-          className="mx-3 mb-5 flex h-9 items-center gap-2.5 text-ink"
+          className="mx-[18px] mb-5 flex h-9 items-center justify-center gap-0 text-ink group-hover/aside:justify-start group-hover/aside:gap-2.5"
           aria-label="Sir Thaddeus home"
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center">
             <ThaddeusMark />
           </span>
-          <span className="pointer-events-none overflow-hidden whitespace-nowrap text-[15px] font-semibold opacity-0 transition-opacity duration-150 group-hover/aside:opacity-100">
+          <span className="pointer-events-none max-w-0 overflow-hidden whitespace-nowrap text-[15px] font-semibold opacity-0 transition-[max-width,opacity] duration-200 group-hover/aside:max-w-[142px] group-hover/aside:opacity-100">
             Sir Thaddeus
           </span>
         </Link>
@@ -100,7 +101,14 @@ function RootLayout() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-w-0 h-11 items-center justify-between gap-3 overflow-hidden border-b border-line bg-canvas/80 px-4 backdrop-blur md:px-6">
+        <header className="shell-header flex min-w-0 h-12 items-center justify-between gap-2 overflow-hidden border-b border-line px-3 backdrop-blur-xl md:px-6">
+          <Link
+            to="/"
+            className="flex h-7 w-7 shrink-0 items-center justify-center md:hidden"
+            aria-label="Sir Thaddeus home"
+          >
+            <ThaddeusSignet className="h-7 w-7" />
+          </Link>
           <nav
             className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap md:hidden"
             aria-label="Primary"
@@ -109,15 +117,15 @@ function RootLayout() {
               <Link
                 key={to}
                 to={to}
-                activeProps={{ className: 'text-ink' }}
-                className="shrink-0 rounded-full px-2.5 py-1 text-xs text-ink-muted hover:text-ink"
+                activeProps={{ className: 'bg-accent-soft text-accent' }}
+                className="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium text-ink-muted transition-colors hover:bg-canvas-sunken hover:text-ink"
               >
                 {label}
               </Link>
             ))}
           </nav>
           <div className="hidden md:block" />
-          <div className="flex items-center gap-3 text-xs text-ink-muted">
+          <div className="flex items-center gap-2 text-xs text-ink-muted">
             <KillAppButton />
             <RuntimeStateBadge />
           </div>
@@ -137,19 +145,20 @@ function RootLayout() {
 
 function NavGroup({ items }: { items: ReadonlyArray<NavEntry> }) {
   return (
-    <ul className="px-2 space-y-0.5">
+    <ul className="px-2.5 space-y-0.5">
       {items.map(({ to, label, icon: Icon }) => (
         <li key={to}>
           <Link
             to={to}
+            data-testid={`desktop-nav-${label.toLowerCase()}`}
             activeProps={{
-              className: 'bg-accent-soft text-ink',
+              className: 'bg-accent-soft text-accent ring-1 ring-inset ring-accent/15',
             }}
             activeOptions={{ exact: to === '/' }}
-            className="flex h-9 items-center gap-3 rounded-xl px-3 text-sm text-ink-muted transition-colors hover:text-ink"
+            className="flex h-9 items-center justify-center gap-0 rounded-xl px-3 text-sm font-medium text-ink-muted transition-colors hover:bg-canvas-sunken hover:text-ink group-hover/aside:justify-start group-hover/aside:gap-3"
           >
             <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
-            <span className="pointer-events-none overflow-hidden whitespace-nowrap opacity-0 transition-opacity duration-150 group-hover/aside:opacity-100">
+            <span className="pointer-events-none max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity] duration-200 group-hover/aside:max-w-[150px] group-hover/aside:opacity-100">
               {label}
             </span>
           </Link>

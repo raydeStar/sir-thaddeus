@@ -441,7 +441,7 @@ function WikiLinkDialog({
           <button type="button" className="wiki-command-button" onClick={onCancel}>Cancel</button>
           <button
             type="submit"
-            className="wiki-command-button border-accent bg-accent text-white hover:bg-accent hover:border-accent disabled:opacity-60"
+            className="wiki-command-button border-accent bg-accent text-accent-on hover:border-accent-strong hover:bg-accent-strong disabled:opacity-60"
             disabled={!valid}
           >
             {canRemove ? 'Update' : 'Insert'}

@@ -410,7 +410,7 @@ function SettingsRoute() {
                   type="submit"
                   data-testid="settings-save"
                   disabled={saving}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-accent px-5 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+                  className="btn-primary px-5"
                 >
                   {saving ? (
                     <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
@@ -445,7 +445,7 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (id: TabId) => 
     <div
       role="tablist"
       aria-label="Settings categories"
-      className="-mx-1 flex flex-wrap border-b border-line"
+      className="-mx-1 flex gap-1 overflow-x-auto rounded-2xl border border-line bg-canvas-sunken/65 p-1.5"
       data-testid="settings-tabs"
     >
       {TABS.map(({ id, label, icon: Icon }) => {
@@ -458,20 +458,14 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (id: TabId) => 
             aria-selected={selected}
             data-testid={`settings-tab-${id}`}
             onClick={() => onChange(id)}
-            className={`relative inline-flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
+            className={`relative inline-flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
               selected
-                ? 'text-ink'
-                : 'text-ink-muted hover:text-ink'
+                ? 'bg-canvas-raised text-accent shadow-soft ring-1 ring-inset ring-line'
+                : 'text-ink-muted hover:bg-canvas-raised/55 hover:text-ink'
             }`}
           >
             <Icon className="h-4 w-4" strokeWidth={1.75} />
             <span>{label}</span>
-            {selected ? (
-              <span
-                aria-hidden
-                className="absolute inset-x-3 -bottom-px h-[2px] rounded-full bg-accent"
-              />
-            ) : null}
           </button>
         );
       })}
@@ -1472,7 +1466,7 @@ function FilesTab({
               type="button"
               onClick={addRoot}
               data-testid="settings-files-add-button"
-              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-2.5 text-sm font-medium text-white transition hover:opacity-90"
+              className="btn-primary px-3.5 py-2.5"
             >
               <Plus className="h-4 w-4" strokeWidth={2} />
               Add

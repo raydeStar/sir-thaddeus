@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Sir Thaddeus trust flow</title>
+  <desc id="desc">The model proposes, visible permission controls the action, a scoped tool boundary executes it, and evidence plus a local trace provide the receipt.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111D"/>
+      <stop offset="0.58" stop-color="#0B1C2E"/>
+      <stop offset="1" stop-color="#10253F"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#172B41"/>
+      <stop offset="1" stop-color="#0B1724"/>
+    </linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F0C36C"/>
+      <stop offset="0.52" stop-color="#C79239"/>
+      <stop offset="1" stop-color="#F5D695"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.16" cy="0.22" r="0.7">
+      <stop offset="0" stop-color="#D3A24E" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#D3A24E" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grain" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="3" r="0.7" fill="#F5EBD8" opacity="0.035"/>
+      <circle cx="16" cy="12" r="0.5" fill="#F5EBD8" opacity="0.025"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="12" flood-color="#000" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#background)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+  <rect width="1280" height="640" fill="url(#grain)"/>
+  <rect x="14" y="14" width="1252" height="612" rx="28" fill="none" stroke="#C79239" stroke-opacity="0.34" stroke-width="2"/>
+  <rect x="28" y="28" width="1224" height="584" rx="20" fill="none" stroke="#F5EBD8" stroke-opacity="0.055"/>
+
+  <!-- Brand lockup -->
+  <g transform="translate(70 70)">
+    <circle r="34" fill="#081522" stroke="url(#brass)" stroke-width="2"/>
+    <circle r="27" fill="none" stroke="#F5D695" stroke-opacity="0.18"/>
+    <g font-family="Georgia, 'Times New Roman', serif" font-size="35" font-weight="700">
+      <text x="-10" y="12" text-anchor="middle" fill="#F5EBD8">S</text>
+      <text x="11" y="12" text-anchor="middle" fill="url(#brass)">T</text>
+    </g>
+  </g>
+  <text x="120" y="65" font-family="Consolas, 'Cascadia Mono', monospace" font-size="17" font-weight="700" letter-spacing="4.2" fill="#F0C36C">SIR THADDEUS</text>
+  <text x="120" y="89" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#91A3B7">VISIBLE PERMISSION. SCOPED ACTION. LOCAL RECEIPT.</text>
+  <text x="1212" y="75" text-anchor="end" font-family="Consolas, 'Cascadia Mono', monospace" font-size="15" letter-spacing="2" fill="#91A3B7">PROPOSE  →  PERMIT  →  ACT  →  PROVE</text>
+  <line x1="56" y1="119" x2="1224" y2="119" stroke="#C79239" stroke-opacity="0.28"/>
+
+  <!-- Headline -->
+  <text x="64" y="171" font-family="Georgia, 'Times New Roman', serif" font-size="42" font-weight="700" fill="#F6EDDB">A boundary you can see.</text>
+  <text x="64" y="205" font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="#A9B7C6">The model proposes. You decide. Sir Thaddeus keeps the receipt.</text>
+
+  <!-- Connectors -->
+  <path d="M404 358 H470 M810 358 H876" stroke="#D3A24E" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="437" cy="358" r="5" fill="#F0C36C"/>
+  <circle cx="843" cy="358" r="5" fill="#F0C36C"/>
+
+  <!-- Permission card -->
+  <g filter="url(#shadow)">
+    <rect x="64" y="238" width="340" height="250" rx="20" fill="url(#card)" stroke="#C79239" stroke-opacity="0.38"/>
+    <rect x="64" y="238" width="340" height="72" rx="20" fill="#18304A" opacity="0.52"/>
+    <circle cx="108" cy="277" r="24" fill="#3A211C" stroke="#E36C63" stroke-opacity="0.35"/>
+    <path d="M108 260 L123 266 V278 C123 290 116 298 108 302 C100 298 93 290 93 278 V266Z" fill="none" stroke="#E77863" stroke-width="2"/>
+    <text x="145" y="269" font-family="Consolas, monospace" font-size="12" font-weight="700" letter-spacing="1.5" fill="#F0C36C">01 · ASK</text>
+    <text x="145" y="293" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#F5EBD8">Permission</text>
+    <text x="88" y="338" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#A9B7C6">See the exact tool, arguments, and scope.</text>
+    <rect x="88" y="358" width="292" height="42" rx="9" fill="#08111C" stroke="#52677D" stroke-opacity="0.48"/>
+    <text x="103" y="384" font-family="Consolas, monospace" font-size="12" fill="#C8D3E0">web_search</text>
+    <text x="194" y="384" font-family="Consolas, monospace" font-size="11" fill="#6F8499">{ query: "Olympia weather" }</text>
+    <g font-family="Segoe UI, Arial, sans-serif" font-size="11" font-weight="600">
+      <rect x="88" y="423" width="61" height="32" rx="16" fill="#30171B" stroke="#BD4557" stroke-opacity="0.62"/>
+      <text x="118.5" y="443" text-anchor="middle" fill="#F17A88">Deny</text>
+      <rect x="156" y="423" width="61" height="32" rx="16" fill="#96651D"/>
+      <text x="186.5" y="443" text-anchor="middle" fill="#FFF8EA">Once</text>
+      <rect x="224" y="423" width="70" height="32" rx="16" fill="#172A3E" stroke="#708398" stroke-opacity="0.6"/>
+      <text x="259" y="443" text-anchor="middle" fill="#C8D3E0">Session</text>
+      <rect x="301" y="423" width="79" height="32" rx="16" fill="#172A3E" stroke="#D3A24E" stroke-opacity="0.66"/>
+      <text x="340.5" y="443" text-anchor="middle" fill="#F0C36C">Always</text>
+    </g>
+  </g>
+
+  <!-- Scoped action card -->
+  <g filter="url(#shadow)">
+    <rect x="470" y="238" width="340" height="250" rx="20" fill="url(#card)" stroke="#C79239" stroke-opacity="0.38"/>
+    <rect x="470" y="238" width="340" height="72" rx="20" fill="#18304A" opacity="0.52"/>
+    <circle cx="514" cy="277" r="24" fill="#213048"/>
+    <path d="M501 277 H527 M514 264 V290 M505 268 Q514 277 523 286 M523 268 Q514 277 505 286" fill="none" stroke="#F0C36C" stroke-width="1.8"/>
+    <text x="551" y="269" font-family="Consolas, monospace" font-size="12" font-weight="700" letter-spacing="1.5" fill="#F0C36C">02 · ACT</text>
+    <text x="551" y="293" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#F5EBD8">Scoped tool boundary</text>
+    <text x="494" y="338" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#A9B7C6">Only the approved capability crosses into MCP.</text>
+    <g font-family="Consolas, monospace" font-size="12">
+      <rect x="494" y="367" width="122" height="42" rx="9" fill="#08111C" stroke="#52677D" stroke-opacity="0.48"/>
+      <text x="555" y="393" text-anchor="middle" fill="#C8D3E0">weather_geocode</text>
+      <path d="M628 388 H651" stroke="#F0C36C" stroke-width="2"/>
+      <path d="M646 383 L653 388 L646 393" fill="none" stroke="#F0C36C" stroke-width="2"/>
+      <rect x="663" y="367" width="123" height="42" rx="9" fill="#08111C" stroke="#52677D" stroke-opacity="0.48"/>
+      <text x="724.5" y="393" text-anchor="middle" fill="#C8D3E0">web_search</text>
+    </g>
+    <rect x="494" y="428" width="292" height="30" rx="15" fill="#15283B" stroke="#D3A24E" stroke-opacity="0.3"/>
+    <text x="640" y="448" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" fill="#F0C36C">APPROVED CAPABILITY ONLY</text>
+  </g>
+
+  <!-- Evidence card -->
+  <g filter="url(#shadow)">
+    <rect x="876" y="238" width="340" height="250" rx="20" fill="url(#card)" stroke="#C79239" stroke-opacity="0.38"/>
+    <rect x="876" y="238" width="340" height="72" rx="20" fill="#18304A" opacity="0.52"/>
+    <circle cx="920" cy="277" r="24" fill="#322A18"/>
+    <path d="M908 267 H932 V288 H908Z M913 273 H927 M913 278 H924 M913 283 H928" fill="none" stroke="#F0C36C" stroke-width="1.8"/>
+    <text x="957" y="269" font-family="Consolas, monospace" font-size="12" font-weight="700" letter-spacing="1.5" fill="#F0C36C">03 · VERIFY</text>
+    <text x="957" y="293" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#F5EBD8">Evidence</text>
+    <text x="900" y="338" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#A9B7C6">Answer, sources, outcome, and local trace.</text>
+    <g font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600">
+      <rect x="900" y="367" width="86" height="38" rx="10" fill="#172A3E" stroke="#7088A2" stroke-opacity="0.62"/>
+      <text x="943" y="391" text-anchor="middle" fill="#C8D3E0">Answer</text>
+      <rect x="996" y="367" width="86" height="38" rx="10" fill="#172A3E" stroke="#7088A2" stroke-opacity="0.62"/>
+      <text x="1039" y="391" text-anchor="middle" fill="#C8D3E0">Sources</text>
+      <rect x="1092" y="367" width="100" height="38" rx="10" fill="#152131" stroke="#D3A24E" stroke-opacity="0.62"/>
+      <text x="1142" y="391" text-anchor="middle" fill="#F0C36C">Local trace</text>
+    </g>
+    <text x="900" y="446" font-family="Consolas, monospace" font-size="12" letter-spacing="1.1" fill="#6F8499">THE RECEIPT STAYS ON YOUR MACHINE.</text>
+  </g>
+
+  <!-- Policy legend -->
+  <g transform="translate(64 520)">
+    <rect width="1152" height="72" rx="18" fill="#08131F" stroke="#C79239" stroke-opacity="0.26"/>
+    <g font-family="Consolas, 'Cascadia Mono', monospace" font-size="12">
+      <g transform="translate(30 0)">
+        <text y="29" fill="#F0C36C" font-weight="700">OFF</text><text y="50" fill="#708398">blocks it</text>
+      </g>
+      <g transform="translate(210 0)">
+        <text y="29" fill="#F0C36C" font-weight="700">ASK</text><text y="50" fill="#708398">pauses the turn</text>
+      </g>
+      <g transform="translate(405 0)">
+        <text y="29" fill="#F0C36C" font-weight="700">ONCE</text><text y="50" fill="#708398">one approved call</text>
+      </g>
+      <g transform="translate(610 0)">
+        <text y="29" fill="#F0C36C" font-weight="700">SESSION</text><text y="50" fill="#708398">until you leave</text>
+      </g>
+      <g transform="translate(812 0)">
+        <text y="29" fill="#F0C36C" font-weight="700">ALWAYS</text><text y="50" fill="#708398">visible policy</text>
+      </g>
+      <g transform="translate(1010 0)">
+        <text y="29" fill="#E77863" font-weight="700">STOP</text><text y="50" fill="#708398">kills active work</text>
+      </g>
+    </g>
+  </g>
+</svg>

@@ -28,10 +28,12 @@ Do not add clothing, a bow tie, monocle, hat, plague-doctor mask, giant eye, agg
 | Study blue | Raised surfaces | `#10253F` |
 | Ivory | Wordmark and primary type | `#F5EBD8` |
 | Aged brass | Signet and structure | `#C79239` |
-| Coral | Permission, attention, and living warmth | `#F08B68` |
+| Ember red | Destructive actions and failures only | `#E36C63` |
 | Slate | Secondary copy | `#91A3B7` |
 
 Prefer blackened steel, smoked glass, walnut, aged brass, paper, and controlled practical light. Magic should appear as barely visible constellation geometry, dust, or a restrained glint—not spectacle.
+
+In product UI, aged brass is the primary action and focus color. Ember red is reserved for destructive or failed states; it should never become the ambient brand wash.
 
 ## Current anchors
 
@@ -40,3 +42,6 @@ Prefer blackened steel, smoked glass, walnut, aged brass, paper, and controlled 
 - [`images/raven-familiar.png`](images/raven-familiar.png) — character reference.
 - [`images/local-first-workspace-final.png`](images/local-first-workspace-final.png) — definitive product-world hero with a pixel-authentic UI composite.
 - [`images/permission-flow-demo.gif`](images/permission-flow-demo.gif) — deterministic real-UI permission-flow demonstration.
+- [`images/sir-thaddeus-social-banner.jpg`](images/sir-thaddeus-social-banner.jpg) — 1280×640 share card for LinkedIn posts and GitHub social preview.
+- [`svg/trust-flow-social.svg`](svg/trust-flow-social.svg) — editable source for the standalone social trust-flow graphic.
+- [`images/sir-thaddeus-trust-flow.jpg`](images/sir-thaddeus-trust-flow.jpg) — upload-ready 1280×640 trust-flow card for LinkedIn and GitHub.

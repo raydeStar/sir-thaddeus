@@ -128,7 +128,7 @@ export function SourceCards({ sources }: SourceCardsProps) {
 
               <span
                 aria-hidden
-                className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border border-line/70 bg-canvas/85 text-accent backdrop-blur transition group-hover/source-card:border-accent group-hover/source-card:bg-accent group-hover/source-card:text-white"
+                className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border border-line/70 bg-canvas/85 text-accent backdrop-blur transition group-hover/source-card:border-accent group-hover/source-card:bg-accent group-hover/source-card:text-accent-on"
               >
                 <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2} />
               </span>
@@ -202,7 +202,7 @@ function SourceImage({
   const cleanDomain = domain.replace(/^www\./, '');
   const monogram = (cleanDomain[0] || '?').toUpperCase();
   return (
-    <div className={`relative flex ${mediaClass} w-full items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_30%_20%,rgba(217,119,87,0.16),transparent_55%),radial-gradient(circle_at_70%_80%,rgba(118,143,201,0.14),transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.04),rgba(255,255,255,0))] dark:bg-[radial-gradient(circle_at_30%_20%,rgba(232,144,105,0.22),transparent_55%),radial-gradient(circle_at_70%_80%,rgba(132,160,224,0.18),transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0))]`}>
+    <div className={`relative flex ${mediaClass} w-full items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_30%_20%,rgba(150,101,29,0.16),transparent_55%),radial-gradient(circle_at_70%_80%,rgba(70,98,132,0.14),transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.04),rgba(255,255,255,0))] dark:bg-[radial-gradient(circle_at_30%_20%,rgba(210,163,79,0.20),transparent_55%),radial-gradient(circle_at_70%_80%,rgba(71,102,140,0.20),transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0))]`}>
       <span className="absolute left-3 top-3 rounded-full border border-line/60 bg-canvas/65 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-muted backdrop-blur">
         {sourceLabel}
       </span>
