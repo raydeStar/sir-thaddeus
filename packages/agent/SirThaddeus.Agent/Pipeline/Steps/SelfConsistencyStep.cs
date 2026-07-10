@@ -9,9 +9,9 @@ namespace SirThaddeus.Agent.Pipeline.Steps;
 /// For strict-answer reasoning items (a bare number or A–D letter), samples the
 /// model several times with a step-by-step prompt and returns the majority-vote
 /// final answer. This is the honest lever for the variance the calculator can't
-/// fix: a single sample of a multi-step problem is unreliable (the same
-/// recurrence scored 32 once and 37 once), but the majority across N samples is
-/// stable. The model does all the reasoning; only the vote is mechanical.
+/// fix: a single sample of a multi-step problem can be unreliable, while the
+/// majority across independent samples is often more stable. The model does all
+/// the reasoning; only the vote is mechanical.
 ///
 /// <para>Opt-in and off by default: enabled only when <c>ST_SELF_CONSISTENCY</c>
 /// is set to N&gt;=2 (capped at 9). When disabled, or when the prompt isn't a
@@ -27,17 +27,13 @@ namespace SirThaddeus.Agent.Pipeline.Steps;
 /// </summary>
 public sealed class SelfConsistencyStep : ITurnStep
 {
-    private static readonly Regex NumericOnlyPrompt = new(
-        @"reply\s+with\s+only\b[^.]*\b(integer|number|decimal|value|remainder|count|sum|digits?)\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
     private static readonly Regex ChoiceOnlyPrompt = new(
         @"reply\s+with\s+only\s+a\s*,?\s*b\s*,?\s*c\s*,?\s*(?:or\s+)?d\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    // Real benchmark fixtures (MMLU-Pro, AIME) don't say "reply with only X";
-    // they say "put the final answer on its own line". Fire on that too, and
-    // tell choice from numeric by whether the prompt lists A–J options.
+    // Some task formats request a labeled final-answer line rather than a bare
+    // value. Treat that as strict output too, distinguishing choice prompts by
+    // whether they provide A–J option lines.
     private static readonly Regex FinalAnswerInstruction = new(
         @"final\s+answer",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -268,9 +264,9 @@ public sealed class SelfConsistencyStep : ITurnStep
         });
     }
 
-    /// <summary>Strict-answer detection shared by both paths: fires on
-    /// "reply with only …" numeric/choice prompts and on real benchmark
-    /// "final answer" instructions, telling choice from numeric by whether the
+    /// <summary>Strict-answer detection shared by both paths: fires on bare
+    /// numeric/choice requests and on explicit "final answer" instructions,
+    /// telling choice from numeric by whether the
     /// prompt lists A–J option lines. Returns false for non-strict prompts.</summary>
     private static bool TryClassifyStrictPrompt(string userText, out bool isChoice)
     {
@@ -278,7 +274,7 @@ public sealed class SelfConsistencyStep : ITurnStep
         isChoice = ChoiceOnlyPrompt.IsMatch(userText)
             || ChoiceOptionLine.Matches(userText).Count >= 3;
         var isNumeric = !isChoice
-            && (NumericOnlyPrompt.IsMatch(userText) || hasFinalAnswer);
+            && (StrictAnswerContract.RequestsBareNumeric(userText) || hasFinalAnswer);
         return isChoice || isNumeric;
     }
 
@@ -296,7 +292,7 @@ public sealed class SelfConsistencyStep : ITurnStep
         var trimmed = runAnswer.Trim();
         return isChoice
             ? Regex.IsMatch(trimmed, "^[A-J]$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
-            : Regex.IsMatch(trimmed, @"^-?\d+(?:\.\d+)?$", RegexOptions.CultureInvariant);
+            : StrictAnswerContract.IsBareNumeric(trimmed);
     }
 
     // Tool-aware self-consistency is a distinct, more expensive opt-in on top of
@@ -340,7 +336,7 @@ public sealed class SelfConsistencyStep : ITurnStep
     // what makes the majority vote meaningful, so this defaults to 0.9 (higher
     // than the usual 0.7) and is applied per-call, independent of the global
     // temperature — so SC never degenerates to identical samples even if a
-    // benchmark config runs the model at temperature 0. Override with
+    // deterministic configurations run the model at temperature 0. Override with
     // ST_SELF_CONSISTENCY_TEMP; clamped to a sane (0, 2] range.
     private static double ReadConfiguredTemperature()
     {

@@ -131,6 +131,28 @@ The runtime binds to `127.0.0.1` on an ephemeral port. A bearer token rotates ea
 
 The scorer grades actual values, not answer shape. A Docker canary aborts broken sandbox runs instead of blaming the model. Roughly **1,900 lines** of benchmark-specific shortcut solvers were removed so the suite exercises the real model and tool pipeline.
 
+### Fresh optimization pass: what changed
+
+The July 2026 pass tightened the real answer and measurement paths rather than teaching Sir Thaddeus the suite. No probe IDs, expected answers, suite thresholds, or answer keys were added to production code.
+
+| Before | After | Why it matters |
+| --- | --- | --- |
+| Strict numeric replies depended on one narrow wording pattern. | A shared answer contract recognizes natural requests such as “return just the number,” including unseen paraphrases. | Product behavior follows user intent instead of benchmark phrasing. |
+| Valid compute results were easiest to preserve when they arrived as plain integer strings and the request named the tool. | Actual compute-tool records are authoritative; numeric JSON values and scientific notation are accepted too. | Fewer correct tool results are discarded because of harmless formatting differences. |
+| A completed model-intake run could be lost to a later reporting failure, forcing the expensive measurement to run again. | Completed summaries can regenerate scorecards and reports with `-ReuseSummaryPath`. | Measurement is cheaper to recover and easier to audit. |
+| Windows-native output quirks could masquerade as model-load or reporting failures. | Model loading uses the real process exit code, reporting filters incidental stream records, and malformed arm data fails closed. | Infrastructure errors are less likely to be reported as model weakness—or as a misleading scorecard. |
+
+### Fresh model ceiling check
+
+One baseline run per model on the same closed-book, 20-item `python-probe` suite, with no judge:
+
+| Model | Result | Read |
+| --- | ---: | --- |
+| `liquid/lfm2.5-1.2b` | **8 / 20 · 40%** | Remarkable for its size, but wrong program construction still dominates the misses. |
+| `lfm2.5-8b-a1b` | **17 / 20 · 85%** | The larger model converts the same tool boundary into substantially more correct work. |
+
+That **+45 percentage-point** gap is a model comparison, not a claimed code-score uplift. A single run is a spot check, not a leaderboard. Its value is diagnostic: after routing, scoring, and result handling were audited, model selection remained the strongest immediate quality lever.
+
 Run [`dev/model-intake.ps1`](dev/model-intake.ps1) to turn a new model into a scorecard and recommended configuration. See [docs/TESTING.md](docs/TESTING.md) for methodology and [`tools/SirThaddeus.Harness/Suites/`](tools/SirThaddeus.Harness/Suites/) for the probes.
 
 <a id="trust-model"></a>

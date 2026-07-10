@@ -28,6 +28,8 @@
     dev/model-intake.ps1 -ModelId liquid/lfm2.5-8b-a1b
 .EXAMPLE
     dev/model-intake.ps1 -ModelId my/new-model -Suites python-probe,solver-probe -Repeats 5
+.EXAMPLE
+    dev/model-intake.ps1 -ModelId lfm2.5-8b-a1b -Suites python-probe -Repeats 1 -Arms baseline -ReuseSummaryPath artifacts/harness-repeat/20260709_215509-python-probe.json
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -41,7 +43,9 @@ param(
 
     [string[]]$Arms = @('baseline', 'sc', 'sc-tools'),
 
-    [string]$SettingsTemplate = ''
+    [string]$SettingsTemplate = '',
+
+    [string]$ReuseSummaryPath = ''
 )
 
 Set-StrictMode -Version Latest
@@ -228,9 +232,31 @@ function Ensure-ModelLoaded {
         return
     }
     Write-Host ("Model '{0}' not loaded. Loading via lms..." -f $modelId) -ForegroundColor Yellow
-    & lms load $modelId -y 2>&1 | ForEach-Object { Write-Host ([string]$_) }
-    if ($LASTEXITCODE -ne 0) {
-        throw ("lms load '$modelId' failed (exit $LASTEXITCODE). Confirm the model id is correct " +
+    # lms writes progress and even its success line to stderr. Under newer
+    # PowerShell native-error semantics that becomes a terminating ErrorRecord
+    # despite exit code 0, so capture the actual process exit code explicitly.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativePreferenceVariable = Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $previousNativePreference = if ($null -ne $nativePreferenceVariable) { $nativePreferenceVariable.Value } else { $null }
+    try {
+        $ErrorActionPreference = 'Continue'
+        if ($null -ne $nativePreferenceVariable) {
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
+        & lms load $modelId -y 2>&1 | ForEach-Object {
+            $line = if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { [string]$_ }
+            Write-Host $line
+        }
+        $loadExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -ne $nativePreferenceVariable) {
+            $PSNativeCommandUseErrorActionPreference = $previousNativePreference
+        }
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($loadExitCode -ne 0) {
+        throw ("lms load '$modelId' failed (exit $loadExitCode). Confirm the model id is correct " +
             "and downloaded (lms ls).")
     }
     if (-not (Test-ModelLoaded -modelId $modelId)) {
@@ -319,13 +345,47 @@ function Format-RatePercent {
     return ('{0:0.0}%' -f ($rate * 100.0))
 }
 
-# "rate±stddev" cell, e.g. "83.3%±10.5%". Both numbers come straight from the
+# "rate+/-stddev" cell, e.g. "83.3%+/-10.5%". Both numbers come straight from the
 # repeat JSON's overall block (item-weighted rate; stddev over complete runs).
 function Format-Cell {
     param($overall)
     $rate = [double]$overall.mean_pass_rate
     $stddev = [double]$overall.stddev_pass_rate
-    return ('{0}±{1}' -f (Format-RatePercent -rate $rate), (Format-RatePercent -rate $stddev))
+    return ('{0}+/-{1}' -f (Format-RatePercent -rate $rate), (Format-RatePercent -rate $stddev))
+}
+
+function Get-ArmName {
+    param($card)
+    if ($null -eq $card) { return '' }
+    $property = $card.PSObject.Properties['arm']
+    if ($null -eq $property -or $null -eq $property.Value) { return '' }
+    return [string]$property.Value
+}
+
+function Get-CardValue {
+    param($card, [string]$name)
+    if ($null -eq $card) { return $null }
+    $property = $card.PSObject.Properties[$name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Get-ArmCards {
+    param($value)
+    if ($null -eq $value) { return }
+
+    $armProperty = $value.PSObject.Properties['arm']
+    $rateProperty = $value.PSObject.Properties['mean_pass_rate']
+    if ($null -ne $armProperty -and $null -ne $rateProperty) {
+        Write-Output -NoEnumerate $value
+        return
+    }
+
+    if ($value -is [System.Collections.IEnumerable] -and $value -isnot [string]) {
+        foreach ($item in $value) {
+            Get-ArmCards -value $item
+        }
+    }
 }
 
 # Count partial runs recorded in a summary's runs[] array.
@@ -377,8 +437,10 @@ Write-Host ("Patched settings: {0}" -f $patchedSettingsPath) -ForegroundColor Da
 Write-Host ("ST_SETTINGS_PATH -> {0}" -f $patchedSettingsPath) -ForegroundColor DarkGray
 
 # 2) Ensure LM Studio has the model loaded.
-Assert-LmsAvailable
-Ensure-ModelLoaded -modelId $ModelId
+if ([string]::IsNullOrWhiteSpace($ReuseSummaryPath)) {
+    Assert-LmsAvailable
+    Ensure-ModelLoaded -modelId $ModelId
+}
 
 # 3) Run the matrix: arm x suite.
 # results[suite][arm] = the collected pscustomobject from Invoke-ArmSuite.
@@ -387,10 +449,40 @@ foreach ($suite in $Suites) {
     $results[$suite] = @{}
 }
 
-foreach ($arm in $Arms) {
-    foreach ($suite in $Suites) {
-        $collected = Invoke-ArmSuite -arm $arm -suite $suite -k $Repeats
-        $results[$suite][$arm] = $collected
+if (-not [string]::IsNullOrWhiteSpace($ReuseSummaryPath)) {
+    if (@($Suites).Count -ne 1 -or @($Arms).Count -ne 1) {
+        throw '-ReuseSummaryPath requires exactly one suite and one arm.'
+    }
+    if (-not (Test-Path $ReuseSummaryPath)) {
+        throw "ReuseSummaryPath '$ReuseSummaryPath' does not exist."
+    }
+
+    $resolvedSummaryPath = (Resolve-Path $ReuseSummaryPath).Path
+    $reusedSummary = Get-Content -Path $resolvedSummaryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $suite = @($Suites)[0]
+    $arm = @($Arms)[0]
+    if (-not [string]::Equals([string]$reusedSummary.suite, [string]$suite, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Reused summary suite '$($reusedSummary.suite)' does not match requested suite '$suite'."
+    }
+    if ([int]$reusedSummary.repeats -ne $Repeats) {
+        throw "Reused summary has $($reusedSummary.repeats) repeat(s), but -Repeats is $Repeats. Pass the matching value."
+    }
+    $results[$suite][$arm] = [pscustomobject]@{
+        arm         = $arm
+        suite       = $suite
+        summaryPath = $resolvedSummaryPath
+        summary     = $reusedSummary
+    }
+    Write-Host ("Reusing completed summary: {0}" -f $resolvedSummaryPath) -ForegroundColor Yellow
+}
+else {
+    foreach ($arm in $Arms) {
+        foreach ($suite in $Suites) {
+            # Keep the explicit wrapper returned last. Native child-process
+            # adapters may also emit incidental success-stream records.
+            $collected = @(Invoke-ArmSuite -arm $arm -suite $suite -k $Repeats)[-1]
+            $results[$suite][$arm] = $collected
+        }
     }
 }
 
@@ -449,62 +541,71 @@ foreach ($suite in $Suites) {
 # stddev" uses the winning arm's stddev as the tolerance band.
 $recommendations = New-Object System.Collections.ArrayList
 foreach ($suiteCard in $scoreSuites) {
-    $arms = @($suiteCard.arms)
+    # A function in the measurement path may emit incidental success-stream
+    # records (notably native stderr wrappers in Windows PowerShell). Keep only
+    # the typed arm cards here so a valid single-arm run can still report.
+    $suiteArmCards = @(Get-ArmCards -value $suiteCard.arms)
+    if ($suiteArmCards.Count -eq 0) {
+        throw ("Suite '{0}' produced no valid arm cards; refusing to write a misleading report." -f $suiteCard.suite)
+    }
 
     # Best arm by raw rate.
     $best = $null
-    foreach ($armCard in $arms) {
+    foreach ($armCard in $suiteArmCards) {
         if ($null -eq $best) { $best = $armCard; continue }
-        if ([double]$armCard.mean_pass_rate -gt [double]$best.mean_pass_rate) { $best = $armCard }
+        if ([double](Get-CardValue -card $armCard -name 'mean_pass_rate') -gt
+            [double](Get-CardValue -card $best -name 'mean_pass_rate')) { $best = $armCard }
     }
 
     # Baseline card (if baseline was one of the arms tested).
     $baselineCard = $null
-    foreach ($armCard in $arms) {
-        if ($armCard.arm -eq 'baseline') { $baselineCard = $armCard }
+    foreach ($armCard in $suiteArmCards) {
+        if ((Get-ArmName -card $armCard) -eq 'baseline') { $baselineCard = $armCard }
     }
 
     $chosen = $best
-    $reason = ('highest item-weighted pass-rate ({0})' -f (Format-RatePercent -rate ([double]$best.mean_pass_rate)))
+    $reason = ('highest item-weighted pass-rate ({0})' -f
+        (Format-RatePercent -rate ([double](Get-CardValue -card $best -name 'mean_pass_rate'))))
 
-    if ($null -ne $baselineCard -and $best.arm -ne 'baseline') {
+    if ($null -ne $baselineCard -and (Get-ArmName -card $best) -ne 'baseline') {
         # Tolerance band = winning arm's stddev. If baseline is within that band of
         # the winner, prefer baseline (cheaper, lower latency, no extra sampling).
-        $band = [double]$best.stddev_pass_rate
-        $gap = [double]$best.mean_pass_rate - [double]$baselineCard.mean_pass_rate
+        $band = [double](Get-CardValue -card $best -name 'stddev_pass_rate')
+        $gap = [double](Get-CardValue -card $best -name 'mean_pass_rate') -
+            [double](Get-CardValue -card $baselineCard -name 'mean_pass_rate')
         if ($gap -le $band) {
             $chosen = $baselineCard
             $reason = ('baseline is within 1 stddev of the best arm ({0}); gap {1} <= band {2}. ' +
                 'Scaffolding must earn its latency, so baseline wins the tie.') -f `
-                $best.arm, (Format-RatePercent -rate $gap), (Format-RatePercent -rate $band)
+                (Get-ArmName -card $best), (Format-RatePercent -rate $gap), (Format-RatePercent -rate $band)
         }
         else {
             $reason = ('{0} beats baseline by {1}, more than its {2} stddev band' -f `
-                $best.arm, (Format-RatePercent -rate $gap), (Format-RatePercent -rate $band))
+                (Get-ArmName -card $best), (Format-RatePercent -rate $gap), (Format-RatePercent -rate $band))
         }
     }
 
     # Flag any arm on this suite that had partial runs.
     $flagged = New-Object System.Collections.ArrayList
-    foreach ($armCard in $arms) {
-        if ([int]$armCard.partial_run_count -gt 0) {
+    foreach ($armCard in $suiteArmCards) {
+        if ([int](Get-CardValue -card $armCard -name 'partial_run_count') -gt 0) {
             [void]$flagged.Add([pscustomobject]@{
-                arm               = $armCard.arm
-                partial_run_count = $armCard.partial_run_count
-                repeats           = $armCard.repeats
+                arm               = (Get-ArmName -card $armCard)
+                partial_run_count = (Get-CardValue -card $armCard -name 'partial_run_count')
+                repeats           = (Get-CardValue -card $armCard -name 'repeats')
             })
         }
     }
 
     [void]$recommendations.Add([pscustomobject]@{
         suite            = $suiteCard.suite
-        recommended_arm  = $chosen.arm
-        env              = $chosen.env
+        recommended_arm  = (Get-ArmName -card $chosen)
+        env              = (Get-CardValue -card $chosen -name 'env')
         reason           = $reason
-        chosen_rate      = $chosen.mean_pass_rate
-        chosen_stddev    = $chosen.stddev_pass_rate
-        best_arm         = $best.arm
-        best_rate        = $best.mean_pass_rate
+        chosen_rate      = (Get-CardValue -card $chosen -name 'mean_pass_rate')
+        chosen_stddev    = (Get-CardValue -card $chosen -name 'stddev_pass_rate')
+        best_arm         = (Get-ArmName -card $best)
+        best_rate        = (Get-CardValue -card $best -name 'mean_pass_rate')
         partials_flagged = @($flagged.ToArray())
     })
 }
@@ -543,7 +644,7 @@ $md = New-Object System.Collections.ArrayList
 [void]$md.Add(('> All numbers item-weighted over K complete runs; suites are closed-book ' +
     'compute/reasoning probes unless labeled open-book.'))
 [void]$md.Add('')
-[void]$md.Add('Each cell is `pass-rate±stddev` (item-weighted rate; stddev over complete runs). ' +
+[void]$md.Add('Each cell is `pass-rate+/-stddev` (item-weighted rate; stddev over complete runs). ' +
     'A `(P:n)` suffix flags n partial run(s) folded into that cell - treat those numbers with suspicion.')
 [void]$md.Add('')
 
@@ -563,18 +664,20 @@ foreach ($suiteCard in $scoreSuites) {
     [void]$rowCells.Add(('{0} ({1})' -f $suiteCard.suite, $suiteCard.item_count))
     foreach ($arm in $Arms) {
         $armCard = $null
-        foreach ($c in @($suiteCard.arms)) { if ($c.arm -eq $arm) { $armCard = $c } }
+        foreach ($c in @(Get-ArmCards -value $suiteCard.arms)) {
+            if ((Get-ArmName -card $c) -eq $arm) { $armCard = $c }
+        }
         if ($null -eq $armCard) {
             [void]$rowCells.Add('n/a')
             continue
         }
         $overall = [pscustomobject]@{
-            mean_pass_rate   = $armCard.mean_pass_rate
-            stddev_pass_rate = $armCard.stddev_pass_rate
+            mean_pass_rate   = (Get-CardValue -card $armCard -name 'mean_pass_rate')
+            stddev_pass_rate = (Get-CardValue -card $armCard -name 'stddev_pass_rate')
         }
         $cell = Format-Cell -overall $overall
-        if ([int]$armCard.partial_run_count -gt 0) {
-            $cell = ('{0} (P:{1})' -f $cell, $armCard.partial_run_count)
+        if ([int](Get-CardValue -card $armCard -name 'partial_run_count') -gt 0) {
+            $cell = ('{0} (P:{1})' -f $cell, (Get-CardValue -card $armCard -name 'partial_run_count'))
         }
         [void]$rowCells.Add($cell)
     }
@@ -592,7 +695,7 @@ foreach ($rec in @($recommendations.ToArray())) {
     [void]$md.Add(('### {0}' -f $rec.suite))
     [void]$md.Add('')
     [void]$md.Add(('- Recommended arm: **{0}**' -f $rec.recommended_arm))
-    [void]$md.Add(('- Rate: {0}±{1} (K={2})' -f `
+    [void]$md.Add(('- Rate: {0}+/-{1} (K={2})' -f `
         (Format-RatePercent -rate ([double]$rec.chosen_rate)), `
         (Format-RatePercent -rate ([double]$rec.chosen_stddev)), `
         $Repeats))

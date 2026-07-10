@@ -22,10 +22,6 @@ public sealed class DeterministicChatPostProcessor
         @"^\s*(?:answer\s*[:\-]\s*|the\s+best\s+answer\s+is\s+)?(?<letter>[A-J])(?:\s*[)\].:,\-]|\s+|$)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    private static readonly Regex StrictNumericOnlyPromptPattern = new(
-        @"\b(?:give|return|reply\s+with)\s+only\s+(?:the\s+)?(?:final\s+)?(?:integer|number|decimal)\b|\bfinal\s+(?:integer|number|decimal)\s+only\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
     private static readonly Regex ExplicitFinalAnswerLinePromptPattern = new(
         @"\bput\s+the\s+final\s+answer\s+on\s+its\s+own\s+line\s+as\s+[`'""]?final\s+answer\s*:",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -154,7 +150,7 @@ public sealed class DeterministicChatPostProcessor
         if (TryNormalizeExplicitFinalAnswerLineReply(userMessage, assistantText) is { Length: > 0 } finalAnswerLine)
             return finalAnswerLine;
 
-        if (StrictNumericOnlyPromptPattern.IsMatch(userMessage) &&
+        if (StrictAnswerContract.RequestsBareNumeric(userMessage) &&
             TryExtractLastNumericAnswer(assistantText) is { Length: > 0 } numericReply)
         {
             return numericReply;
