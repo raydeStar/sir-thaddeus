@@ -446,6 +446,84 @@ public class ToolLoopStepTests
         Assert.Equal("111", cont.Next.AssistantDraft);
     }
 
+    [Theory]
+    [InlineData("Count the matching rows with python_eval and answer with just a number.")]
+    [InlineData("Use python_eval for the calculation; output only an integer.")]
+    [InlineData("Please run python_eval and give me the numeric value only.")]
+    public async Task Numeric_only_contract_accepts_natural_paraphrases(string prompt)
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(73)\"}"),
+            LlmReply.Final("I calculated seventy."));
+        var mcp = new StubMcp(_ => "{\"stdout\":\"73\\n\",\"exit_code\":0}");
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext(prompt);
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("73", cont.Next.AssistantDraft);
+    }
+
+    [Fact]
+    public async Task Numeric_only_contract_uses_actual_tool_call_without_tool_name_in_prompt()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(73)\"}"),
+            LlmReply.Final("70"));
+        var mcp = new StubMcp(_ => "{\"stdout\":\"73\\n\",\"exit_code\":0}");
+        var step = BuildStep(llm, mcp: mcp);
+        const string prompt = "Count the matching rows and return just the number.";
+        var ctx = ComputeContext(prompt);
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("73", cont.Next.AssistantDraft);
+    }
+
+    [Fact]
+    public async Task Explanatory_compute_request_does_not_adopt_bare_tool_result_as_entire_answer()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", "{\"code\":\"print(73)\"}"),
+            LlmReply.Final("The result is 73 because each matching row was counted once."));
+        var mcp = new StubMcp(_ => "{\"stdout\":\"73\\n\",\"exit_code\":0}");
+        var step = BuildStep(llm, mcp: mcp);
+        const string prompt = "Only calculate a number if it helps, then explain the method.";
+        var ctx = ComputeContext(prompt);
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("The result is 73 because each matching row was counted once.", cont.Next.AssistantDraft);
+    }
+
+    [Fact]
+    public async Task Numeric_only_contract_accepts_numeric_json_result_and_scientific_notation()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("calculator", "{\"expression\":\"-1250\"}"),
+            LlmReply.Final("approximately -1,250"));
+        var mcp = new StubMcp(_ => "{\"result\":-1.25e3}");
+        var step = BuildStep(llm, mcp: mcp);
+        const string prompt = "Calculate the result and respond with just a numeric value.";
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs =
+            [
+                new ToolDefinition { Function = new FunctionDefinition { Name = "calculator", Description = "calc", Parameters = new { } } },
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("-1.25e3", cont.Next.AssistantDraft);
+    }
+
     [Fact]
     public async Task Failed_python_script_stdout_is_never_adopted_as_strict_answer()
     {

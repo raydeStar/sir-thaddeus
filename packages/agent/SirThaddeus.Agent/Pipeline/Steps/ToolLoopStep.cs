@@ -420,14 +420,10 @@ public sealed class ToolLoopStep : ITurnStep
                 // rewrite nudge and force python_eval next round. Capped at 2 per
                 // turn so a truly stuck problem can't spin the loop.
                 //
-                // GATE (measured regression, divisibility_count 3/5 -> 0/5): the
-                // nudge exists to rescue turns with NO usable output. When a
-                // successful bare-numeric value already exists this turn, the
-                // failing call is a redundant self-"verification" — repairing it
-                // goads the model into producing a wrong-but-successful
-                // competitor (401 then a "fixed" verify printing 201) that then
-                // ties against the correct value. Ignore it, like the pipeline
-                // always did before the nudge existed.
+                // The nudge exists to rescue turns with no usable output. Once a
+                // successful bare-numeric value exists, a later failing call is
+                // redundant verification; forcing another rewrite can create a
+                // wrong-but-successful competitor and make the evidence less clear.
                 if (LooksLikePythonEvalTool(toolName) &&
                     LooksLikeFailedOrEmptyPythonResult(outcome) &&
                     pythonRepairNudges < 2 &&
@@ -1260,23 +1256,18 @@ public sealed class ToolLoopStep : ITurnStep
         }
     }
 
-    // Strict-compute turn: the user explicitly directed a compute tool AND
-    // demanded a bare number ("reply with only the integer/number/value").
-    // Shared by the draft adoption and the reconciliation trigger so both
-    // always agree on which turns qualify.
+    // Bare-numeric response contract: recognize the user's requested output
+    // shape rather than one exact sentence. The actual tool records determine
+    // whether a compute result is eligible for adoption.
     private static bool IsStrictComputeTurn(string? userText) =>
-        !string.IsNullOrWhiteSpace(userText) &&
-        Regex.IsMatch(userText, @"reply\s+with\s+only\s+the\s+(integer|number|value)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) &&
-        StrictComputeTools.Any(tool => userText.Contains(tool, StringComparison.OrdinalIgnoreCase));
+        StrictAnswerContract.RequestsBareNumeric(userText);
 
     // Compute tools whose successful output IS the answer for a strict
-    // "reply with only the number" turn. Small models sometimes get the right
-    // value from their own tool call and then mistranscribe it in the final
-    // draft (observed: calculator returned 576, model answered 600; python
-    // printed 111, model answered 1). When the user explicitly directed the
-    // tool and demanded a bare number, the model's own successful computation
-    // wins over its transcription. The reasoning (expression / program
-    // construction) remains entirely the model's.
+    // bare-number turn. Small models sometimes get the right value from their
+    // own tool call and then mistranscribe it in the final draft. When the user
+    // requested a bare number, the model's own successful computation wins over
+    // its transcription. The reasoning (expression / program construction)
+    // remains entirely the model's.
     private static readonly string[] StrictComputeTools = ["calculator", "python_eval"];
 
     // Every successful, bare-numeric result the model's own compute tools
@@ -1297,7 +1288,7 @@ public sealed class ToolLoopStep : ITurnStep
 
             var tool = StrictComputeTools.FirstOrDefault(t =>
                 string.Equals(call.ToolName, t, StringComparison.OrdinalIgnoreCase));
-            if (tool is null || !userText.Contains(tool, StringComparison.OrdinalIgnoreCase))
+            if (tool is null)
                 continue;
 
             if (TryExtractBareNumericComputeValue(call.Result) is { Length: > 0 } value)
@@ -1331,6 +1322,10 @@ public sealed class ToolLoopStep : ITurnStep
             {
                 value = resultEl.GetString();
             }
+            else if (resultEl.ValueKind == JsonValueKind.Number)
+            {
+                value = resultEl.GetRawText();
+            }
             else if (doc.RootElement.TryGetProperty("stdout", out var stdoutEl) &&
                      stdoutEl.ValueKind == JsonValueKind.String)
             {
@@ -1338,8 +1333,7 @@ public sealed class ToolLoopStep : ITurnStep
             }
 
             // Only a bare numeric output is unambiguous enough to adopt.
-            if (!string.IsNullOrWhiteSpace(value) &&
-                Regex.IsMatch(value, @"^-?\d+(?:\.\d+)?$", RegexOptions.CultureInvariant))
+            if (StrictAnswerContract.IsBareNumeric(value))
             {
                 return value;
             }
@@ -1352,12 +1346,9 @@ public sealed class ToolLoopStep : ITurnStep
         return null;
     }
 
-    // Refactored per INTERVENTION 2: adopt the MAJORITY value among all the
-    // turn's successful bare-numeric compute results; ties break to the newest.
-    // (Previously newest-only, which let a subtly corrupted "verify" call
-    // clobber a correct first result.) Single or agreeing results behave
-    // exactly as before: the majority of one value, or of equal values, is
-    // that value.
+    // Adopt the majority value among successful bare-numeric compute results.
+    // Single or agreeing results behave naturally; a tie preserves the first
+    // usable computation instead of letting redundant retries overwrite it.
     private static string? TryBuildStrictComputeResultDraft(string? userText, IReadOnlyList<ToolCallRecord> toolCallsMade)
     {
         if (!IsStrictComputeTurn(userText))
@@ -1367,11 +1358,7 @@ public sealed class ToolLoopStep : ITurnStep
         return SelectMajorityThenOldest(values);
     }
 
-    // Majority wins; on a tie the OLDEST (first computed) of the tied values
-    // wins. The failure taxonomy showed corrupted values come from LATER
-    // redundant "verification" calls (37 then "1"; 401 then a "fixed" verify
-    // printing 201) — the first computation is empirically the trustworthy one
-    // when the vote is split.
+    // Majority wins; on a tie the oldest (first computed) tied value wins.
     private static string? SelectMajorityThenOldest(IReadOnlyList<string> valuesOldestFirst)
     {
         if (valuesOldestFirst.Count == 0)
