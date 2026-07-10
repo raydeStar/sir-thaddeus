@@ -72,16 +72,17 @@ function RootLayout() {
       <aside
         className="shell-sidebar group/aside hidden w-[72px] shrink-0 flex-col border-r border-line py-4 transition-[width] duration-200 hover:w-56 md:flex"
         aria-label="Workspace"
+        data-testid="desktop-sidebar"
       >
         <Link
           to="/"
-          className="mx-[18px] mb-5 flex h-9 items-center gap-2.5 text-ink"
+          className="mx-[18px] mb-5 flex h-9 items-center justify-center gap-0 text-ink group-hover/aside:justify-start group-hover/aside:gap-2.5"
           aria-label="Sir Thaddeus home"
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center">
             <ThaddeusMark />
           </span>
-          <span className="pointer-events-none overflow-hidden whitespace-nowrap text-[15px] font-semibold opacity-0 transition-opacity duration-150 group-hover/aside:opacity-100">
+          <span className="pointer-events-none max-w-0 overflow-hidden whitespace-nowrap text-[15px] font-semibold opacity-0 transition-[max-width,opacity] duration-200 group-hover/aside:max-w-[142px] group-hover/aside:opacity-100">
             Sir Thaddeus
           </span>
         </Link>
@@ -149,14 +150,15 @@ function NavGroup({ items }: { items: ReadonlyArray<NavEntry> }) {
         <li key={to}>
           <Link
             to={to}
+            data-testid={`desktop-nav-${label.toLowerCase()}`}
             activeProps={{
               className: 'bg-accent-soft text-accent ring-1 ring-inset ring-accent/15',
             }}
             activeOptions={{ exact: to === '/' }}
-            className="flex h-9 items-center gap-3 rounded-xl px-3 text-sm font-medium text-ink-muted transition-colors hover:bg-canvas-sunken hover:text-ink"
+            className="flex h-9 items-center justify-center gap-0 rounded-xl px-3 text-sm font-medium text-ink-muted transition-colors hover:bg-canvas-sunken hover:text-ink group-hover/aside:justify-start group-hover/aside:gap-3"
           >
             <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
-            <span className="pointer-events-none overflow-hidden whitespace-nowrap opacity-0 transition-opacity duration-150 group-hover/aside:opacity-100">
+            <span className="pointer-events-none max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity] duration-200 group-hover/aside:max-w-[150px] group-hover/aside:opacity-100">
               {label}
             </span>
           </Link>

@@ -156,6 +156,12 @@ async function inspectAtViewport(
   const total = Math.round(
     (Object.values(checks).filter(Boolean).length / Object.keys(checks).length) * 10,
   );
+  if (label === 'desktop') {
+    const messageList = page.getByTestId('chat-message-list');
+    await messageList.evaluate((element) => {
+      element.scrollTo({ top: 0, behavior: 'auto' });
+    });
+  }
   await page.screenshot({ path: `test-results/sourcecards-ux-${label}.png`, fullPage: true });
 
   return { total, checks };

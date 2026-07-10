@@ -69,4 +69,52 @@ test.describe('Sir Thaddeus visual system', () => {
     expect(layout.pageWidth).toBeLessThanOrEqual(layout.viewportWidth);
     expect(layout.tabsScrollable).toBe(true);
   });
+
+  test('collapsed desktop navigation centers every icon in its target', async ({ page, context }) => {
+    const baseUrl = process.env.RUNTIME_BASE_URL;
+    const token = process.env.RUNTIME_TOKEN;
+    expect(baseUrl).toBeTruthy();
+    expect(token).toBeTruthy();
+    await context.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
+    await page.setViewportSize({ width: 1224, height: 816 });
+
+    await page.goto(`${baseUrl}/chat`, { waitUntil: 'domcontentloaded' });
+    const sidebar = page.getByTestId('desktop-sidebar');
+    await expect(sidebar).toBeVisible();
+
+    const alignment = await page.locator('[data-testid^="desktop-nav-"]').evaluateAll((links) =>
+      links.map((link) => {
+        const icon = link.querySelector('svg');
+        const linkRect = link.getBoundingClientRect();
+        const iconRect = icon?.getBoundingClientRect();
+        return {
+          label: link.getAttribute('data-testid'),
+          centerDelta: iconRect
+            ? Math.abs(
+                (iconRect.left + iconRect.width / 2) -
+                (linkRect.left + linkRect.width / 2),
+              )
+            : Number.POSITIVE_INFINITY,
+          hiddenLabelWidth: link.querySelector('span')?.getBoundingClientRect().width ?? -1,
+        };
+      }),
+    );
+
+    expect(alignment).toHaveLength(primaryNavCount + secondaryNavCount);
+    for (const item of alignment) {
+      expect(item.centerDelta, item.label ?? 'navigation item').toBeLessThanOrEqual(0.5);
+      expect(item.hiddenLabelWidth, item.label ?? 'navigation item').toBe(0);
+    }
+
+    await sidebar.hover();
+    await expect.poll(() => sidebar.evaluate((element) =>
+      element.getBoundingClientRect().width)).toBeGreaterThanOrEqual(223);
+    const visibleLabels = await page.locator('[data-testid^="desktop-nav-"] span').evaluateAll(
+      (labels) => labels.filter((label) => label.getBoundingClientRect().width > 0).length,
+    );
+    expect(visibleLabels).toBe(primaryNavCount + secondaryNavCount);
+  });
 });
+
+const primaryNavCount = 6;
+const secondaryNavCount = 4;
