@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { Check, Plus, X } from 'lucide-react';
 import { PageScaffold } from '../components/PageScaffold';
+import { ThaddeusSignet } from '../components/ThaddeusSignet';
 import { getSettings, putSettings } from '../lib/settingsApi';
 import { getFolderSuggestions, type FolderSuggestion } from '../lib/filesApi';
 import type { SettingsDocument } from '@thaddeus/shared-types';
@@ -139,7 +140,15 @@ function OnboardingRoute() {
         <div data-testid={`onboarding-step-${step}`} className="space-y-4">
           {step === 'welcome' && (
             <>
-              <h2 className="text-base font-semibold text-ink">Hello.</h2>
+              <div className="flex items-center gap-3">
+                <ThaddeusSignet className="h-12 w-12 shrink-0" />
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-accent">
+                    Sir Thaddeus
+                  </p>
+                  <h2 className="mt-0.5 text-base font-semibold text-ink">At your service.</h2>
+                </div>
+              </div>
               <p className="text-sm text-ink">
                 Sir Thaddeus is a local-first agent. Your conversations live on your machine; no
                 cloud account is required.

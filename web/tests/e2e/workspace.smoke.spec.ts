@@ -21,6 +21,7 @@ test.describe('workspace smoke', () => {
 
     // Workspace root mounted.
     await expect(page.getByTestId('workspace-root')).toBeVisible();
+    await expect(page.getByTestId('route-home').getByTestId('thaddeus-signet')).toBeVisible();
 
     // Meta-tag bootstrap is present and the version meta matches the runtime's lock.
     const tokenMeta = await page.locator('meta[name="thaddeus-runtime-token"]').getAttribute('content');

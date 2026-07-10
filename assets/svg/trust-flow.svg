@@ -1,0 +1,88 @@
+<svg width="1280" height="420" viewBox="0 0 1280 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">The Sir Thaddeus trust flow</title>
+  <desc id="desc">A request moves through visible permission, a scoped local tool boundary, and an evidence-backed answer</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#09111C"/>
+      <stop offset="1" stop-color="#10253B"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17273A"/>
+      <stop offset="1" stop-color="#0D1724"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#D4A149"/>
+      <stop offset="0.5" stop-color="#F08B68"/>
+      <stop offset="1" stop-color="#D4A149"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="16" stdDeviation="14" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect x="10" y="10" width="1260" height="400" rx="26" fill="url(#bg)"/>
+  <rect x="10.75" y="10.75" width="1258.5" height="398.5" rx="25.25" fill="none" stroke="#D4A149" stroke-opacity="0.28" stroke-width="1.5"/>
+
+  <text x="62" y="70" font-family="Georgia, 'Times New Roman', serif" font-size="34" font-weight="700" fill="#F6EDDB">A boundary you can see.</text>
+  <text x="62" y="100" font-family="Segoe UI, Arial, sans-serif" font-size="17" fill="#91A3B7">The model can suggest. Sir Thaddeus makes the action legible—and leaves the decision with you.</text>
+
+  <path d="M365 229 H457 M823 229 H915" stroke="url(#signal)" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="411" cy="229" r="5" fill="#F08B68"/>
+  <circle cx="869" cy="229" r="5" fill="#F08B68"/>
+
+  <!-- Ask -->
+  <g filter="url(#soft)">
+    <rect x="62" y="137" width="303" height="196" rx="20" fill="url(#card)" stroke="#D4A149" stroke-opacity="0.3"/>
+    <circle cx="108" cy="184" r="23" fill="#3B211A"/>
+    <path d="M108 168 L123 174 V185 C123 197 116 204 108 208 C100 204 93 197 93 185 V174Z" fill="none" stroke="#F08B68" stroke-width="2"/>
+    <text x="145" y="178" font-family="Consolas, monospace" font-size="13" letter-spacing="1.6" fill="#F08B68">01 · ASK</text>
+    <text x="145" y="204" font-family="Segoe UI, Arial, sans-serif" font-size="21" font-weight="700" fill="#F4ECDD">Permission</text>
+    <text x="88" y="247" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#9CABB9">See the exact tool and arguments.</text>
+    <rect x="88" y="272" width="78" height="31" rx="15.5" fill="#30171B" stroke="#BD4557" stroke-opacity="0.55"/>
+    <text x="127" y="293" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#F05A70">Deny</text>
+    <rect x="176" y="272" width="105" height="31" rx="15.5" fill="#D97757"/>
+    <text x="228.5" y="293" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#FFF">Allow once</text>
+  </g>
+
+  <!-- Act -->
+  <g filter="url(#soft)">
+    <rect x="457" y="137" width="366" height="196" rx="20" fill="url(#card)" stroke="#D4A149" stroke-opacity="0.3"/>
+    <circle cx="503" cy="184" r="23" fill="#192B3E"/>
+    <path d="M490 184 H516 M503 171 V197 M494 175 Q503 184 512 193 M512 175 Q503 184 494 193" fill="none" stroke="#E7B65C" stroke-width="1.8"/>
+    <text x="540" y="178" font-family="Consolas, monospace" font-size="13" letter-spacing="1.6" fill="#E7B65C">02 · ACT</text>
+    <text x="540" y="204" font-family="Segoe UI, Arial, sans-serif" font-size="21" font-weight="700" fill="#F4ECDD">Scoped tool boundary</text>
+    <text x="483" y="247" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#9CABB9">Only the approved capability crosses into MCP.</text>
+    <g font-family="Consolas, monospace" font-size="12">
+      <rect x="483" y="270" width="97" height="31" rx="8" fill="#0A111B" stroke="#546477" stroke-opacity="0.5"/>
+      <text x="531.5" y="290" text-anchor="middle" fill="#B8C5D1">geocode</text>
+      <path d="M590 285 H618" stroke="#F08B68" stroke-width="2"/>
+      <rect x="628" y="270" width="105" height="31" rx="8" fill="#0A111B" stroke="#546477" stroke-opacity="0.5"/>
+      <text x="680.5" y="290" text-anchor="middle" fill="#B8C5D1">web_search</text>
+    </g>
+  </g>
+
+  <!-- Answer -->
+  <g filter="url(#soft)">
+    <rect x="915" y="137" width="303" height="196" rx="20" fill="url(#card)" stroke="#D4A149" stroke-opacity="0.3"/>
+    <circle cx="961" cy="184" r="23" fill="#2D2415"/>
+    <path d="M949 174 H973 V194 H949Z M954 180 H968 M954 185 H965 M954 190 H969" fill="none" stroke="#E7B65C" stroke-width="1.8"/>
+    <text x="998" y="178" font-family="Consolas, monospace" font-size="13" letter-spacing="1.6" fill="#E7B65C">03 · VERIFY</text>
+    <text x="998" y="204" font-family="Segoe UI, Arial, sans-serif" font-size="21" font-weight="700" fill="#F4ECDD">Evidence</text>
+    <text x="941" y="247" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#9CABB9">Answer, sources, outcome, and trace.</text>
+    <rect x="941" y="270" width="105" height="34" rx="9" fill="#2D2632" stroke="#A179A3" stroke-opacity="0.55"/>
+    <rect x="1057" y="270" width="135" height="34" rx="9" fill="#30261E" stroke="#D97757" stroke-opacity="0.55"/>
+    <text x="993.5" y="291" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#D7BED6">Source card</text>
+    <text x="1124.5" y="291" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#F1B39D">Local trace</text>
+  </g>
+
+  <g font-family="Consolas, monospace" font-size="13" letter-spacing="1.5">
+    <text x="62" y="378" fill="#D4A149">OFF</text>
+    <text x="107" y="378" fill="#708398">blocks it</text>
+    <text x="250" y="378" fill="#F08B68">ASK</text>
+    <text x="295" y="378" fill="#708398">puts you in the loop</text>
+    <text x="510" y="378" fill="#D4A149">ALWAYS</text>
+    <text x="583" y="378" fill="#708398">remembers your choice</text>
+    <text x="890" y="378" fill="#D4A149">STOP</text>
+    <text x="938" y="378" fill="#708398">kills active work</text>
+  </g>
+</svg>
