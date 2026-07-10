@@ -270,7 +270,7 @@ function RoutineRunRoute() {
           data-testid="routine-run-complete"
           disabled={sealed || completing}
           onClick={() => void onComplete()}
-          className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="btn-primary"
         >
           {completing ? 'Completing…' : sealed ? 'Completed' : 'Complete routine'}
         </button>

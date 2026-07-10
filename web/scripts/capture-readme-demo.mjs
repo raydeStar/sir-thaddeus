@@ -1,5 +1,5 @@
 import { chromium } from '@playwright/test';
-import { console } from 'node:console';
+import console from 'node:console';
 import { copyFile, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';

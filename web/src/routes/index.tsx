@@ -211,22 +211,26 @@ function HomeRoute() {
   return (
     <section
       data-testid="route-home"
-      className="mx-auto flex min-h-full w-full max-w-[680px] flex-col px-6 pt-20 pb-16 md:pt-28"
+      className="mx-auto flex min-h-full w-full max-w-[700px] flex-col px-5 pt-14 pb-16 sm:px-6 md:pt-20"
     >
       {/* Hero mark — small, calm. Signals identity without being loud. */}
-      <div className="mx-auto mb-9 drop-shadow-[0_10px_22px_rgba(201,146,57,0.18)]">
-        <ThaddeusSignet className="h-14 w-14" />
+      <div className="mx-auto drop-shadow-[0_12px_28px_rgba(201,146,57,0.24)]">
+        <ThaddeusSignet className="h-16 w-16" />
       </div>
 
+      <p className="mt-5 text-center text-[10px] font-semibold uppercase tracking-[0.24em] text-accent">
+        Sir Thaddeus
+      </p>
+
       {/* Single-line headline. The app's strongest surface — one big sentence. */}
-      <h1 className="text-center text-[40px] font-semibold leading-[1.08] tracking-[-0.03em] text-ink">
+      <h1 className="mt-3 text-center text-[38px] font-semibold leading-[1.08] tracking-[-0.04em] text-ink sm:text-[42px]">
         How can I help?
       </h1>
       <p className="mt-3 text-center text-[15px] text-ink-muted">
-        Ask anything, or pick up where you left off.
+        Your model, memory, and tools—always within your rules.
       </p>
 
-      <div className="mt-10">
+      <div className="mt-9">
         <ChatComposer
           value={draft}
           onChange={setDraft}
@@ -323,7 +327,7 @@ function HomeRoute() {
 
       {/* Recents. Only renders when there are threads — otherwise the hero breathes. */}
       {recent.length > 0 ? (
-        <nav aria-label="Recent conversations" className="mt-20">
+        <nav aria-label="Recent conversations" className="mt-16">
           {/* Hairline divider gives the section its own visual weight so it
               doesn't read as a continuation of the input hint. */}
           <div className="mb-6 h-px bg-line" aria-hidden />
@@ -346,7 +350,7 @@ function HomeRoute() {
                   params={{ threadId: t.id }}
                   search={{ focusMessageId: undefined }}
                   data-testid={`home-recent-${t.id}`}
-                  className="group/recent flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink transition-colors hover:bg-canvas-raised"
+                  className="group/recent flex items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-sm text-ink transition-all hover:border-line hover:bg-canvas-raised hover:shadow-soft"
                 >
                   <span
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-canvas-sunken text-ink-subtle transition-colors group-hover/recent:bg-accent-soft group-hover/recent:text-accent"

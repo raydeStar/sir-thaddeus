@@ -19,6 +19,6 @@
     <text x="59" y="105" text-anchor="middle" fill="#F5EBD8">S</text>
     <text x="102" y="105" text-anchor="middle" fill="url(#brass)">T</text>
   </g>
-  <path d="M75 78 L80 72 L85 78 L80 84Z" fill="#F08B68"/>
+  <path d="M75 78 L80 72 L85 78 L80 84Z" fill="#F0C36C"/>
   <path d="M65 137 L80 129 L95 137 L80 145Z" fill="url(#brass)" opacity="0.9"/>
 </svg>

@@ -29,7 +29,7 @@ export function RuntimeStateBadge() {
 
   return (
     <div
-      className="flex items-center gap-2 rounded-full border border-line bg-canvas-raised px-2.5 py-1"
+      className="flex h-7 items-center gap-2 rounded-full border border-line bg-canvas-raised/85 px-2.5 shadow-soft"
       data-testid="runtime-state-badge"
       data-state={state}
       data-connected={connected}

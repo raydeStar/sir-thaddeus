@@ -30,7 +30,7 @@ export function KillAppButton() {
       data-testid="header-kill-app"
       title="Stop everything and exit Sir Thaddeus"
       aria-label="Stop everything and exit Sir Thaddeus"
-      className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-white shadow-sm transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:cursor-not-allowed disabled:bg-red-900/60"
+      className="flex h-7 w-7 items-center justify-center rounded-full border border-red-500/25 bg-canvas-raised text-red-500 shadow-soft transition hover:border-red-500/60 hover:bg-red-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-red-500/35 disabled:cursor-not-allowed disabled:opacity-50"
     >
       <Power className="h-3.5 w-3.5" strokeWidth={2.5} aria-hidden />
     </button>

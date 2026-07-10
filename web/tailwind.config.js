@@ -26,8 +26,10 @@ export default {
         },
         accent: {
           DEFAULT: 'var(--color-accent)',
+          strong: 'var(--color-accent-strong)',
           soft: 'var(--color-accent-soft)',
           ring: 'var(--color-accent-ring)',
+          on: 'var(--color-on-accent)',
         },
         thaddeus: {
           ink: 'var(--color-ink)',
@@ -63,8 +65,8 @@ export default {
         tightest: '-0.02em',
       },
       boxShadow: {
-        soft: '0 1px 2px rgba(20, 18, 14, 0.04), 0 0 0 1px rgba(20, 18, 14, 0.06)',
-        lift: '0 6px 24px -8px rgba(20, 18, 14, 0.12), 0 2px 6px rgba(20, 18, 14, 0.04)',
+        soft: 'var(--shadow-soft)',
+        lift: 'var(--shadow-lift)',
       },
       borderRadius: {
         xl: '0.875rem',

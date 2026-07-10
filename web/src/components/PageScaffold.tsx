@@ -34,11 +34,11 @@ export function PageScaffold({
   return (
     <section
       data-testid={testId}
-      className={`mx-auto w-full ${widthClass[width]} px-6 py-12 md:px-10 md:py-16`}
+      className={`mx-auto w-full ${widthClass[width]} px-5 py-9 sm:px-6 md:px-10 md:py-14`}
     >
       {!bare ? (
-        <header className="mb-10">
-          <h1 className="text-[2.25rem] font-semibold leading-[1.1] text-ink">{title}</h1>
+        <header className="mb-9 border-b border-line pb-7">
+          <h1 className="text-[2rem] font-semibold leading-[1.1] tracking-[-0.035em] text-ink md:text-[2.25rem]">{title}</h1>
           {subtitle ? (
             <p className="mt-2 text-[15px] text-ink-muted">{subtitle}</p>
           ) : null}

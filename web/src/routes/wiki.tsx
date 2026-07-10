@@ -510,7 +510,7 @@ function WikiRoute() {
           ) : null}
           <button
             type="button"
-            className={`wiki-command-button ${(dirty || isDraftPage) && !busy && (page || (isDraftPage && (draft.trim() || pageTitleDraft.trim()))) ? 'border-accent bg-accent text-white hover:bg-accent hover:border-accent' : ''}`}
+            className={`wiki-command-button ${(dirty || isDraftPage) && !busy && (page || (isDraftPage && (draft.trim() || pageTitleDraft.trim()))) ? 'border-accent bg-accent text-accent-on hover:bg-accent-strong hover:border-accent-strong' : ''}`}
             disabled={busy || (isDraftPage ? !draft.trim() && !pageTitleDraft.trim() : !dirty || !page)}
             onClick={() => void savePage()}
             title="Save (Ctrl+S)"
@@ -1071,7 +1071,7 @@ function WikiRoute() {
                       </div>
                       <button
                         type="button"
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-subtle"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-on shadow-sm transition hover:bg-accent-strong disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-ink-subtle"
                         disabled={busy || !pagePrompt.trim()}
                         onClick={() => {
                           if (selectedText.trim()) {
@@ -1350,7 +1350,7 @@ function WikiConfirmDialog({
           </button>
           <button
             type="button"
-            className={`wiki-command-button ${destructive ? 'border-rose-500 bg-rose-600 text-white hover:bg-rose-600 hover:border-rose-500' : 'border-accent bg-accent text-white hover:bg-accent hover:border-accent'}`}
+            className={`wiki-command-button ${destructive ? 'border-rose-500 bg-rose-600 text-white hover:bg-rose-600 hover:border-rose-500' : 'border-accent bg-accent text-accent-on hover:bg-accent-strong hover:border-accent-strong'}`}
             disabled={disabled}
             onClick={onConfirm}
           >
@@ -1427,7 +1427,7 @@ function WikiImportDialog({
           ) : null}
           <button
             type="button"
-            className="wiki-command-button border-accent bg-accent text-white hover:bg-accent hover:border-accent"
+            className="wiki-command-button border-accent bg-accent text-accent-on hover:border-accent-strong hover:bg-accent-strong"
             disabled={busy || preview.newCount === 0}
             onClick={() => onConfirm('skip')}
           >

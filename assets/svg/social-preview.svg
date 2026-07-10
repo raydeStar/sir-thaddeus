@@ -42,7 +42,7 @@
       <text x="-12" y="14" text-anchor="middle" fill="#F5EBD8">S</text>
       <text x="13" y="14" text-anchor="middle" fill="url(#brass)">T</text>
     </g>
-    <path d="M-3 -2 L0 -6 L3 -2 L0 2Z" fill="#F08B68"/>
+    <path d="M-3 -2 L0 -6 L3 -2 L0 2Z" fill="#F0C36C"/>
   </g>
 
   <text x="682" y="82" font-family="Consolas, 'Cascadia Mono', monospace" font-size="17" letter-spacing="5" fill="#D3A24E">SIR THADDEUS</text>
@@ -58,8 +58,8 @@
     <text x="677" y="435" text-anchor="middle" fill="#F5EBD8">Local models</text>
     <rect x="788" y="408" width="190" height="42" rx="21" fill="#172A3E" stroke="#D3A24E" stroke-opacity="0.35"/>
     <text x="883" y="435" text-anchor="middle" fill="#F5EBD8">Private memory</text>
-    <rect x="994" y="408" width="211" height="42" rx="21" fill="#3A211B" stroke="#F08B68" stroke-opacity="0.55"/>
-    <text x="1099.5" y="435" text-anchor="middle" fill="#F4C0AD">Visible permission</text>
+    <rect x="994" y="408" width="211" height="42" rx="21" fill="#152131" stroke="#D3A24E" stroke-opacity="0.55"/>
+    <text x="1099.5" y="435" text-anchor="middle" fill="#F0C36C">Visible permission</text>
   </g>
 
   <text x="582" y="514" font-family="Georgia, 'Times New Roman', serif" font-size="24" font-style="italic" fill="#C8D3E0">Your thoughts deserve a butler, not an audience.</text>

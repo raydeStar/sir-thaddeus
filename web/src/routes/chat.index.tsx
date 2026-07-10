@@ -47,7 +47,7 @@ function ChatListRoute() {
             type="button"
             onClick={onNew}
             data-testid="chat-new-thread"
-            className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+            className="btn-primary"
           >
             <Plus className="h-4 w-4" strokeWidth={2} />
             New chat
@@ -75,7 +75,7 @@ function ChatListRoute() {
             type="button"
             onClick={onNew}
             data-testid="chat-new-thread"
-            className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            className="btn-primary mt-3"
           >
             <Plus className="h-4 w-4" strokeWidth={2} />
             New chat
