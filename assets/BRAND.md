@@ -43,3 +43,5 @@ In product UI, aged brass is the primary action and focus color. Ember red is re
 - [`images/local-first-workspace-final.png`](images/local-first-workspace-final.png) — definitive product-world hero with a pixel-authentic UI composite.
 - [`images/permission-flow-demo.gif`](images/permission-flow-demo.gif) — deterministic real-UI permission-flow demonstration.
 - [`images/sir-thaddeus-social-banner.jpg`](images/sir-thaddeus-social-banner.jpg) — 1280×640 share card for LinkedIn posts and GitHub social preview.
+- [`svg/trust-flow-social.svg`](svg/trust-flow-social.svg) — editable source for the standalone social trust-flow graphic.
+- [`images/sir-thaddeus-trust-flow.jpg`](images/sir-thaddeus-trust-flow.jpg) — upload-ready 1280×640 trust-flow card for LinkedIn and GitHub.
