@@ -6,8 +6,8 @@ const richSources = [
     title: '4 new Olympia restaurants: hours, locations, signature food',
     domain: 'theolympian.com',
     excerpt: 'Olympia dining keeps expanding with new Mexican fare, breakfast sandwiches, and Japanese-style donuts.',
-    favicon: iconDataUrl('O', '#d97757'),
-    thumbnail: thumbDataUrl('OLYMPIA FOOD', 'New restaurants downtown', '#924c34', '#22384d'),
+    favicon: iconDataUrl('O', '#c79239'),
+    thumbnail: thumbDataUrl('OLYMPIA FOOD', 'New restaurants downtown', '#1b3f6e', '#102030'),
     publishedAt: '2026-05-10T08:00:00Z',
   },
   {
@@ -16,7 +16,7 @@ const richSources = [
     domain: 'thurstontalk.com',
     excerpt: 'A local donut shop is drawing attention for soft mochi donuts and weekend breakfast traffic.',
     favicon: iconDataUrl('T', '#3b82f6'),
-    thumbnail: thumbDataUrl('KAWAII DONUT', 'Mochi donuts and morning lines', '#a85532', '#f7b267'),
+    thumbnail: thumbDataUrl('KAWAII DONUT', 'Mochi donuts and morning lines', '#6f4d18', '#c9973e'),
     publishedAt: '2026-05-09T15:30:00Z',
   },
   {
@@ -25,7 +25,7 @@ const richSources = [
     domain: 'olyfed.com',
     excerpt: 'The bakery cafe is pairing breakfast sandwiches with pastries in a small downtown space.',
     favicon: iconDataUrl('G', '#10b981'),
-    thumbnail: thumbDataUrl('GLOWIES', 'Breakfast sandwiches and pastries', '#334155', '#d97757'),
+    thumbnail: thumbDataUrl('GLOWIES', 'Breakfast sandwiches and pastries', '#24394f', '#9a702f'),
     publishedAt: '2026-05-08T18:45:00Z',
   },
   {
@@ -33,8 +33,8 @@ const richSources = [
     title: 'Concerts and events in Portland this week',
     domain: 'bandsintown.com',
     excerpt: 'Venue calendars point to a busy week for small stages, touring acts, and last-minute ticket listings.',
-    favicon: iconDataUrl('B', '#8b5cf6'),
-    thumbnail: thumbDataUrl('LIVE MUSIC', 'Concerts and small venues', '#1f2937', '#7c3aed'),
+    favicon: iconDataUrl('B', '#58718d'),
+    thumbnail: thumbDataUrl('LIVE MUSIC', 'Concerts and small venues', '#1c2e43', '#58718d'),
     publishedAt: '2026-05-07T19:00:00Z',
   },
   {
@@ -43,7 +43,7 @@ const richSources = [
     domain: 'forecast.weather.gov',
     excerpt: 'The latest forecast emphasizes mild temperatures, patchy clouds, and a calmer weekend pattern.',
     favicon: iconDataUrl('W', '#06b6d4'),
-    thumbnail: thumbDataUrl('FORECAST', 'Cool mornings and calmer wind', '#0f766e', '#2563eb'),
+    thumbnail: thumbDataUrl('FORECAST', 'Cool mornings and calmer wind', '#0c5962', '#1b3f6e'),
     publishedAt: '2026-05-10T12:00:00Z',
   },
 ];
@@ -61,7 +61,7 @@ test.describe('source cards UX', () => {
     await forceDarkTheme(context);
     await installRoutes(page, baseUrl!);
 
-    const desktopScore = await inspectAtViewport(page, baseUrl!, 1224, 816, 'desktop');
+    const desktopScore = await inspectAtViewport(page, baseUrl!, 1224, 900, 'desktop');
     expect(desktopScore, JSON.stringify(desktopScore.checks)).toMatchObject({ total: 10 });
 
     const mobileScore = await inspectAtViewport(page, baseUrl!, 390, 780, 'mobile');
@@ -87,6 +87,17 @@ async function inspectAtViewport(
   await expect(cards).toHaveCount(richSources.length);
   await expect(page.getByTestId('source-card-thumbnail')).toHaveCount(richSources.length);
   await expect(page.getByTestId('chat-latest-response-actions')).toBeVisible();
+  const sourceImages = page.getByTestId('chat-source-cards').locator('img');
+  await expect.poll(() => sourceImages.count()).toBeGreaterThanOrEqual(richSources.length);
+  await expect.poll(
+    () => sourceImages.evaluateAll((images) =>
+      images
+        .filter((image) => {
+          const rect = image.getBoundingClientRect();
+          return rect.bottom > 0 && rect.top < window.innerHeight;
+        })
+        .every((image) => image.complete && image.naturalWidth > 0)),
+  ).toBe(true);
 
   const checks = await page.evaluate(() => {
     const sourceSection = document.querySelector<HTMLElement>('[data-testid="chat-source-cards"]');
@@ -103,7 +114,12 @@ async function inspectAtViewport(
         rect.left >= -1 &&
         rect.right <= viewportWidth + 1;
     });
-    const imagesReady = images.every((image) => image.complete && image.naturalWidth > 0);
+    const imagesReady = images
+      .filter((image) => {
+        const rect = image.getBoundingClientRect();
+        return rect.bottom > 0 && rect.top < window.innerHeight;
+      })
+      .every((image) => image.complete && image.naturalWidth > 0);
     const noHorizontalPageOverflow =
       document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1;
     const noCardOverlap = sourceCards.every((card, index) => {

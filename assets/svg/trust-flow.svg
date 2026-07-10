@@ -69,10 +69,10 @@
     <text x="998" y="178" font-family="Consolas, monospace" font-size="13" letter-spacing="1.6" fill="#E7B65C">03 · VERIFY</text>
     <text x="998" y="204" font-family="Segoe UI, Arial, sans-serif" font-size="21" font-weight="700" fill="#F4ECDD">Evidence</text>
     <text x="941" y="247" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#9CABB9">Answer, sources, outcome, and trace.</text>
-    <rect x="941" y="270" width="105" height="34" rx="9" fill="#2D2632" stroke="#A179A3" stroke-opacity="0.55"/>
+    <rect x="941" y="270" width="105" height="34" rx="9" fill="#16273A" stroke="#7088A2" stroke-opacity="0.62"/>
     <rect x="1057" y="270" width="135" height="34" rx="9" fill="#152131" stroke="#D3A24E" stroke-opacity="0.55"/>
-    <text x="993.5" y="291" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#D7BED6">Source card</text>
-    <text x="1124.5" y="291" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#F1B39D">Local trace</text>
+    <text x="993.5" y="291" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#C8D3E0">Source card</text>
+    <text x="1124.5" y="291" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#F0C36C">Local trace</text>
   </g>
 
   <g font-family="Consolas, monospace" font-size="13" letter-spacing="1.5">

@@ -26,7 +26,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/github/license/raydeStar/sir-thaddeus?color=C9973E" alt="Apache 2.0 license" /></a>
     <img src="https://img.shields.io/badge/platform-Windows-0078D6" alt="Windows" />
     <img src="https://img.shields.io/badge/telemetry-none-111111" alt="No telemetry" />
-    <img src="https://img.shields.io/badge/tools-MCP-D97757" alt="MCP tools" />
+    <img src="https://img.shields.io/badge/tools-MCP-C79239" alt="MCP tools" />
   </p>
 </div>
 

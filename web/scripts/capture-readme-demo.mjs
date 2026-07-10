@@ -57,16 +57,16 @@ const sources = [
     'Olympia Farmers Market opens for the downtown weekend',
     'DOWNTOWN',
     'Market stalls and local food',
-    '#92400e',
-    '#d97757',
+    '#6f4d18',
+    '#c9973e',
   ),
   source(
     'experienceolympia.com',
     'Waterfront music and evening events around the harbor',
     'EVENTS',
     'An evening by the water',
-    '#4c1d95',
-    '#7c3aed',
+    '#1c2e43',
+    '#58718d',
   ),
 ];
 
