@@ -152,6 +152,17 @@ Run one specific test id:
 ./dev/harness.ps1 --test smoke_casual_no_tools --judge none
 ```
 
+For repeated model measurements, use the campaign wrapper:
+
+```powershell
+./dev/harness-repeat.ps1 -Suite python-probe -Repeats 5
+```
+
+It prepares the harness and headless runtime once, then launches the compiled
+assemblies for each isolated repeat. `-SkipBuild` is available when a parent
+campaign such as `model-intake.ps1` has already prepared both Debug assemblies.
+Do not use it after source changes unless you have rebuilt first.
+
 If a test id exists in more than one suite, pair it with `--suite`.
 
 Examples:
@@ -226,7 +237,9 @@ Each harness iteration writes `score.json` with:
 
 Run-level `summary.json` and `summary.md` include failing tests sorted by
 severity, top recurring failure reasons, average score by rubric profile, and
-hard-gate failure counts.
+hard-gate failure counts. They also separate runtime warmup, per-test reset,
+test work, host total, and remaining harness overhead so latency regressions can
+be attributed instead of inferred from one wall-clock number.
 
 ### Overnight harness runs
 

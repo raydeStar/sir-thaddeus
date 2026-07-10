@@ -24,6 +24,7 @@ namespace SirThaddeus.Harness.Execution;
 internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
 {
     private readonly AppSettings _baseSettings;
+    private readonly bool _requiresManagedSearch;
     private readonly int _port;
     private readonly Uri _baseUri;
     private readonly HttpClient _http;
@@ -44,9 +45,10 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
         PropertyNameCaseInsensitive = true
     };
 
-    public HeadlessRuntimeHarnessClient(AppSettings settings)
+    public HeadlessRuntimeHarnessClient(AppSettings settings, bool requiresManagedSearch = true)
     {
         _baseSettings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _requiresManagedSearch = requiresManagedSearch;
         _port = GetFreeTcpPort();
         _baseUri = new Uri($"http://127.0.0.1:{_port}/");
         _http = new HttpClient
@@ -68,6 +70,16 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
         {
             if (_runtimeBuilt)
                 return;
+
+            if (IsTrueEnvironmentValue("ST_HARNESS_SKIP_RUNTIME_BUILD"))
+            {
+                // Campaign wrappers build the harness and runtime once, then
+                // launch several isolated harness processes. Validate the DLL
+                // before trusting the opt-out so a stale flag fails clearly.
+                _ = ResolveHeadlessRuntimeAssembly();
+                _runtimeBuilt = true;
+                return;
+            }
 
             var project = ResolveHeadlessRuntimeProject();
             var build = new Process
@@ -181,7 +193,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
 
         DisposeRuntimeProcess();
         _processSpawnedThisCall = true;
-        _sandbox ??= HarnessRuntimeSandbox.CreateShared(_baseSettings);
+        _sandbox ??= HarnessRuntimeSandbox.CreateShared(_baseSettings, _requiresManagedSearch);
 
         lock (_stdout)
             _stdout.Clear();
@@ -232,7 +244,14 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
         _process.BeginErrorReadLine();
 
         await WaitForHealthyAsync(cancellationToken);
-        await WaitForSearxngReadyAsync(cancellationToken);
+        if (_requiresManagedSearch)
+        {
+            await WaitForSearxngReadyAsync(cancellationToken);
+        }
+        else
+        {
+            Console.Error.WriteLine("[harness] Managed search startup skipped: every selected test has an explicit non-web tool boundary.");
+        }
         await PrewarmAgentPipelineAsync(cancellationToken);
     }
 
@@ -286,8 +305,11 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
     }
 
     private static bool ShouldSkipPrewarm()
+        => IsTrueEnvironmentValue("ST_HARNESS_SKIP_PREWARM");
+
+    private static bool IsTrueEnvironmentValue(string name)
     {
-        var raw = Environment.GetEnvironmentVariable("ST_HARNESS_SKIP_PREWARM");
+        var raw = Environment.GetEnvironmentVariable(name);
         return raw is not null &&
                (raw.Equals("1", StringComparison.OrdinalIgnoreCase) ||
                 raw.Equals("true", StringComparison.OrdinalIgnoreCase) ||

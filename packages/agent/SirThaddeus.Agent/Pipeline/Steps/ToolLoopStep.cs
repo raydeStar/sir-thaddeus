@@ -87,6 +87,13 @@ public sealed class ToolLoopStep : ITurnStep
         // across rounds. Two consecutive identical failures nudges the model
         // to stop retrying.
         var callSignatureCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        // calculator and python_eval are pure within a turn: the same normalized
+        // arguments produce the same result. Small models frequently repeat an
+        // already-successful verification call, so retain the result without
+        // paying another MCP / Docker round-trip. Permission and interceptors
+        // still run for every requested call; only the final MCP execution is
+        // memoized, and failures are never cached.
+        var pureComputeResults = new Dictionary<string, ToolCallOutcome>(StringComparer.Ordinal);
         var lastCallOk = true;
         string? forcedToolForNextRound = null;
 
@@ -274,7 +281,7 @@ public sealed class ToolLoopStep : ITurnStep
 
                 var sw = Stopwatch.StartNew();
                 var outcome = await ExecuteSingleCallAsync(
-                        context, toolName, args, activityId, cancellationToken)
+                        context, toolName, args, activityId, pureComputeResults, cancellationToken)
                     .ConfigureAwait(false);
                 sw.Stop();
 
@@ -487,7 +494,13 @@ public sealed class ToolLoopStep : ITurnStep
             .ConfigureAwait(false);
 
         var sw = Stopwatch.StartNew();
-        var outcome = await ExecuteSingleCallAsync(context, ToolNames.TimeNow, args, activityId, cancellationToken)
+        var outcome = await ExecuteSingleCallAsync(
+                context,
+                ToolNames.TimeNow,
+                args,
+                activityId,
+                new Dictionary<string, ToolCallOutcome>(StringComparer.Ordinal),
+                cancellationToken)
             .ConfigureAwait(false);
         sw.Stop();
 
@@ -1409,6 +1422,7 @@ public sealed class ToolLoopStep : ITurnStep
         string toolName,
         string args,
         string activityId,
+        IDictionary<string, ToolCallOutcome> pureComputeResults,
         CancellationToken ct)
     {
         // Permission gate first — denial skips both interceptors and MCP.
@@ -1455,6 +1469,10 @@ public sealed class ToolLoopStep : ITurnStep
             }
         }
 
+        var cacheKey = BuildCallSignature(toolName, args);
+        if (IsPureComputeTool(toolName) && pureComputeResults.TryGetValue(cacheKey, out var cached))
+            return cached;
+
         // Fall through to the real MCP server.
         try
         {
@@ -1462,7 +1480,10 @@ public sealed class ToolLoopStep : ITurnStep
             if (TryExtractStructuredToolError(result, out var error))
                 return new ToolCallOutcome(result, Ok: false, Error: error);
 
-            return new ToolCallOutcome(result, Ok: true, Error: null);
+            var outcome = new ToolCallOutcome(result, Ok: true, Error: null);
+            if (IsCacheablePureComputeOutcome(toolName, outcome))
+                pureComputeResults[cacheKey] = outcome;
+            return outcome;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -1540,6 +1561,11 @@ public sealed class ToolLoopStep : ITurnStep
     {
         var name = call.Function.Name ?? string.Empty;
         var rawArgs = call.Function.Arguments ?? "{}";
+        return BuildCallSignature(name, rawArgs);
+    }
+
+    private static string BuildCallSignature(string toolName, string rawArgs)
+    {
         string normalized;
         try
         {
@@ -1550,6 +1576,15 @@ public sealed class ToolLoopStep : ITurnStep
         {
             normalized = rawArgs;
         }
-        return name + "|" + normalized;
+        return toolName + "|" + normalized;
     }
+
+    private static bool IsPureComputeTool(string toolName) =>
+        string.Equals(toolName, "calculator", StringComparison.OrdinalIgnoreCase) ||
+        LooksLikePythonEvalTool(toolName);
+
+    private static bool IsCacheablePureComputeOutcome(string toolName, ToolCallOutcome outcome) =>
+        outcome.Ok &&
+        IsPureComputeTool(toolName) &&
+        (!LooksLikePythonEvalTool(toolName) || !LooksLikeFailedOrEmptyPythonResult(outcome));
 }

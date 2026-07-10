@@ -17,12 +17,17 @@
 
 .EXAMPLE
     dev/harness-repeat.ps1 -Suite python-probe -Repeats 5
+.EXAMPLE
+    dev/harness-repeat.ps1 -Suite python-probe -Repeats 5 -SkipBuild
+    # Only when the Debug harness and headless-runtime assemblies are already current.
 #>
 param(
     [Parameter(Mandatory = $true)]
     [string]$Suite,
 
     [int]$Repeats = 5,
+
+    [switch]$SkipBuild,
 
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ExtraHarnessArgs
@@ -34,11 +39,36 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
-$HarnessScript = Join-Path $RepoRoot "dev/harness.ps1"
-if (-not (Test-Path $HarnessScript)) {
-    Write-Host "Harness script not found at $HarnessScript" -ForegroundColor Red
-    exit 1
+$HarnessProject = Join-Path $RepoRoot "tools/SirThaddeus.Harness/SirThaddeus.Harness.csproj"
+$HarnessAssembly = Join-Path $RepoRoot "tools/SirThaddeus.Harness/bin/Debug/net10.0/SirThaddeus.Harness.dll"
+$RuntimeProject = Join-Path $RepoRoot "apps/headless-runtime/SirThaddeus.HeadlessRuntime/SirThaddeus.HeadlessRuntime.csproj"
+$RuntimeAssembly = Join-Path $RepoRoot "apps/headless-runtime/SirThaddeus.HeadlessRuntime/bin/Debug/net10.0/SirThaddeus.HeadlessRuntime.dll"
+
+function Invoke-CheckedBuild {
+    param([string]$project, [string]$label)
+    Write-Host ("Preparing {0}..." -f $label) -ForegroundColor DarkGray
+    & dotnet build $project -c Debug
+    if ($LASTEXITCODE -ne 0) {
+        throw ("{0} build failed with exit code {1}." -f $label, $LASTEXITCODE)
+    }
 }
+
+$buildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+if (-not $SkipBuild) {
+    # Build once for the whole campaign. The old path entered `dotnet run` and
+    # then rebuilt the headless runtime inside every repeat process.
+    Invoke-CheckedBuild -project $HarnessProject -label 'harness'
+    Invoke-CheckedBuild -project $RuntimeProject -label 'headless runtime'
+}
+$buildStopwatch.Stop()
+
+if (-not (Test-Path $HarnessAssembly) -or -not (Test-Path $RuntimeAssembly)) {
+    throw 'Harness/runtime assemblies are missing. Run without -SkipBuild once to prepare them.'
+}
+
+# The runtime assembly was prepared above, so child harness processes may skip
+# their defensive in-process build and launch the DLL directly.
+$env:ST_HARNESS_SKIP_RUNTIME_BUILD = '1'
 
 $HarnessRoot = Join-Path $RepoRoot "artifacts/harness"
 
@@ -185,11 +215,17 @@ for ($i = 1; $i -le $Repeats; $i++) {
 
     # Invoke the harness. Capture stdout for the fallback parser while echoing it.
     $stdoutLines = New-Object System.Collections.ArrayList
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $HarnessScript @baseArgs 2>&1 | ForEach-Object {
+    $runStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    & dotnet exec $HarnessAssembly @baseArgs 2>&1 | ForEach-Object {
         $text = $_
         if ($_ -is [System.Management.Automation.ErrorRecord]) { $text = $_.ToString() }
         Write-Host $text
         [void]$stdoutLines.Add([string]$text)
+    }
+    $harnessExitCode = $LASTEXITCODE
+    $runStopwatch.Stop()
+    if ($harnessExitCode -ne 0) {
+        Write-Host ("  harness exited with code {0}; collecting any completed results." -f $harnessExitCode) -ForegroundColor DarkYellow
     }
 
     # Find the suite dir this run produced (newest, and newer than the pre-run one).
@@ -261,6 +297,7 @@ for ($i = 1; $i -le $Repeats; $i++) {
         expected  = $expectedItems
         partial   = $isPartial
         pass_rate = [math]::Round($runPassRate, 4)
+        duration_seconds = [math]::Round($runStopwatch.Elapsed.TotalSeconds, 2)
     })
 
     Write-Host ("  run {0}: {1}/{2} passed (pass-rate {3:P0})" -f $i, $runPassCount, $runItemCount, $runPassRate) -ForegroundColor Green
@@ -354,6 +391,8 @@ $summary = [pscustomobject]@{
         total_item_results = $totalItemResults
         stddev_pass_rate   = [math]::Round($stddevPassRate, 4)
         stddev_runs_used   = $rates.Count
+        build_seconds      = [math]::Round($buildStopwatch.Elapsed.TotalSeconds, 2)
+        campaign_seconds   = [math]::Round((($runsDetail | Measure-Object -Property duration_seconds -Sum).Sum), 2)
     }
     runs     = @($runsDetail.ToArray())
     run_dirs = @($runDirs.ToArray())
