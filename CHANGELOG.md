@@ -41,6 +41,8 @@
   unchanged large runtime and model packs do not need to be republished.
 - Shell IPC contract tests can use a larger child-runtime startup budget on
   constrained CI runners without changing the production startup timeout.
+- Rolling `master` builds now run Windows, Linux, and macOS package smoke gates
+  before the `latest` prerelease is published.
 
 ## 1.0.0 — 2026-05-08
 
