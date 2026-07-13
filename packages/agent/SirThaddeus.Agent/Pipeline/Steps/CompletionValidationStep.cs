@@ -1,4 +1,5 @@
 using SirThaddeus.Agent.Validation;
+using SirThaddeus.Agent.Routing;
 
 namespace SirThaddeus.Agent.Pipeline.Steps;
 
@@ -26,11 +27,16 @@ public sealed class CompletionValidationStep : ITurnStep
 {
     private readonly CompletionValidator? _validator;
     private readonly RepairLoop? _repair;
+    private readonly Action<string, string>? _log;
 
-    public CompletionValidationStep(CompletionValidator? validator, RepairLoop? repair)
+    public CompletionValidationStep(
+        CompletionValidator? validator,
+        RepairLoop? repair,
+        Action<string, string>? log = null)
     {
         _validator = validator;
         _repair = repair;
+        _log = log;
     }
 
     public string Name => "CompletionValidation";
@@ -56,6 +62,18 @@ public sealed class CompletionValidationStep : ITurnStep
         if (IsDeterministicLocalBusinessPlacesDraft(context))
             return new StepResult.Continue(context);
 
+        if (CanSkipHighConfidenceConversationValidation(context))
+        {
+            LogDecision(
+                context,
+                "skipped_high_confidence_conversation",
+                passed: true,
+                repairNeeded: false,
+                usedLlm: false,
+                elapsedMs: 0);
+            return new StepResult.Continue(context);
+        }
+
         CompletionValidationResult validation;
         try
         {
@@ -75,8 +93,17 @@ public sealed class CompletionValidationStep : ITurnStep
         {
             // Validator's own fail-open contract — a broken LLM call
             // shouldn't abort the turn.
+            LogDecision(context, "error_fail_open", passed: true, repairNeeded: false, usedLlm: null, elapsedMs: null);
             return new StepResult.Continue(context);
         }
+
+        LogDecision(
+            context,
+            "complete",
+            validation.Passed,
+            validation.RepairNeeded,
+            validation.UsedLlm,
+            validation.ElapsedMs);
 
         if (validation.Passed || _repair is null)
             return new StepResult.Continue(context);
@@ -85,6 +112,7 @@ public sealed class CompletionValidationStep : ITurnStep
         // repair loop prompts the LLM with a targeted "you missed X,
         // redo this part" instruction rather than a full re-run.
         RepairResult repair;
+        var repairStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             repair = await _repair
@@ -102,19 +130,122 @@ public sealed class CompletionValidationStep : ITurnStep
         }
         catch
         {
+            LogRepair(context, "error_original_retained", repairStarted, changed: false);
             return new StepResult.Continue(context);
         }
 
         if (string.IsNullOrWhiteSpace(repair.FinalText) ||
             string.Equals(repair.FinalText, context.AssistantDraft, StringComparison.Ordinal))
         {
+            LogRepair(context, "complete_original_retained", repairStarted, changed: false);
             return new StepResult.Continue(context);
         }
 
         // Adopt the repaired text as the new draft. ResponseComposerStep
         // will pick it up as the final response.
+        LogRepair(context, "complete_repaired", repairStarted, changed: true);
         return new StepResult.Continue(context with { AssistantDraft = repair.FinalText });
     }
+
+    private void LogDecision(
+        TurnContext context,
+        string outcome,
+        bool passed,
+        bool repairNeeded,
+        bool? usedLlm,
+        double? elapsedMs)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        var path = usedLlm switch
+        {
+            true => "helper_llm",
+            false => "heuristic",
+            null => "unknown"
+        };
+        var duration = elapsedMs.HasValue
+            ? elapsedMs.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)
+            : string.Empty;
+        _log(
+            "COMPLETION_VALIDATION_DECISION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} outcome={outcome} " +
+            $"path={path} passed={passed} repair_needed={repairNeeded} elapsed_ms={duration}");
+    }
+
+    private void LogRepair(TurnContext context, string outcome, long started, bool changed)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        var elapsedMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        _log(
+            "COMPLETION_REPAIR_TIMING",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} outcome={outcome} " +
+            $"changed={changed} elapsed_ms={elapsedMs:0.###}");
+    }
+
+    private static bool IsLatencyTracingEnabled()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool CanSkipHighConfidenceConversationValidation(TurnContext context)
+    {
+        if (!IsTruthy(Environment.GetEnvironmentVariable(
+                "ST_SKIP_HIGH_CONFIDENCE_CONVERSATION_VALIDATION")))
+        {
+            return false;
+        }
+
+        var plan = TurnPlanCompiler.Compile(new TurnPlanningInput
+        {
+            UserText = context.UserText ?? string.Empty,
+            Features = context.Features
+        });
+
+        var onlySuppressedMemoryProvenance = context.ToolCallsMade.All(call =>
+            !call.Success &&
+            (string.Equals(call.ToolName, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(call.ToolName, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase)));
+        var eligible = onlySuppressedMemoryProvenance &&
+               string.IsNullOrWhiteSpace(context.ForcedTool) &&
+               plan.PrimaryKind == TurnPrimaryKind.Conversation &&
+               plan.Confidence >= 0.95 &&
+               !plan.RequiresExistingFullPath &&
+               !plan.DynamicMemoryRequired &&
+               !plan.FreshnessRequired &&
+               !plan.ToolsRequired &&
+               !plan.FilesOrUrlsRequired &&
+               !plan.DeepReasoningRequired &&
+               !plan.HighStakesHandlingRequired &&
+               !plan.StructuredResponseRequired;
+
+        if (IsLatencyTracingEnabled() && _log is not null)
+        {
+            _log(
+                "COMPLETION_VALIDATION_SKIP_ELIGIBILITY",
+                $"thread_id={context.ThreadId} turn_id={context.MessageId} eligible={eligible} " +
+                $"kind={plan.PrimaryKind} confidence={plan.Confidence:0.00} full_path={plan.RequiresExistingFullPath} " +
+                $"tool_calls={context.ToolCallsMade.Count} suppressed_memory_only={onlySuppressedMemoryProvenance} " +
+                $"forced_tool={!string.IsNullOrWhiteSpace(context.ForcedTool)} " +
+                $"memory={plan.DynamicMemoryRequired} freshness={plan.FreshnessRequired} tools={plan.ToolsRequired} " +
+                $"files={plan.FilesOrUrlsRequired} reasoning={plan.DeepReasoningRequired} " +
+                $"high_stakes={plan.HighStakesHandlingRequired} structured={plan.StructuredResponseRequired}");
+        }
+
+        return eligible;
+    }
+
+    private static bool IsTruthy(string? raw) =>
+        string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsDeterministicLocalBusinessPlacesDraft(TurnContext context)
     {

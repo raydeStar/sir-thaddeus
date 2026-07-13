@@ -294,7 +294,10 @@ public sealed class LmStudioAssistant : IAssistant
 
         var messageId = "msg_" + Convert.ToHexString(Guid.NewGuid().ToByteArray().AsSpan(0, 8))
             .ToLowerInvariant();
+        var latencyTrace = RoutingLatencyTrace.Current;
+        RoutingLatencyTrace.BindAssistantMessage(latencyTrace, messageId);
         await _publisher.PublishStartAsync(threadId, messageId, ct).ConfigureAwait(false);
+        RoutingLatencyTrace.Mark(_logger, latencyTrace, "assistant_turn_start_event");
 
         var thread = await _store.GetAsync(threadId, ct).ConfigureAwait(false);
         var llmMessages = new List<LlmChatMessage>(HistoryTurns + 2)
@@ -306,7 +309,13 @@ public sealed class LmStudioAssistant : IAssistant
         // Fetch available tools from the MCP server and shape them for the
         // OpenAI function-calling API. Empty list means "no tools" — the
         // model will just answer from knowledge.
+        var toolDiscoveryStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         var toolDefs = await BuildToolDefinitionsAsync(ct).ConfigureAwait(false);
+        RoutingLatencyTrace.Mark(
+            _logger,
+            latencyTrace,
+            "tool_registry_discovery_complete",
+            System.Diagnostics.Stopwatch.GetElapsedTime(toolDiscoveryStarted).TotalMilliseconds);
 
         // Build the per-turn pipeline. Steps are cheap to construct; the
         // long-lived collaborators (LLM client, MCP client, footman) are
@@ -341,7 +350,9 @@ public sealed class LmStudioAssistant : IAssistant
         AgentResponse response;
         try
         {
+            RoutingLatencyTrace.Mark(_logger, latencyTrace, "pipeline_start");
             response = await pipeline.RunAsync(initialContext, ct).ConfigureAwait(false);
+            RoutingLatencyTrace.Mark(_logger, latencyTrace, "pipeline_complete");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -372,6 +383,8 @@ public sealed class LmStudioAssistant : IAssistant
             {
                 ct.ThrowIfCancellationRequested();
                 sentSoFar.Append(chunk);
+                if (sentSoFar.Length == chunk.Length)
+                    RoutingLatencyTrace.Mark(_logger, latencyTrace, "first_ui_delta");
                 await _publisher.PublishDeltaAsync(threadId, messageId, chunk, ct).ConfigureAwait(false);
                 if (DeltaDelay > TimeSpan.Zero)
                 {
@@ -426,6 +439,7 @@ public sealed class LmStudioAssistant : IAssistant
                 persistedSources,
                 CancellationToken.None)
             .ConfigureAwait(false);
+        RoutingLatencyTrace.Mark(_logger, latencyTrace, "assistant_turn_complete_event");
         return message;
     }
 
@@ -446,6 +460,9 @@ public sealed class LmStudioAssistant : IAssistant
     {
         var sanitize = new Func<TurnContext, string, string>((_, draft) =>
             AssistantResponseSanitizer.CleanChatReply(draft));
+        Action<string, string>? latencyLog = IsLatencyTracingEnabled()
+            ? (action, message) => _logger.LogInformation("{Action} {Message}", action, message)
+            : null;
 
         var toolLoop = new ToolLoopStep(
             _llm, mcp, sink,
@@ -460,9 +477,10 @@ public sealed class LmStudioAssistant : IAssistant
                 new FactSearchArgsRewriter(),
                 new ExistenceSearchArgsRewriter()
             ],
-            maxRoundTrips: MaxRoundTrips);
+            maxRoundTrips: MaxRoundTrips,
+            log: latencyLog);
 
-        return new ChatPipeline(new ITurnStep[]
+        var steps = new List<ITurnStep>
         {
             // Safety boundary runs FIRST. High-risk illicit-instruction
             // prompts get a canned safe-redirect response before any
@@ -572,7 +590,7 @@ public sealed class LmStudioAssistant : IAssistant
             // draft actually answered the question; runs one targeted
             // repair if the validator flags a miss. No-op when either
             // collaborator is null.
-            new CompletionValidationStep(CompletionValidator, CompletionRepairLoop),
+            new CompletionValidationStep(CompletionValidator, CompletionRepairLoop, latencyLog),
 
             // Search fallback: replaces refusal drafts with a retry when
             // user prompt has web-lookup signals. No-op when executor null.
@@ -613,7 +631,27 @@ public sealed class LmStudioAssistant : IAssistant
             new AutoMemoryExtractStep(AutoMemoryExtractor),
 
             new ResponseComposerStep(),
-        });
+        };
+
+        if (TurnPlanShadowStep.IsEnabled)
+        {
+            var featureIndex = steps.FindIndex(step => step is FeatureExtractorStep);
+            steps.Insert(
+                featureIndex + 1,
+                new TurnPlanShadowStep((action, message) =>
+                    _logger.LogInformation("{Action} {Message}", action, message)));
+        }
+
+        return new ChatPipeline(steps, latencyLog);
+    }
+
+    private static bool IsLatencyTracingEnabled()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
     }
 
 

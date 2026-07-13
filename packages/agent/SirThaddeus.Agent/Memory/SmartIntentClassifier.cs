@@ -56,18 +56,31 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
 
     public async Task<MemoryIntentDecision> ClassifyAsync(string userMessage, CancellationToken ct = default)
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         if (string.IsNullOrWhiteSpace(userMessage))
+        {
+            WriteLatency("empty", MemoryIntentDecision.Unsure, started);
             return MemoryIntentDecision.Unsure;
+        }
 
         var lower = userMessage.Trim().ToLowerInvariant();
         if (LooksLikeDeterministicInject(lower))
+        {
+            WriteLatency("heuristic", MemoryIntentDecision.Inject, started);
             return MemoryIntentDecision.Inject;
+        }
 
         if (LooksLikeDeterministicSuppress(lower))
+        {
+            WriteLatency("heuristic", MemoryIntentDecision.Suppress, started);
             return MemoryIntentDecision.Suppress;
+        }
 
         if (!_allowLlmFallback)
+        {
+            WriteLatency("heuristic_only_unsure", MemoryIntentDecision.Unsure, started);
             return MemoryIntentDecision.Unsure;
+        }
 
         try
         {
@@ -94,7 +107,10 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
             {
                 var val = prop.GetString();
                 if (Enum.TryParse<MemoryIntentDecision>(val, ignoreCase: true, out var dec))
+                {
+                    WriteLatency("helper_llm", dec, started);
                     return dec;
+                }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -114,7 +130,49 @@ public sealed class SmartIntentClassifier : ISmartIntentClassifier
             WriteAudit("MEMORY_CLASSIFIER_FAIL", userMessage, ex.Message);
         }
 
+        WriteLatency("helper_llm_fallback", MemoryIntentDecision.Unsure, started);
         return MemoryIntentDecision.Unsure;
+    }
+
+    private void WriteLatency(string path, MemoryIntentDecision decision, long started)
+    {
+        if (_audit is null || !LatencyTracingEnabled())
+            return;
+
+        var elapsedMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        var correlationId = System.Diagnostics.Activity.Current?
+            .GetBaggageItem("routing_correlation_id") ?? string.Empty;
+        var turnId = System.Diagnostics.Activity.Current?.GetBaggageItem("turn_id") ?? string.Empty;
+        try
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "agent",
+                Action = "MEMORY_CLASSIFICATION_TIMING",
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["correlation_id"] = correlationId,
+                    ["turn_id"] = turnId,
+                    ["path"] = path,
+                    ["decision"] = decision.ToString(),
+                    ["duration_ms"] = elapsedMs
+                }
+            });
+        }
+        catch
+        {
+            // Opt-in diagnostics must never affect the turn.
+        }
+    }
+
+    private static bool LatencyTracingEnabled()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LooksLikeDeterministicInject(string lower)

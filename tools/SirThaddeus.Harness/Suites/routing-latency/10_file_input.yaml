@@ -1,0 +1,16 @@
+id: routing_latency_file_input
+name: Routing latency - file-shaped request
+category: file
+user_message: "Summarize the attached notes.txt file. If no file is attached, ask me to attach it."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: ["attach"]
+  forbidden_keywords: ["<think>", "</think>", "error", "timeout"]
+  max_response_chars: 500
+min_score: 7.0

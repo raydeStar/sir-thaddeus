@@ -1,0 +1,18 @@
+id: routing_latency_structured_output
+name: Routing latency - strict structured output
+category: structured
+user_message: "Return JSON only with two fields: status set to ok, and count set to 3."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: ["status", "count"]
+  forbidden_keywords: ["<think>", "</think>", "error", "timeout"]
+  max_response_chars: 200
+  require_json: true
+  required_json_fields: [status, count]
+min_score: 8.0

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace SirThaddeus.Agent.Pipeline;
 
 /// <summary>
@@ -42,6 +44,9 @@ public sealed class ChatPipeline
     {
         ArgumentNullException.ThrowIfNull(initial);
 
+        var timingEnabled = IsLatencyTracingEnabled();
+        var pipelineStarted = timingEnabled ? Stopwatch.GetTimestamp() : 0L;
+
         if (_steps.Count == 0)
         {
             _logEvent?.Invoke("PIPELINE_EMPTY", "no steps configured");
@@ -56,16 +61,29 @@ public sealed class ChatPipeline
             var step = _steps[i];
             _logEvent?.Invoke("PIPELINE_STEP_START", $"{i}:{step.Name}");
 
-            var result = await step.ExecuteAsync(current, cancellationToken).ConfigureAwait(false);
+            var stepStarted = timingEnabled ? Stopwatch.GetTimestamp() : 0L;
+            StepResult result;
+            try
+            {
+                result = await step.ExecuteAsync(current, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                LogStepTiming(initial, i, step.Name, stepStarted, "error", timingEnabled);
+                throw;
+            }
 
             switch (result)
             {
                 case StepResult.Continue cont:
                     current = cont.Next;
+                    LogStepTiming(initial, i, step.Name, stepStarted, "continue", timingEnabled);
                     _logEvent?.Invoke("PIPELINE_STEP_CONTINUE", $"{i}:{step.Name}");
                     break;
 
                 case StepResult.Terminate term:
+                    LogStepTiming(initial, i, step.Name, stepStarted, "terminate", timingEnabled);
+                    LogPipelineTiming(initial, pipelineStarted, "terminate", timingEnabled);
                     _logEvent?.Invoke(
                         "PIPELINE_STEP_TERMINATE",
                         $"{i}:{step.Name} text_len={term.Response.Text?.Length ?? 0} success={term.Response.Success}");
@@ -77,7 +95,51 @@ public sealed class ChatPipeline
         // pipeline — surface it as a deterministic error rather than
         // silently returning empty text.
         _logEvent?.Invoke("PIPELINE_EXHAUSTED", $"steps={_steps.Count}");
+        LogPipelineTiming(initial, pipelineStarted, "exhausted", timingEnabled);
         return AgentResponse.FromError(
             "Chat pipeline completed without producing a response. Check that the final step terminates.");
+    }
+
+    private void LogStepTiming(
+        TurnContext initial,
+        int index,
+        string stepName,
+        long started,
+        string outcome,
+        bool enabled)
+    {
+        if (!enabled || _logEvent is null)
+            return;
+
+        var elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        _logEvent(
+            "PIPELINE_STEP_TIMING",
+            $"thread_id={initial.ThreadId} turn_id={initial.MessageId} " +
+            $"step_index={index} step={stepName} outcome={outcome} elapsed_ms={elapsedMs:0.###}");
+    }
+
+    private void LogPipelineTiming(
+        TurnContext initial,
+        long started,
+        string outcome,
+        bool enabled)
+    {
+        if (!enabled || _logEvent is null)
+            return;
+
+        var elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        _logEvent(
+            "PIPELINE_TIMING",
+            $"thread_id={initial.ThreadId} turn_id={initial.MessageId} " +
+            $"outcome={outcome} elapsed_ms={elapsedMs:0.###}");
+    }
+
+    private static bool IsLatencyTracingEnabled()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
     }
 }

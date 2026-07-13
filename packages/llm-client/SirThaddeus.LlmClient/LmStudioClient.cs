@@ -224,6 +224,19 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         ArgumentNullException.ThrowIfNull(messages);
         requestContext ??= new LlmRequestContext();
 
+        var providerRequestId = "llm_" + Guid.NewGuid().ToString("N")[..12];
+        var routingCorrelationId = Activity.Current?.GetBaggageItem("routing_correlation_id") ?? string.Empty;
+        var threadId = Activity.Current?.GetBaggageItem("thread_id") ?? string.Empty;
+        var turnId = Activity.Current?.GetBaggageItem("turn_id") ?? string.Empty;
+        _logger.LogInformation(
+            "llm.queue_enter providerRequestId={ProviderRequestId} correlationId={CorrelationId} threadId={ThreadId} turnId={TurnId} task={TaskKind} background={Background}",
+            providerRequestId,
+            routingCorrelationId,
+            threadId,
+            turnId,
+            requestContext.TaskKind,
+            requestContext.Priority == LlmRequestPriority.Background);
+
         var queuedAt = Stopwatch.GetTimestamp();
         _requestGate.IncrementQueued();
         try
@@ -239,13 +252,36 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         _requestGate.IncrementActive();
         var requestStarted = Stopwatch.GetTimestamp();
         var requestStartedAt = DateTimeOffset.UtcNow;
+        _logger.LogInformation(
+            "llm.request_started providerRequestId={ProviderRequestId} correlationId={CorrelationId} threadId={ThreadId} turnId={TurnId} queueWaitMs={QueueWaitMs} firstTokenObservable={FirstTokenObservable}",
+            providerRequestId,
+            routingCorrelationId,
+            threadId,
+            turnId,
+            queueWaitMs,
+            false);
 
         IReadOnlyList<ChatMessage> budgetedMessages = messages;
         try
         {
+            var promptPreparationStarted = Stopwatch.GetTimestamp();
             budgetedMessages = ApplyPromptBudget(messages, requestContext);
             var estimatedTokens = EstimateTokens(budgetedMessages);
             var requestedOutputTokens = GetOptionsSnapshot().EffectiveMaxTokens(maxTokensOverride);
+            if (IsLatencyTracingEnabled())
+            {
+                var promptPreparationMs = Stopwatch.GetElapsedTime(promptPreparationStarted).TotalMilliseconds;
+                _logger.LogInformation(
+                    "llm.prompt_prepared providerRequestId={ProviderRequestId} correlationId={CorrelationId} threadId={ThreadId} turnId={TurnId} messages={Messages} tools={Tools} estimatedInputTokens={InputTokens} durationMs={DurationMs}",
+                    providerRequestId,
+                    routingCorrelationId,
+                    threadId,
+                    turnId,
+                    budgetedMessages.Count,
+                    tools?.Count ?? 0,
+                    estimatedTokens,
+                    promptPreparationMs);
+            }
             TrackRequestStart(requestContext, estimatedTokens, requestedOutputTokens, queueWaitMs, requestStartedAt);
 
             using var requestCts = CreateRequestCancellationTokenSource(cancellationToken);
@@ -274,15 +310,29 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
             _lastRequestDurationMs = (long)Math.Round(Stopwatch.GetElapsedTime(requestStarted).TotalMilliseconds);
             _requestGate.DecrementActive();
             _logger.LogInformation(
-                "llm.request_completed task={TaskKind} background={Background} model={Model} estimatedInputTokens={InputTokens} requestedOutputTokens={OutputTokens} queueWaitMs={QueueWaitMs} durationMs={DurationMs}",
+                "llm.request_completed providerRequestId={ProviderRequestId} correlationId={CorrelationId} threadId={ThreadId} turnId={TurnId} task={TaskKind} background={Background} model={Model} estimatedInputTokens={InputTokens} requestedOutputTokens={OutputTokens} queueWaitMs={QueueWaitMs} durationMs={DurationMs} firstTokenObservable={FirstTokenObservable}",
+                providerRequestId,
+                routingCorrelationId,
+                threadId,
+                turnId,
                 _lastTaskKind,
                 _lastRequestWasBackground,
                 GetOptionsSnapshot().Model,
                 _lastEstimatedInputTokens,
                 _lastRequestedOutputTokens,
                 _lastQueueWaitMs,
-                _lastRequestDurationMs);
+                _lastRequestDurationMs,
+                false);
         }
+    }
+
+    private static bool IsLatencyTracingEnabled()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<LlmResponse> ChatCoreLegacyAsync(

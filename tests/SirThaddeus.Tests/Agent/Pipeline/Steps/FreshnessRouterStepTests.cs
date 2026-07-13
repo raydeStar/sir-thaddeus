@@ -122,6 +122,22 @@ public class FreshnessRouterStepTests
     // ── Guards ──────────────────────────────────────────────────────────
 
     [Fact]
+    public async Task Does_not_treat_freshness_words_inside_quoted_context_as_the_user_request()
+    {
+        var step = new FreshnessRouterStep();
+        var ctx = WithTools(
+            "Answer the multiple-choice question below.\n\n" +
+            "Example: How many children today are vaccinated? Answer: 80%.\n\n" +
+            "Question: Which definition best describes cooperative federalism?",
+            "web_search");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Null(cont.Next.ForcedTool);
+    }
+
+    [Fact]
     public async Task No_op_when_web_search_not_in_tool_list()
     {
         // If the footman narrowed tools such that web_search isn't

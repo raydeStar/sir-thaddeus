@@ -49,7 +49,7 @@ public sealed class CompletionValidator
             var result = await ValidateWithLlmAsync(
                 userRequest, assistantResponse, hasToolResults, cancellationToken);
             sw.Stop();
-            return result with { ElapsedMs = sw.Elapsed.TotalMilliseconds };
+            return result with { ElapsedMs = sw.Elapsed.TotalMilliseconds, UsedLlm = true };
         }
         catch
         {
@@ -58,7 +58,8 @@ public sealed class CompletionValidator
             return new CompletionValidationResult
             {
                 Passed = true,
-                ElapsedMs = sw.Elapsed.TotalMilliseconds
+                ElapsedMs = sw.Elapsed.TotalMilliseconds,
+                UsedLlm = true
             };
         }
     }

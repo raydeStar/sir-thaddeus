@@ -1,0 +1,16 @@
+id: routing_latency_creative
+name: Routing latency - creative writing
+category: creative
+user_message: "Write a four-line poem about rain on a workshop roof."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: ["rain"]
+  forbidden_keywords: ["<think>", "</think>", "as an ai", "error", "timeout"]
+  max_response_chars: 500
+min_score: 6.0

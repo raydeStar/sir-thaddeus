@@ -82,6 +82,9 @@ public static class ChatApi
             if (req is null || string.IsNullOrWhiteSpace(req.Text))
                 return Results.BadRequest(new { error = "text is required" });
 
+            var turnLogger = loggerFactory.CreateLogger("ChatApi.AssistantTurn");
+            var latencyTrace = RoutingLatencyTrace.Start(id, turnLogger);
+
             WikiChatContextPrompt prompt;
             try
             {
@@ -102,10 +105,13 @@ public static class ChatApi
                 Role: ChatRole.User,
                 Text: userText,
                 CreatedAt: DateTimeOffset.UtcNow);
+            if (latencyTrace is not null)
+                latencyTrace.UserMessageId = message.Id;
 
             try
             {
                 var updated = await store.AppendMessageAsync(id, message, ct).ConfigureAwait(false);
+                RoutingLatencyTrace.Mark(turnLogger, latencyTrace, "user_message_persisted");
 
                 // Auto-title: if the thread is still stamped with the placeholder and
                 // this is the first user turn, derive a short title from the message.
@@ -140,7 +146,10 @@ public static class ChatApi
                     ThreadId: id,
                     Detail: null));
 
-                StartAssistantTurn(id, prompt.Prompt, assistant, machine, activity, loggerFactory, lifetime, activityEntry);
+                RoutingLatencyTrace.Mark(turnLogger, latencyTrace, "assistant_task_queued");
+                StartAssistantTurn(
+                    id, prompt.Prompt, assistant, machine, activity, loggerFactory,
+                    lifetime, activityEntry, latencyTrace);
 
                 return Results.Json(
                     new AppendMessageResponse(message, updated),
@@ -208,11 +217,14 @@ public static class ChatApi
         IActivityLog activity,
         ILoggerFactory loggerFactory,
         IHostApplicationLifetime lifetime,
-        ActivityEntry activityEntry)
+        ActivityEntry activityEntry,
+        RoutingLatencyTrace.TraceState? latencyTrace = null)
     {
         _ = Task.Run(async () =>
         {
             var log = loggerFactory.CreateLogger("ChatApi.AssistantTurn");
+            using var latencyActivation = RoutingLatencyTrace.Activate(latencyTrace);
+            RoutingLatencyTrace.Mark(log, latencyTrace, "assistant_task_start");
             var status = ActivityStatus.Ok;
             string? detail = null;
             var bgCt = lifetime.ApplicationStopping;
@@ -220,6 +232,7 @@ public static class ChatApi
             {
                 var reply = await assistant.RespondAsync(threadId, prompt, bgCt)
                     .ConfigureAwait(false);
+                RoutingLatencyTrace.Mark(log, latencyTrace, "assistant_response_complete");
                 detail = reply.Text.Length > 280 ? reply.Text[..280] + "…" : reply.Text;
             }
             catch (OperationCanceledException) when (bgCt.IsCancellationRequested)
@@ -236,6 +249,7 @@ public static class ChatApi
             }
             finally
             {
+                RoutingLatencyTrace.Mark(log, latencyTrace, "ui_completion_event");
                 machine.TryTransition(StateTrigger.PlanTextOnly);
                 activity.Update(
                     activityEntry.Id,

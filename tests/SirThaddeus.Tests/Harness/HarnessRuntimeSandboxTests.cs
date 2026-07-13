@@ -97,7 +97,14 @@ public sealed class HarnessRuntimeSandboxTests
         var unrestrictedSuite = new HarnessSuite
         {
             Name = "unrestricted",
-            Tests = [new HarnessTestCase { Id = "unrestricted" }]
+            Tests =
+            [
+                new HarnessTestCase
+                {
+                    Id = "unrestricted",
+                    Assertions = new HarnessAssertions { AllowedToolsOnly = false }
+                }
+            ]
         };
 
         Assert.False(HarnessHostRequirements.FromSuites([computeSuite]).RequiresManagedSearch);

@@ -1,5 +1,6 @@
 using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine;
+using SirThaddeus.Agent.Routing;
 
 namespace SirThaddeus.Agent.Pipeline.Steps;
 
@@ -25,6 +26,13 @@ namespace SirThaddeus.Agent.Pipeline.Steps;
 /// </summary>
 public sealed class PersonalityInjectionStep : ITurnStep
 {
+    private const string FinalTaskFocusBlock = """
+
+        [TurnFocus:latest_unresolved]
+        When the user supplies completed examples, solved items, or reference material followed by an unfinished request, answer only the final unresolved request. Do not re-answer or summarize completed examples unless the user asks. Follow the user's explicit safe output format exactly.
+        [/TurnFocus:latest_unresolved]
+        """;
+
     private readonly IPersonalityRuntime? _runtime;
 
     public PersonalityInjectionStep(IPersonalityRuntime? runtime)
@@ -44,6 +52,8 @@ public sealed class PersonalityInjectionStep : ITurnStep
 
         var messages = context.LlmMessages.ToList();
         WrapFirstSystemMessage(messages, _runtime);
+        if (ExplicitResponseContractDetector.IsNoToolDirectAnswer(context.UserText))
+            AppendFinalTaskFocus(messages);
         InjectFewShotExamples(messages, _runtime.Snapshot.Profile.Instructions.FewShotExamples);
 
         return Task.FromResult<StepResult>(new StepResult.Continue(context with { LlmMessages = messages }));
@@ -66,6 +76,19 @@ public sealed class PersonalityInjectionStep : ITurnStep
         // Uncommon case (facade should always seed the base prompt) but
         // keeps the step safe under future reorderings.
         messages.Insert(0, ChatMessage.System(runtime.BuildSystemPrompt(taskInstruction: string.Empty)));
+    }
+
+    private static void AppendFinalTaskFocus(List<ChatMessage> messages)
+    {
+        for (var i = 0; i < messages.Count; i++)
+        {
+            if (!string.Equals(messages[i].Role, "system", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            messages[i] = ChatMessage.System(
+                (messages[i].Content ?? string.Empty).TrimEnd() + FinalTaskFocusBlock);
+            return;
+        }
     }
 
     // Few-shot injection delegates to the shared PersonalityFewShotInjector

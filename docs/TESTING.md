@@ -241,6 +241,30 @@ hard-gate failure counts. They also separate runtime warmup, per-test reset,
 test work, host total, and remaining harness overhead so latency regressions can
 be attributed instead of inferred from one wall-clock number.
 
+### Routing latency diagnostics
+
+Routing diagnostics are opt-in and do not change normal execution unless the
+validation-skip experiment is explicitly enabled:
+
+- `ST_ROUTING_LATENCY_TRACE=1` records monotonic pipeline, provider, memory,
+  HTTP, and UI timing without logging prompt or memory contents.
+- `ST_TURN_PLAN_SHADOW=1` records the deterministic shadow plan and reason
+  codes without changing routing or permission decisions.
+- `ST_HARNESS_PRESERVE_SANDBOX=1` retains an isolated harness runtime so its
+  local logs and audit records can be inspected after a run.
+- `ST_SKIP_HIGH_CONFIDENCE_CONVERSATION_VALIDATION=1` enables the default-off
+  conversation-only experiment. Keep it disabled outside a controlled cohort.
+
+Use `dev/run-routing-latency-desktop-campaign.ps1` for repeated desktop-path
+cohorts and `dev/analyze-routing-latency-campaign.ps1` to summarize the result.
+The `routing-latency` harness suite supplies focused conversation, memory,
+research, tool, file, high-stakes, structured-output, and adversarial probes.
+
+The optional mini-MMLU helper scripts expect `local-benchmark-runner` as a
+sibling checkout by default. Override `-BenchmarkRunnerRoot` and `-PythonPath`
+when using a different layout. These scripts compare run artifacts; production
+routing never receives expected answers, suite IDs, or scoring thresholds.
+
 ### Overnight harness runs
 
 For long local runs such as `./dev/harness.ps1 --all --judge none`:

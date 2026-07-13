@@ -1,0 +1,16 @@
+id: routing_latency_explicit_memory
+name: Routing latency - explicit memory request
+category: memory
+user_message: "What do you remember about my preferred programming language? If nothing is stored, say so plainly."
+allowed_tools: [memory_retrieve]
+mode: live
+assertions:
+  required_tools: [memory_retrieve]
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: []
+  forbidden_keywords: ["<think>", "</think>", "error", "timeout"]
+  max_response_chars: 700
+min_score: 6.0

@@ -1,0 +1,16 @@
+id: routing_latency_tool_task
+name: Routing latency - explicit tool task
+category: tool
+user_message: "Run tool_ping and tell me whether the MCP server is responding."
+allowed_tools: [tool_ping]
+mode: live
+assertions:
+  required_tools: [tool_ping]
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: ["responding"]
+  forbidden_keywords: ["<think>", "</think>", "as an ai"]
+  max_response_chars: 500
+min_score: 7.0

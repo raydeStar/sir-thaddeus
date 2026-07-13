@@ -1,0 +1,16 @@
+id: routing_latency_ambiguous
+name: Routing latency - consequential ambiguity
+category: ambiguous
+user_message: "Can you take care of that for me?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: []
+  forbidden_keywords: ["<think>", "</think>", "error", "timeout"]
+  max_response_chars: 600
+min_score: 5.0

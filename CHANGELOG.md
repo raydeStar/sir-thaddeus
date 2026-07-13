@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Agent quality and routing
+
+- Explicit no-tool response contracts are detected from the request lead so
+  quoted examples cannot silently escalate a direct-answer turn into research.
+- Direct-answer prompts with completed examples now focus the model on the
+  final unresolved request while preserving personality, memory, tools, and
+  safety boundaries.
+- Headless retries no longer force live search for tasks classified as
+  no-tool, and failed memory-only provenance no longer activates tool-backed
+  response rewriting.
+- Capability summaries, tool-backed fallbacks, and pure-social replies are
+  grounded in actual runtime records and avoid exposing raw local-provider
+  context errors.
+
+### Measurement and diagnostics
+
+- Harness reruns reuse current builds, avoid duplicate pure-compute tool calls,
+  and report warmup, reset, test-work, host, and harness-overhead timing.
+- Opt-in routing latency traces, shadow turn planning, and a narrowly gated
+  conversation-validation experiment remain disabled by default and cannot
+  grant tool or permission authority.
+- The matched benchmark workflow records raw-model controls, exact repeats,
+  invalid-output counts, and disjoint confirmation slices without placing
+  benchmark identifiers or expected answers in production code.
+
 ## 1.0.0 — 2026-05-08
 
 The v1.0 release. The hybrid Shell + Runtime + workspace surface is now

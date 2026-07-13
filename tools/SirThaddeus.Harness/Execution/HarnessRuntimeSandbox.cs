@@ -166,6 +166,9 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
 
     public void Dispose()
     {
+        if (IsPreserveSandboxEnabled())
+            return;
+
         try
         {
             if (Directory.Exists(RootDirectory))
@@ -175,6 +178,15 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         {
             // Best-effort cleanup. Sandbox directories live under temp.
         }
+    }
+
+    private static bool IsPreserveSandboxEnabled()
+    {
+        var raw = System.Environment.GetEnvironmentVariable("ST_HARNESS_PRESERVE_SANDBOX");
+        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

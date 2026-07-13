@@ -3,6 +3,7 @@ using SirThaddeus.Agent.Pipeline;
 
 namespace SirThaddeus.Tests.Agent.Pipeline;
 
+[Collection(RoutingLatencyEnvironmentCollection.Name)]
 public class ChatPipelineTests
 {
     [Fact]
@@ -116,6 +117,37 @@ public class ChatPipelineTests
         Assert.Equal(new ITurnStep[] { a, b }, pipeline.Steps);
     }
 
+    [Fact]
+    public async Task Opt_in_latency_trace_records_correlated_step_and_pipeline_timings()
+    {
+        var previous = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+        Environment.SetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE", "1");
+        try
+        {
+            var events = new List<(string action, string message)>();
+            var terminal = new RecordingStep("final", new(), _ =>
+                new StepResult.Terminate(new AgentResponse { Text = "done" }));
+            var pipeline = new ChatPipeline(
+                [terminal],
+                (action, message) => events.Add((action, message)));
+
+            await pipeline.RunAsync(NewContext("hi"), CancellationToken.None);
+
+            Assert.Contains(events, e =>
+                e.action == "PIPELINE_STEP_TIMING" &&
+                e.message.Contains("thread_id=t1", StringComparison.Ordinal) &&
+                e.message.Contains("turn_id=m1", StringComparison.Ordinal) &&
+                e.message.Contains("step=final", StringComparison.Ordinal));
+            Assert.Contains(events, e =>
+                e.action == "PIPELINE_TIMING" &&
+                e.message.Contains("outcome=terminate", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE", previous);
+        }
+    }
+
     private static TurnContext NewContext(string userText) =>
         new() { ThreadId = "t1", MessageId = "m1", UserText = userText };
 
@@ -139,4 +171,10 @@ public class ChatPipelineTests
             return Task.FromResult(_body(context));
         }
     }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class RoutingLatencyEnvironmentCollection
+{
+    public const string Name = "RoutingLatencyEnvironmentVariables";
 }

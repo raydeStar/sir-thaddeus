@@ -93,6 +93,7 @@ public sealed class TaskClassifier : ITaskClassifier
         return IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower) ||
                IntentFeatureExtractor.LooksLikeVoiceMicCheck(lower) ||
                IntentFeatureExtractor.LooksLikeLogicPuzzlePrompt(lower) ||
+               ExplicitResponseContractDetector.IsNoToolDirectAnswer(lower) ||
                UtilityRouter.TryHandle(lower) is not null;
     }
 }
