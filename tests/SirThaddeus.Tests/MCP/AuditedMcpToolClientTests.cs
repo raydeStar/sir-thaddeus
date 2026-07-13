@@ -13,6 +13,7 @@ namespace SirThaddeus.Tests;
 //   - Caches and uses permission token IDs
 // ─────────────────────────────────────────────────────────────────────────
 
+[Collection(RuntimeEnvironmentVariableCollection.Name)]
 public class AuditedMcpToolClientTests
 {
     private const string SessionId = "test-session-01";

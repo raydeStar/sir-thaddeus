@@ -27,6 +27,19 @@
   invalid-output counts, and disjoint confirmation slices without placing
   benchmark identifiers or expected answers in production code.
 
+### Security
+
+- SQLite entry projects now select the current SQLitePCLRaw native bundle
+  instead of the vulnerable `SQLitePCLRaw.lib.e_sqlite3` 2.1.11 transitive
+  dependency reported by `GHSA-2m69-gcr7-jv3q`.
+- Web transitive dependencies are refreshed to clear the production audit.
+
+### Fixed
+
+- The offline Windows voice dependency bundle now satisfies the current
+  backend requirements, and asset fetching supports per-asset release URLs so
+  unchanged large runtime and model packs do not need to be republished.
+
 ## 1.0.0 — 2026-05-08
 
 The v1.0 release. The hybrid Shell + Runtime + workspace surface is now

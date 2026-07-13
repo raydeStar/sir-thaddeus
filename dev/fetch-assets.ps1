@@ -68,7 +68,7 @@ function Install-Asset($asset) {
         Remove-Item -Force $markerPath -ErrorAction SilentlyContinue
     }
 
-    $url = "$baseUrl$($asset.filename)"
+    $url = if ($asset.url) { $asset.url } else { "$baseUrl$($asset.filename)" }
     $sizeMB = [math]::Round($asset.sizeBytes / 1MB, 1)
     Write-Host "  [DOWNLOAD] $($asset.filename) ($sizeMB MB)" -ForegroundColor Cyan
     Write-Host "    URL: $url"
