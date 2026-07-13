@@ -266,7 +266,7 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
     var sanitize = new Func<TurnContext, string, string>(
         (ctx, draft) => ApplyHeadlessQualityGuards(
             AssistantResponseSanitizer.NormalizeJsonOnlyReply(
-                AssistantResponseSanitizer.CleanChatReply(draft),
+                AssistantResponseSanitizer.CleanChatReply(draft, ctx.UserText),
                 ctx.UserText),
             ctx));
 

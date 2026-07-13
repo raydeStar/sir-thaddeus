@@ -9,6 +9,9 @@
 - Direct-answer prompts with completed examples now focus the model on the
   final unresolved request while preserving personality, memory, tools, and
   safety boundaries.
+- Explicit labeled-answer contracts now survive response sanitization in both
+  desktop and headless paths, and malformed option-letter replies receive one
+  bounded, answer-agnostic contract repair.
 - Headless retries no longer force live search for tasks classified as
   no-tool, and failed memory-only provenance no longer activates tool-backed
   response rewriting.

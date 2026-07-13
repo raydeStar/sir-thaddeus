@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Validation;
@@ -14,6 +15,7 @@ public sealed class RepairLoop
     private readonly ILlmClient _llm;
     private readonly CompletionValidator _validator;
     private const int RepairMaxTokens = 512;
+    private const int ContractRepairMaxTokens = 96;
 
     /// <summary>
     /// Maximum repair attempts per failed validation. Default 1.
@@ -45,19 +47,29 @@ public sealed class RepairLoop
         {
             var sw = Stopwatch.StartNew();
 
-            var repairPrompt = BuildRepairPrompt(
-                userRequest, currentText, currentValidation);
+            var isMultipleChoiceLetterRepair =
+                ExplicitResponseContractDetector.RequiresLabeledMultipleChoiceLetter(userRequest) &&
+                !ExplicitResponseContractDetector.HasLabeledMultipleChoiceLetter(currentText);
+
+            var repairPrompt = isMultipleChoiceLetterRepair
+                ? BuildMultipleChoiceLetterRepairPrompt(userRequest, currentText)
+                : BuildRepairPrompt(userRequest, currentText, currentValidation);
 
             try
             {
                 var messages = new List<ChatMessage>
                 {
-                    ChatMessage.System(RepairSystemPrompt),
+                    ChatMessage.System(isMultipleChoiceLetterRepair
+                        ? MultipleChoiceLetterRepairSystemPrompt
+                        : RepairSystemPrompt),
                     ChatMessage.User(repairPrompt)
                 };
 
                 var llmResponse = await _llm.ChatAsync(
-                    messages, tools: null, RepairMaxTokens, cancellationToken);
+                    messages,
+                    tools: null,
+                    isMultipleChoiceLetterRepair ? ContractRepairMaxTokens : RepairMaxTokens,
+                    cancellationToken);
 
                 sw.Stop();
                 var repairedText = llmResponse.Content?.Trim();
@@ -76,11 +88,22 @@ public sealed class RepairLoop
                     break;
                 }
 
-                // Re-validate the repaired response.
-                var hasToolResults = toolCallsMade.Count > 0 &&
-                                     toolCallsMade.Any(t => t.Success);
-                var revalidation = await _validator.ValidateAsync(
-                    userRequest, repairedText, hasToolResults, cancellationToken);
+                // A targeted shape-only repair succeeds when it now satisfies
+                // the exact deterministic contract that triggered it. Other
+                // repair types still receive the full completion validation.
+                CompletionValidationResult revalidation;
+                if (isMultipleChoiceLetterRepair &&
+                    ExplicitResponseContractDetector.HasLabeledMultipleChoiceLetter(repairedText))
+                {
+                    revalidation = new CompletionValidationResult { Passed = true };
+                }
+                else
+                {
+                    var hasToolResults = toolCallsMade.Count > 0 &&
+                                         toolCallsMade.Any(t => t.Success);
+                    revalidation = await _validator.ValidateAsync(
+                        userRequest, repairedText, hasToolResults, cancellationToken);
+                }
 
                 var succeeded = revalidation.Passed;
                 attempts.Add(new RepairAttempt
@@ -154,11 +177,35 @@ public sealed class RepairLoop
             """;
     }
 
+    internal static string BuildMultipleChoiceLetterRepairPrompt(
+        string userRequest,
+        string failedResponse)
+        => $"""
+            The user request is below. It asks for one offered option letter in a labeled final-answer line.
+
+            User request:
+            {userRequest}
+
+            Previous response:
+            {failedResponse}
+
+            Correct only the response contract. Choose the answer from the offered options and output exactly one line:
+            Final answer: <LETTER>
+
+            Replace <LETTER> with one offered option letter. Output no explanation or additional text.
+            """;
+
     private const string RepairSystemPrompt =
         "You are correcting a specific flaw in an earlier answer. " +
         "Fix only the identified issue. Keep everything else intact. " +
         "Do not add disclaimers about the correction. " +
         "Output only the corrected response text.";
+
+    private const string MultipleChoiceLetterRepairSystemPrompt =
+        "Repair only an explicit multiple-choice response contract. " +
+        "Use the request and prior response to select one offered option letter. " +
+        "Output exactly `Final answer: <LETTER>`, replacing <LETTER> with that letter. " +
+        "Do not explain, restate, or add any other text.";
 }
 
 /// <summary>

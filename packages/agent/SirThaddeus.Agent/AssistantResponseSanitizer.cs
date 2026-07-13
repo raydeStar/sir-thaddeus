@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using System.Text.Json;
+using SirThaddeus.Agent.Routing;
 
 namespace SirThaddeus.Agent;
 
@@ -17,8 +18,14 @@ public static class AssistantResponseSanitizer
     /// emitted by chain-of-thought models. When <paramref name="preserveRationale"/>
     /// is true the text is returned unchanged.
     /// </summary>
-    public static string StripThinkingScaffold(string text, bool preserveRationale = false)
-        => OrchestratorMessageHelpers.StripThinkingScaffold(text, preserveRationale);
+    public static string StripThinkingScaffold(
+        string text,
+        bool preserveRationale = false,
+        bool preserveFinalAnswerLabel = false)
+        => OrchestratorMessageHelpers.StripThinkingScaffold(
+            text,
+            preserveRationale,
+            preserveFinalAnswerLabel);
 
     /// <summary>
     /// Strips raw chat-template tokens (harmony / Llama / Mistral / ChatML)
@@ -34,8 +41,20 @@ public static class AssistantResponseSanitizer
     /// on empty input.
     /// </summary>
     public static string CleanChatReply(string text)
+        => CleanChatReply(text, latestUserMessage: null);
+
+    /// <summary>
+    /// Runs the full cleanup pipeline while preserving an explicitly requested
+    /// labeled final-answer line. Ordinary replies retain the historical
+    /// behavior of removing that presentation label.
+    /// </summary>
+    public static string CleanChatReply(string text, string? latestUserMessage)
     {
-        text = StripThinkingScaffold(text);
+        var preserveFinalAnswerLabel =
+            ExplicitResponseContractDetector.RequiresLabeledFinalAnswerLine(latestUserMessage);
+        text = StripThinkingScaffold(
+            text,
+            preserveFinalAnswerLabel: preserveFinalAnswerLabel);
         text = StripRawTemplateTokens(text);
         return text;
     }

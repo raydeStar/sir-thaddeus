@@ -566,6 +566,43 @@ public class NonThinkingModelRegressionTests
         Assert.Equal("42.", result);
     }
 
+    [Fact]
+    public void CleanChatReply_ExplicitFinalAnswerContract_PreservesLabel()
+    {
+        var input = "A canary limits blast radius.\n\nFinal answer: use a canary";
+        var prompt =
+            "Put the final answer on its own line as `Final answer: <answer>`.\n\n" +
+            "Which rollout should come first?";
+
+        var result = AssistantResponseSanitizer.CleanChatReply(input, prompt);
+
+        Assert.Equal(input, result);
+    }
+
+    [Fact]
+    public void CleanChatReply_OrdinaryPrompt_KeepsHistoricalLabelCleanup()
+    {
+        var result = AssistantResponseSanitizer.CleanChatReply(
+            "Reasoning.\n\nFinal answer: 42",
+            "What is the result?");
+
+        Assert.Equal("42", result);
+    }
+
+    [Fact]
+    public void CleanChatReply_ExplicitContract_RemovesThinkingButPreservesFinalLabel()
+    {
+        var input = "<think>private scratch work</think>\nFinal answer: green";
+        var prompt =
+            "Put the final answer on its own line as `Final answer: <answer>`.\n\n" +
+            "What color results?";
+
+        var result = AssistantResponseSanitizer.CleanChatReply(input, prompt);
+
+        Assert.Equal("Final answer: green", result);
+        Assert.DoesNotContain("scratch", result);
+    }
+
     // ── Bare harmony channel leaks (<channel>thought <channel>…) ──────
 
     // ── Automation-run refusal loop collapse ───────────────────────────

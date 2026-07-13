@@ -458,8 +458,8 @@ public sealed class LmStudioAssistant : IAssistant
     /// </remarks>
     internal ChatPipeline BuildTurnPipeline(IMcpToolClient mcp, IChatEventSink sink)
     {
-        var sanitize = new Func<TurnContext, string, string>((_, draft) =>
-            AssistantResponseSanitizer.CleanChatReply(draft));
+        var sanitize = new Func<TurnContext, string, string>((ctx, draft) =>
+            AssistantResponseSanitizer.CleanChatReply(draft, ctx.UserText));
         Action<string, string>? latencyLog = IsLatencyTracingEnabled()
             ? (action, message) => _logger.LogInformation("{Action} {Message}", action, message)
             : null;

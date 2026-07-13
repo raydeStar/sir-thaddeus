@@ -5,6 +5,79 @@ namespace SirThaddeus.Tests;
 
 public class CompletionValidatorTests
 {
+    [Fact]
+    public void Heuristic_ExplicitFinalAnswerLineMissing_RequestsTargetedRepair()
+    {
+        var request =
+            "Put the final answer on its own line as `Final answer: <answer>`.\n\n" +
+            "What color results from mixing blue and yellow?";
+
+        var result = CompletionValidator.TryValidateHeuristic(
+            request,
+            "Mixing blue and yellow produces green.");
+
+        Assert.NotNull(result);
+        Assert.False(result.Passed);
+        Assert.True(result.RepairNeeded);
+        Assert.Contains("labeled final-answer line", result.MissingElement);
+        Assert.Contains("Final answer: <answer>", result.SuggestedRepair);
+        Assert.False(result.UsedLlm);
+    }
+
+    [Fact]
+    public void Heuristic_ExplicitFinalAnswerLinePresent_AllowsNormalValidation()
+    {
+        var request =
+            "Put the final answer on its own line as `Final answer: <answer>`.\n\n" +
+            "What color results from mixing blue and yellow?";
+
+        var result = CompletionValidator.TryValidateHeuristic(
+            request,
+            "Mixing blue and yellow produces green.\n\nFinal answer: green");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Heuristic_DoesNotApplyFinalAnswerFormatToOrdinaryRequests()
+    {
+        var result = CompletionValidator.TryValidateHeuristic(
+            "Draft a three-step rollout plan.",
+            "First test locally, then canary the change, then monitor production.");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Heuristic_RequestedOptionLetterRejectsProseValue()
+    {
+        var request =
+            "Put the final answer on its own line as `Final answer: <answer>`.\n\n" +
+            "Choose the correct letter choice: A. canary B. full deployment";
+
+        var result = CompletionValidator.TryValidateHeuristic(
+            request,
+            "A canary limits risk.\n\nFinal answer: a canary release");
+
+        Assert.NotNull(result);
+        Assert.False(result.Passed);
+        Assert.True(result.RepairNeeded);
+        Assert.Contains("exactly one requested option letter", result.MissingElement);
+        Assert.Contains("Final answer: <letter>", result.SuggestedRepair);
+    }
+
+    [Fact]
+    public void Heuristic_RequestedOptionLetterAcceptsSingleLetterForNormalValidation()
+    {
+        var request =
+            "Put the final answer on its own line as `Final answer: <answer>`.\n\n" +
+            "Choose the correct letter choice: A. canary B. full deployment";
+
+        var result = CompletionValidator.TryValidateHeuristic(request, "Final answer: A");
+
+        Assert.Null(result);
+    }
+
     // ── Heuristic: Empty response ────────────────────────────────────
 
     [Fact]
