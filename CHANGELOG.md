@@ -39,6 +39,8 @@
 - The offline Windows voice dependency bundle now satisfies the current
   backend requirements, and asset fetching supports per-asset release URLs so
   unchanged large runtime and model packs do not need to be republished.
+- Shell IPC contract tests can use a larger child-runtime startup budget on
+  constrained CI runners without changing the production startup timeout.
 
 ## 1.0.0 — 2026-05-08
 

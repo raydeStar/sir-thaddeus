@@ -41,8 +41,9 @@ public sealed class IpcContractTests : IAsyncLifetime
         _supervisor = new RuntimeProcessSupervisor(
             NullLogger<RuntimeProcessSupervisor>.Instance,
             _lockFilePath,
-            testMode: true);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            testMode: true,
+            startupTimeout: TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(75));
         _lockFile = await _supervisor.EnsureRunningAsync(cts.Token);
     }
 
