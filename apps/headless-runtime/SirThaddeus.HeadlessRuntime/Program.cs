@@ -259,7 +259,8 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
             new FactSearchArgsRewriter(),
             new ExistenceSearchArgsRewriter()
         ],
-        maxRoundTrips: 6);
+        maxRoundTrips: 6,
+        maxOutputTokens: Math.Max(1, currentSettings.Llm.MaxTokens));
 
     var sanitize = new Func<TurnContext, string, string>(
         (ctx, draft) => ApplyHeadlessQualityGuards(
@@ -678,40 +679,12 @@ static string NormalizeWeatherWindPhrase(string wind)
 static string BuildHeadlessSystemPrompt(AppSettings currentSettings)
 {
     var effectiveLocation = currentSettings.GetEffectiveUserLocation(currentSettings.ActiveProfileId);
-    var locationLabel = effectiveLocation.GetResolvedLabel();
-    var timezone = effectiveLocation.GetResolvedTimezone();
-    var preferredUnits = currentSettings.Weather.GetNormalizedUnitSystem();
-
-    // Date block runs unconditionally — local-LLM training cutoffs are
-    // months to years stale, and "today's date" questions need to work
-    // even when the user hasn't set a location. The existence-verification
-    // nudge got moved OUT of here because a prompt-wide "verify" hint
-    // pushed 4B models to web_search casual questions. If the CLI grows a
-    // per-turn system prompt augmentation point later, that's where the
-    // surgical existence nudge should live.
-    var today = DateTimeOffset.Now;
-    var dateBlock =
-        $"Today's date is {today:dddd, MMMM d, yyyy} ({today:yyyy-MM-dd}). " +
-        "Use this when the user asks about the current date, day of week, " +
-        "or relative dates (e.g. \"tomorrow\", \"last week\"). Do not guess " +
-        "or rely on your training cutoff.";
-
-    if (string.IsNullOrWhiteSpace(locationLabel))
-        return dateBlock + "\n\n" + currentSettings.Llm.SystemPrompt;
-
-    var tzNote = string.IsNullOrWhiteSpace(timezone) ? "" : $" Timezone: {timezone.Trim()}.";
-    var unitsNote = string.IsNullOrWhiteSpace(preferredUnits) ? "" : $" Preferred units: {preferredUnits}.";
-    var locationBlock =
-        $"The user's home location is: {locationLabel.Trim()}.{tzNote}{unitsNote} " +
-        "Use this ONLY as the default area when they ask about weather, local " +
-        "places, news, or times WITHOUT specifying a location. When the user " +
-        "explicitly names a different city (e.g. \"weather in Seattle\"), use " +
-        "the city THEY named — do not ask for clarification or second-guess. " +
-        "Pass the location string to weather_geocode and similar location-scoped " +
-        "tools verbatim. Do not announce that you know their home location — " +
-        "just use it naturally when they omit one.";
-
-    return dateBlock + "\n\n" + locationBlock + "\n\n" + currentSettings.Llm.SystemPrompt;
+    return ProductionPromptComposer.ComposeBaseSystemPrompt(
+        currentSettings.Llm.SystemPrompt,
+        DateTimeOffset.Now,
+        effectiveLocation.GetResolvedLabel(),
+        effectiveLocation.GetResolvedTimezone(),
+        currentSettings.Weather.GetNormalizedUnitSystem());
 }
 
 var orchestrator = BuildOrchestrator(settings);
@@ -952,6 +925,19 @@ if (options.ServerMode)
             QueueManagedSearxngUpdate(settings);
         },
         BuildSearchStatusAsync,
+        () =>
+        {
+            var primary = llm.GetUsageSnapshot();
+            var gatekeeper = gatekeeperLlm.GetUsageSnapshot();
+            return new LlmUsageSnapshot
+            {
+                RequestCount = primary.RequestCount + gatekeeper.RequestCount,
+                PromptTokens = primary.PromptTokens + gatekeeper.PromptTokens,
+                CompletionTokens = primary.CompletionTokens + gatekeeper.CompletionTokens,
+                TotalTokens = primary.TotalTokens + gatekeeper.TotalTokens,
+                ContextWindowTokens = primary.ContextWindowTokens
+            };
+        },
         audit,
         apiPermissionGate,
         () => auditedAgentMcp?.ResetBudgets(),

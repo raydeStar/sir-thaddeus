@@ -88,6 +88,7 @@ public sealed class HarnessApplication
                         FinalResponse = single.Response.Text,
                         ArtifactDirectory = single.ArtifactPaths.RootDirectory,
                         JudgeResult = single.JudgeResult,
+                        LlmRoundTrips = single.Response.LlmRoundTrips,
                         Timing = single.Timing
                     };
                 }
@@ -129,6 +130,7 @@ public sealed class HarnessApplication
                     Attempts = attempts.Count,
                     ArtifactDirectory = best.ArtifactDirectory,
                     FinalResponse = best.FinalResponse,
+                    LlmRoundTrips = best.LlmRoundTrips,
                     RuntimeWarmupSeconds = aggregateTiming.RuntimeWarmupSeconds,
                     ResetSeconds = aggregateTiming.ResetSeconds,
                     TestWorkSeconds = aggregateTiming.TestWorkSeconds,

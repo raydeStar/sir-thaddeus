@@ -47,6 +47,7 @@ public sealed partial class LmStudioAssistant
                 new ExistenceSearchArgsRewriter()
             ],
             maxRoundTrips: MaxRoundTrips,
+            maxOutputTokens: MaxOutputTokens,
             log: latencyLog);
 
         var steps = new List<ITurnStep>

@@ -29,6 +29,7 @@ public static class SuiteReporter
         public required int Attempts { get; init; }
         public string? ArtifactDirectory { get; init; }
         public string? FinalResponse { get; init; }
+        public int LlmRoundTrips { get; init; }
         public double RuntimeWarmupSeconds { get; init; }
         public double ResetSeconds { get; init; }
         public double TestWorkSeconds { get; init; }
@@ -219,11 +220,13 @@ public static class SuiteReporter
                 },
                 tokensIn = r.Score.TokensIn,
                 tokensOut = r.Score.TokensOut,
+                totalTokens = r.Score.TokensIn + r.Score.TokensOut,
                 score = r.Score.FinalScore,
                 hard_pass = r.Score.HardPass,
                 attempts = r.Attempts,
                 artifact_directory = r.ArtifactDirectory,
                 final_response = r.FinalResponse,
+                model_calls = r.LlmRoundTrips,
                 breakdown = new
                 {
                     keyword_penalty = r.Score.KeywordPenalty,

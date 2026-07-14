@@ -153,6 +153,9 @@ public sealed partial class LmStudioAssistant : IAssistant
     /// <summary>Maximum LLM round-trips inside the tool loop before giving up.</summary>
     public int MaxRoundTrips { get; init; } = 6;
 
+    /// <summary>Configured output-token budget for the primary model call.</summary>
+    public int MaxOutputTokens { get; init; } = 1024;
+
     /// <summary>System prompt prepended to every request.</summary>
     /// <remarks>
     /// Tuned for small local models. The refusal pattern ("I cannot do X
@@ -201,74 +204,6 @@ public sealed partial class LmStudioAssistant : IAssistant
         "inline caveat rather than a whole-reply hedge. If you don't know a " +
         "fact and it matters, say so and keep going. ";
 
-    private string ComposeSystemPrompt()
-    {
-        var text = SystemPrompt;
-
-        // Logic-puzzle scaffold moved out of here — LogicPuzzleScaffoldStep
-        // in the pipeline handles it after FeatureExtractorStep classifies
-        // the turn. Keeping both would double-inject the suffix.
-        //
-        // Existence-verification hint also lives in the pipeline now
-        // (ExistenceVerificationHintStep) so UI and CLI share the same
-        // pattern-gated injection instead of duplicating it here.
-
-        var dateBlock = BuildDateBlock();
-        var locBlock = BuildLocationBlock();
-        var offlineBlock = BuildOfflineModeBlock();
-        var preamble = string.Join("\n\n",
-            new[] { dateBlock, locBlock, offlineBlock }.Where(s => !string.IsNullOrEmpty(s)));
-        return string.IsNullOrEmpty(preamble) ? text : preamble + "\n\n" + text;
-    }
-
-    // Without this block the model freely hallucinates a year — local-LLM
-    // training cutoffs are months to years stale, and "what is today's date"
-    // is routine enough that we can't rely on tool calls to rescue it.
-    private static string BuildDateBlock()
-    {
-        var today = DateTimeOffset.Now;
-        return $"Today's date is {today:dddd, MMMM d, yyyy} ({today:yyyy-MM-dd}). " +
-               "Use this when the user asks about the current date, day of week, " +
-               "or relative dates (e.g. \"tomorrow\", \"last week\"). Do not guess " +
-               "or rely on your training cutoff.";
-    }
-
-    // (Existence-verification regex + builder moved to
-    // ExistenceVerificationHintStep — it belongs in the pipeline so both
-    // runtimes get it with the same gating.)
-
-    /// <summary>
-    /// Builds the one-paragraph location hint prepended to the system prompt
-    /// when the user has a configured home location. Weather / local-search
-    /// queries resolve to the user's city instead of the model's geographic
-    /// default. Mirrors <c>BuildHeadlessSystemPrompt</c> in the CLI so both
-    /// runtimes give the model the same baseline location context.
-    /// </summary>
-    private string BuildLocationBlock()
-    {
-        if (string.IsNullOrWhiteSpace(LocationHint)) return string.Empty;
-        var units = string.IsNullOrWhiteSpace(PreferredUnits) ? "" : $" Preferred units: {PreferredUnits!.Trim()}.";
-        return
-            $"The user's home location is: {LocationHint!.Trim()}.{units} " +
-            "Use this ONLY as the default area when they ask about weather, local " +
-            "places, news, or times WITHOUT specifying a location. When the user " +
-            "explicitly names a different city (e.g. \"weather in Seattle\"), use " +
-            "the city THEY named — do not ask for clarification or second-guess. " +
-            "Pass the location string to weather_geocode and similar location-scoped " +
-            "tools verbatim. Do not announce that you know their home location — " +
-            "just use it naturally when they omit one.";
-    }
-
-    private string BuildOfflineModeBlock()
-    {
-        if (!OfflineMode) return string.Empty;
-        return
-            "Offline mode is ON. Do not use web, browser, weather, places, feed, " +
-            "holiday, status-check, or other network-backed tools. Work from local " +
-            "conversation context, local memory, wiki/files when available, and " +
-            "clearly say when a question needs live web access that offline mode is blocking.";
-    }
-
     public LmStudioAssistant(
         ILlmClient llm,
         IMcpToolClient mcp,
@@ -302,7 +237,12 @@ public sealed partial class LmStudioAssistant : IAssistant
         var thread = await _store.GetAsync(threadId, ct).ConfigureAwait(false);
         var llmMessages = new List<LlmChatMessage>(HistoryTurns + 2)
         {
-            LlmChatMessage.System(ComposeSystemPrompt()),
+            LlmChatMessage.System(ProductionPromptComposer.ComposeBaseSystemPrompt(
+                SystemPrompt,
+                DateTimeOffset.Now,
+                LocationHint,
+                preferredUnits: PreferredUnits,
+                offlineMode: OfflineMode)),
         };
         llmMessages.AddRange(BuildHistory(thread));
 

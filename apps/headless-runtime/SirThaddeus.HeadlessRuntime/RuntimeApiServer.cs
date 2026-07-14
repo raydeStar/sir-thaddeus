@@ -13,6 +13,7 @@ using SirThaddeus.Config;
 using SirThaddeus.Contracts;
 using SirThaddeus.Memory;
 using SirThaddeus.Memory.Sqlite;
+using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine.Profiles;
 using SirThaddeus.RuntimeHost;
 
@@ -38,6 +39,7 @@ internal static partial class RuntimeApiServer
         Func<AppSettings> getSettings,
         Action<AppSettings> setSettings,
         Func<CancellationToken, Task<SearchStatusResponse>> getSearchStatus,
+        Func<LlmUsageSnapshot> getLlmUsage,
         IAuditLogger audit,
         ApiPermissionGate? permissionGate,
         Action? resetToolBudgets,
@@ -77,7 +79,7 @@ internal static partial class RuntimeApiServer
             };
         }
 
-        MapCoreEndpoints(app, getSearchStatus, getSettings, PersistSettings, audit);
+        MapCoreEndpoints(app, getSearchStatus, getLlmUsage, getSettings, PersistSettings, audit);
         MapMemoryEndpoints(app, getSettings);
         MapRunEndpoints(app, runs, buildOrchestrator, getSettings, permissionGate, PersistSettings, audit);
         MapActivityEndpoints(app, audit, getSettings, PersistSettings, permissionGate);

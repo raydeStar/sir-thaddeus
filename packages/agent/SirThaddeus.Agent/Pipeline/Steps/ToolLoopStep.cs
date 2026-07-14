@@ -38,7 +38,7 @@ namespace SirThaddeus.Agent.Pipeline.Steps;
 /// </summary>
 public sealed class ToolLoopStep : ITurnStep
 {
-    private const int ToolLoopMaxOutputTokens = 1024;
+    private const int DefaultMaxOutputTokens = 1024;
 
     private readonly ILlmClient _llm;
     private readonly IMcpToolClient _mcp;
@@ -48,6 +48,7 @@ public sealed class ToolLoopStep : ITurnStep
     private readonly IReadOnlyList<IToolCallInterceptor> _interceptors;
     private readonly IReadOnlyList<IToolArgsRewriter> _argsRewriters;
     private readonly int _maxRoundTrips;
+    private readonly int _maxOutputTokens;
     private readonly Action<string, string>? _log;
 
     public ToolLoopStep(
@@ -59,6 +60,7 @@ public sealed class ToolLoopStep : ITurnStep
         IEnumerable<IToolCallInterceptor>? interceptors = null,
         IEnumerable<IToolArgsRewriter>? argsRewriters = null,
         int maxRoundTrips = 6,
+        int maxOutputTokens = DefaultMaxOutputTokens,
         Action<string, string>? log = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
@@ -70,7 +72,10 @@ public sealed class ToolLoopStep : ITurnStep
         _argsRewriters = argsRewriters?.ToArray() ?? Array.Empty<IToolArgsRewriter>();
         if (maxRoundTrips < 1)
             throw new ArgumentOutOfRangeException(nameof(maxRoundTrips), "Must be >= 1.");
+        if (maxOutputTokens < 1)
+            throw new ArgumentOutOfRangeException(nameof(maxOutputTokens), "Must be >= 1.");
         _maxRoundTrips = maxRoundTrips;
+        _maxOutputTokens = maxOutputTokens;
         _log = log;
     }
 
@@ -168,7 +173,7 @@ public sealed class ToolLoopStep : ITurnStep
             try
             {
                 response = await _llm
-                    .ChatAsync(messages, tools, ToolLoopMaxOutputTokens, forcedToolChoice, cancellationToken)
+                    .ChatAsync(messages, tools, _maxOutputTokens, forcedToolChoice, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
