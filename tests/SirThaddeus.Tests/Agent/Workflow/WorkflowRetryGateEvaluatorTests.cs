@@ -92,31 +92,6 @@ public sealed class WorkflowRetryGateEvaluatorTests
         Assert.Equal("search_retry_not_applicable", decision.ReasonCode);
     }
 
-    [Fact]
-    public void Evaluate_BlocksRetry_ForConsensusPreservedSnapshot_EvenWithBudgetLeft()
-    {
-        // WorkflowChatRunCoordinator preserves a self-consistency vote by
-        // building exactly this snapshot (raised score, High band,
-        // ShouldRetry=false) when firstResponse.FromConsensusVote is true, so
-        // the retry gate must disallow the (redundant) re-vote even though every
-        // budget still has headroom. This locks the mechanism the skip relies
-        // on: a consensus answer, already voted from N samples, is not re-run.
-        var evaluator = new RetryGateEvaluator();
-        var state = CreateState(maxRetries: 2, retriesUsed: 0, maxToolCalls: 8, toolCallsUsed: 1, timeBudgetSec: 30);
-        var consensusPreserved = new ConfidenceSnapshot
-        {
-            Score = 0.85,
-            Band = "High",
-            Summary = "Consensus-voted answer preserved without retry.",
-            ShouldRetry = false
-        };
-
-        var decision = evaluator.Evaluate(state, consensusPreserved, TimeSpan.FromSeconds(5));
-
-        Assert.False(decision.IsAllowed);
-        Assert.Equal("confidence_not_retry", decision.ReasonCode);
-    }
-
     private static TaskRunState CreateState(
         int maxRetries,
         int retriesUsed,

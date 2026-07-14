@@ -1,35 +1,22 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-    Model intake rig. Answers "a new local model just released: is it good, and how
-    should we configure it?" by MEASURING a config matrix (arms x suites) instead of
-    guessing.
+    Measures a local model on supported Sir Thaddeus harness suites.
 
 .DESCRIPTION
-    Optimal scaffolding is per-model, not universal: self-consistency took a 1.2B model
-    from 0/6 to 6/6 on one suite but took an 8B from 6/6 to 4/6 on another. So this rig
-    never assumes an arm helps - it runs each arm against each suite K times via
-    dev/harness-repeat.ps1, collects the aggregate JSON that script emits, and writes a
-    scorecard plus a compact report with a per-suite recommended config.
+    Runs the production baseline repeatedly with temperature 0 and writes an
+    auditable scorecard plus Markdown report. Rejected reasoning strategies do
+    not remain as configurable arms. Partial runs are surfaced explicitly.
 
-    For each arm the rig sets the arm's env vars, then invokes:
-        dev/harness-repeat.ps1 -Suite <suite> -Repeats <K>
-    and reads the newest artifacts/harness-repeat/<stamp>-<suite>.json it produced.
-
-    Honesty rules baked in:
-      - Partial runs are never dropped silently; their counts are surfaced per cell.
-      - K and stddev sit next to every number.
-      - Recommendation prefers baseline on ties within 1 stddev: scaffolding must EARN
-        its extra latency before we recommend it.
-
-    This script does NOT embed expected answers. It only aggregates harness output.
+    Use -ReuseSummaryPath to regenerate a report from one completed
+    harness-repeat summary without loading the model or rerunning inference.
 
 .EXAMPLE
     dev/model-intake.ps1 -ModelId liquid/lfm2.5-8b-a1b
 .EXAMPLE
     dev/model-intake.ps1 -ModelId my/new-model -Suites python-probe,solver-probe -Repeats 5
 .EXAMPLE
-    dev/model-intake.ps1 -ModelId lfm2.5-8b-a1b -Suites python-probe -Repeats 1 -Arms baseline -ReuseSummaryPath artifacts/harness-repeat/20260709_215509-python-probe.json
+    dev/model-intake.ps1 -ModelId lfm2.5-8b-a1b -Suites python-probe -Repeats 1 -ReuseSummaryPath artifacts/harness-repeat/20260709_215509-python-probe.json
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -39,9 +26,8 @@ param(
 
     [string[]]$Suites = @('python-probe', 'solver-probe'),
 
+    [ValidateRange(1, 100)]
     [int]$Repeats = 3,
-
-    [string[]]$Arms = @('baseline', 'sc', 'sc-tools'),
 
     [string]$SettingsTemplate = '',
 
@@ -51,684 +37,296 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# GatekeeperModelId defaults to the primary model id (PS 5.1 has no ?? / ternary).
 if ([string]::IsNullOrWhiteSpace($GatekeeperModelId)) {
     $GatekeeperModelId = $ModelId
 }
+if (@($Suites).Count -eq 0 -or @($Suites | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
+    throw 'At least one non-empty suite name is required.'
+}
+if (-not [string]::IsNullOrWhiteSpace($ReuseSummaryPath) -and @($Suites).Count -ne 1) {
+    throw '-ReuseSummaryPath requires exactly one suite.'
+}
 
-$RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$RepeatScript = Join-Path $RepoRoot 'dev/harness-repeat.ps1'
+$RepeatSummaryDir = Join-Path $RepoRoot 'artifacts/harness-repeat'
+$script:HarnessBuildPrepared = $false
 Set-Location $RepoRoot
 
-# ---------------------------------------------------------------------------
-# Arm definitions. Each arm is a named set of scaffolding env vars.
-#   baseline : both SC flags cleared (the honest floor).
-#   sc       : CoT self-consistency, 5 samples.
-#   sc-tools : tool-aware self-consistency, 3 samples (requires ST_SELF_CONSISTENCY too).
-# ST_HARNESS_SKIP_PREWARM and ST_HARNESS_DISABLE_FASTPATH are ALWAYS on for every arm
-# (including baseline) so the harness measures the model, not the pre-LLM shortcuts.
-# ---------------------------------------------------------------------------
-function Get-ArmEnv {
-    param([string]$arm)
-    switch ($arm) {
-        'baseline' {
-            return [pscustomobject]@{
-                ST_SELF_CONSISTENCY       = $null
-                ST_SELF_CONSISTENCY_TOOLS = $null
-            }
-        }
-        'sc' {
-            return [pscustomobject]@{
-                ST_SELF_CONSISTENCY       = '5'
-                ST_SELF_CONSISTENCY_TOOLS = $null
-            }
-        }
-        'sc-tools' {
-            return [pscustomobject]@{
-                ST_SELF_CONSISTENCY       = '3'
-                ST_SELF_CONSISTENCY_TOOLS = '1'
-            }
-        }
-        default {
-            throw "Unknown arm '$arm'. Known arms: baseline, sc, sc-tools."
-        }
+function Set-JsonProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)]$Value
+    )
+    if ($Object.PSObject.Properties.Name -contains $Name) {
+        $Object.$Name = $Value
+    }
+    else {
+        $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
     }
 }
 
-# Human-readable env-var list for an arm (used in report.md recommendations).
-function Get-ArmEnvDescription {
-    param([string]$arm)
-    $armEnv = Get-ArmEnv -arm $arm
-    $parts = New-Object System.Collections.ArrayList
-    # Always-on measurement flags come first so the reader can copy the full set.
-    [void]$parts.Add('ST_HARNESS_SKIP_PREWARM=1')
-    [void]$parts.Add('ST_HARNESS_DISABLE_FASTPATH=1')
-    if ($null -ne $armEnv.ST_SELF_CONSISTENCY) {
-        [void]$parts.Add(('ST_SELF_CONSISTENCY={0}' -f $armEnv.ST_SELF_CONSISTENCY))
-    }
-    else {
-        [void]$parts.Add('ST_SELF_CONSISTENCY (unset)')
-    }
-    if ($null -ne $armEnv.ST_SELF_CONSISTENCY_TOOLS) {
-        [void]$parts.Add(('ST_SELF_CONSISTENCY_TOOLS={0}' -f $armEnv.ST_SELF_CONSISTENCY_TOOLS))
-    }
-    else {
-        [void]$parts.Add('ST_SELF_CONSISTENCY_TOOLS (unset)')
-    }
-    return ($parts.ToArray() -join '; ')
-}
-
-# Apply an arm's env vars into the current process env. $null clears the var.
-function Set-ArmEnvironment {
-    param([string]$arm)
-    $armEnv = Get-ArmEnv -arm $arm
-
-    # Always-on measurement flags (every arm, baseline included).
-    $env:ST_HARNESS_SKIP_PREWARM = '1'
-    $env:ST_HARNESS_DISABLE_FASTPATH = '1'
-
-    if ($null -eq $armEnv.ST_SELF_CONSISTENCY) {
-        Remove-Item Env:ST_SELF_CONSISTENCY -ErrorAction SilentlyContinue
-    }
-    else {
-        $env:ST_SELF_CONSISTENCY = $armEnv.ST_SELF_CONSISTENCY
-    }
-
-    if ($null -eq $armEnv.ST_SELF_CONSISTENCY_TOOLS) {
-        Remove-Item Env:ST_SELF_CONSISTENCY_TOOLS -ErrorAction SilentlyContinue
-    }
-    else {
-        $env:ST_SELF_CONSISTENCY_TOOLS = $armEnv.ST_SELF_CONSISTENCY_TOOLS
-    }
-}
-
-# ---------------------------------------------------------------------------
-# Settings discovery + patching.
-# Default template = the real settings file the runtime reads, per SettingsManager.cs:
-#   %LOCALAPPDATA%\SirThaddeus\settings.json
-# We copy it to a temp dir, set llm.model + llm.gatekeeperModelId, force
-# llm.temperature = 0, and point ST_SETTINGS_PATH at the copy.
-# ---------------------------------------------------------------------------
 function Resolve-SettingsTemplate {
-    param([string]$explicit)
-    if (-not [string]::IsNullOrWhiteSpace($explicit)) {
-        if (-not (Test-Path $explicit)) {
-            throw "SettingsTemplate '$explicit' does not exist."
+    param([string]$ExplicitPath)
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        if (-not (Test-Path -LiteralPath $ExplicitPath)) {
+            throw "SettingsTemplate '$ExplicitPath' does not exist."
         }
-        return (Resolve-Path $explicit).Path
+        return (Resolve-Path -LiteralPath $ExplicitPath).Path
     }
+
     $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
     $candidate = Join-Path $localAppData 'SirThaddeus/settings.json'
-    if (-not (Test-Path $candidate)) {
-        throw ("Could not discover a settings template. Expected the real settings file at " +
-            "'$candidate' (per SettingsManager.cs). Pass -SettingsTemplate <path> to override.")
+    if (-not (Test-Path -LiteralPath $candidate)) {
+        throw "Could not discover settings at '$candidate'. Pass -SettingsTemplate to override."
     }
-    return (Resolve-Path $candidate).Path
+    return (Resolve-Path -LiteralPath $candidate).Path
 }
 
 function New-PatchedSettings {
     param(
-        [string]$templatePath,
-        [string]$modelId,
-        [string]$gatekeeperModelId,
-        [string]$destPath
+        [string]$TemplatePath,
+        [string]$PrimaryModelId,
+        [string]$RouterModelId,
+        [string]$DestinationPath
     )
-    $raw = Get-Content -Path $templatePath -Raw -Encoding UTF8
-    $settings = $raw | ConvertFrom-Json
 
-    # Ensure the llm block exists before patching it.
+    $settings = Get-Content -LiteralPath $TemplatePath -Raw -Encoding UTF8 | ConvertFrom-Json
     if (-not ($settings.PSObject.Properties.Name -contains 'llm') -or $null -eq $settings.llm) {
-        $settings | Add-Member -NotePropertyName 'llm' -NotePropertyValue ([pscustomobject]@{}) -Force
+        $settings | Add-Member -NotePropertyName llm -NotePropertyValue ([pscustomobject]@{}) -Force
     }
+    Set-JsonProperty -Object $settings.llm -Name model -Value $PrimaryModelId
+    Set-JsonProperty -Object $settings.llm -Name gatekeeperModelId -Value $RouterModelId
+    Set-JsonProperty -Object $settings.llm -Name temperature -Value 0
 
-    Set-JsonProperty -object $settings.llm -name 'model' -value $modelId
-    Set-JsonProperty -object $settings.llm -name 'gatekeeperModelId' -value $gatekeeperModelId
-    # Temperature MUST stay 0 for measurement determinism.
-    Set-JsonProperty -object $settings.llm -name 'temperature' -value 0
-
-    $json = $settings | ConvertTo-Json -Depth 32
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($destPath, $json, $utf8NoBom)
+    [IO.File]::WriteAllText(
+        $DestinationPath,
+        ($settings | ConvertTo-Json -Depth 32),
+        $utf8NoBom)
 }
 
-# Add-or-overwrite a property on a PSCustomObject (ConvertFrom-Json gives PSCustomObject).
-function Set-JsonProperty {
-    param(
-        [Parameter(Mandatory = $true)]$object,
-        [Parameter(Mandatory = $true)][string]$name,
-        [Parameter(Mandatory = $true)]$value
-    )
-    if ($object.PSObject.Properties.Name -contains $name) {
-        $object.$name = $value
-    }
-    else {
-        $object | Add-Member -NotePropertyName $name -NotePropertyValue $value -Force
-    }
-}
-
-# ---------------------------------------------------------------------------
-# LM Studio model availability.
-# ---------------------------------------------------------------------------
-function Assert-LmsAvailable {
-    $lms = Get-Command lms -ErrorAction SilentlyContinue
-    if ($null -eq $lms) {
-        throw ("LM Studio CLI 'lms' was not found on PATH. Install/enable it, or start LM Studio, " +
-            "before running the intake rig.")
+function Assert-LmStudioCli {
+    if ($null -eq (Get-Command lms -ErrorAction SilentlyContinue)) {
+        throw "LM Studio CLI 'lms' was not found on PATH. Start LM Studio and enable its CLI."
     }
 }
 
 function Test-ModelLoaded {
-    param([string]$modelId)
-    # `lms ps` lists loaded models. We match the model id as a substring of its output.
-    $psOutput = & lms ps 2>&1 | ForEach-Object { [string]$_ }
-    if ($null -eq $psOutput) { return $false }
-    $joined = ($psOutput -join "`n")
-    return $joined.Contains($modelId)
+    param([string]$RequestedModelId)
+    $lines = & lms ps 2>&1 | ForEach-Object { [string]$_ }
+    return (($lines -join "`n").Contains($RequestedModelId))
 }
 
 function Ensure-ModelLoaded {
-    param([string]$modelId)
-    if (Test-ModelLoaded -modelId $modelId) {
-        Write-Host ("Model '{0}' already loaded (per lms ps)." -f $modelId) -ForegroundColor Green
+    param([string]$RequestedModelId)
+    if (Test-ModelLoaded -RequestedModelId $RequestedModelId) {
+        Write-Host "Model '$RequestedModelId' is already loaded." -ForegroundColor Green
         return
     }
-    Write-Host ("Model '{0}' not loaded. Loading via lms..." -f $modelId) -ForegroundColor Yellow
-    # lms writes progress and even its success line to stderr. Under newer
-    # PowerShell native-error semantics that becomes a terminating ErrorRecord
-    # despite exit code 0, so capture the actual process exit code explicitly.
+
+    Write-Host "Loading '$RequestedModelId' through LM Studio..." -ForegroundColor Yellow
     $previousErrorActionPreference = $ErrorActionPreference
-    $nativePreferenceVariable = Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
-    $previousNativePreference = if ($null -ne $nativePreferenceVariable) { $nativePreferenceVariable.Value } else { $null }
+    $nativePreference = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $previousNativePreference = if ($null -ne $nativePreference) { $nativePreference.Value } else { $null }
     try {
         $ErrorActionPreference = 'Continue'
-        if ($null -ne $nativePreferenceVariable) {
-            $PSNativeCommandUseErrorActionPreference = $false
-        }
-        & lms load $modelId -y 2>&1 | ForEach-Object {
-            $line = if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { [string]$_ }
-            Write-Host $line
-        }
-        $loadExitCode = $LASTEXITCODE
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        & lms load $RequestedModelId -y 2>&1 | ForEach-Object { Write-Host $_.ToString() }
+        $exitCode = $LASTEXITCODE
     }
     finally {
-        if ($null -ne $nativePreferenceVariable) {
+        if ($null -ne $nativePreference) {
             $PSNativeCommandUseErrorActionPreference = $previousNativePreference
         }
         $ErrorActionPreference = $previousErrorActionPreference
     }
-    if ($loadExitCode -ne 0) {
-        throw ("lms load '$modelId' failed (exit $loadExitCode). Confirm the model id is correct " +
-            "and downloaded (lms ls).")
+
+    if ($exitCode -ne 0 -or -not (Test-ModelLoaded -RequestedModelId $RequestedModelId)) {
+        throw "LM Studio failed to load '$RequestedModelId' reliably (exit $exitCode)."
     }
-    if (-not (Test-ModelLoaded -modelId $modelId)) {
-        throw ("Loaded '$modelId' but it does not appear in lms ps. Aborting so we never measure the " +
-            "wrong model.")
-    }
-    Write-Host ("Model '{0}' loaded." -f $modelId) -ForegroundColor Green
 }
 
-# ---------------------------------------------------------------------------
-# Suite item counts (for context in the report). Matches harness-repeat.ps1's
-# expected-item logic: tools/SirThaddeus.Harness/Suites/<suite>/*.yaml.
-# ---------------------------------------------------------------------------
 function Get-SuiteItemCount {
-    param([string]$suite)
-    $suiteDir = Join-Path $RepoRoot ("tools/SirThaddeus.Harness/Suites/{0}" -f $suite)
-    if (-not (Test-Path $suiteDir)) { return 0 }
-    return @(Get-ChildItem -Path $suiteDir -Filter *.yaml -File -ErrorAction SilentlyContinue).Count
+    param([string]$Suite)
+    $suiteDir = Join-Path $RepoRoot "tools/SirThaddeus.Harness/Suites/$Suite"
+    if (-not (Test-Path -LiteralPath $suiteDir)) { return 0 }
+    return @(Get-ChildItem -LiteralPath $suiteDir -Filter *.yaml -File).Count
 }
 
-# ---------------------------------------------------------------------------
-# Run one arm x suite and collect the harness-repeat summary JSON.
-# ---------------------------------------------------------------------------
-$RepeatScript = Join-Path $RepoRoot 'dev/harness-repeat.ps1'
-$RepeatSummaryDir = Join-Path $RepoRoot 'artifacts/harness-repeat'
-$script:HarnessBuildPrepared = $false
-
-function Get-NewestSummaryStamp {
-    param([string]$suite)
-    if (-not (Test-Path $RepeatSummaryDir)) { return '' }
-    $pattern = ('*-{0}.json' -f $suite)
-    $newest = Get-ChildItem -Path $RepeatSummaryDir -Filter $pattern -File -ErrorAction SilentlyContinue |
+function Get-NewestSummaryPath {
+    param([string]$Suite)
+    if (-not (Test-Path -LiteralPath $RepeatSummaryDir)) { return '' }
+    $file = Get-ChildItem -LiteralPath $RepeatSummaryDir -Filter "*-$Suite.json" -File |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
-    if ($null -eq $newest) { return '' }
-    return $newest.FullName
+    return if ($null -eq $file) { '' } else { $file.FullName }
 }
 
-function Invoke-ArmSuite {
-    param(
-        [string]$arm,
-        [string]$suite,
-        [int]$k
-    )
-    Set-ArmEnvironment -arm $arm
+function Invoke-SuiteMeasurement {
+    param([string]$Suite, [int]$RepeatCount)
 
-    $beforePath = Get-NewestSummaryStamp -suite $suite
-
+    $before = Get-NewestSummaryPath -Suite $Suite
     Write-Host ""
-    Write-Host ("--- arm={0} suite={1} repeats={2} ---" -f $arm, $suite, $k) -ForegroundColor Cyan
-    Write-Host ("    env: {0}" -f (Get-ArmEnvDescription -arm $arm)) -ForegroundColor DarkGray
+    Write-Host "--- baseline suite=$Suite repeats=$RepeatCount ---" -ForegroundColor Cyan
 
-    $repeatArgs = @('-Suite', $suite, '-Repeats', $k)
-    if ($script:HarnessBuildPrepared) {
-        $repeatArgs += '-SkipBuild'
-    }
-
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $RepeatScript @repeatArgs 2>&1 |
-        ForEach-Object {
-            $text = $_
-            if ($_ -is [System.Management.Automation.ErrorRecord]) { $text = $_.ToString() }
-            Write-Host ([string]$text)
-        }
+    $arguments = @('-Suite', $Suite, '-Repeats', $RepeatCount)
+    if ($script:HarnessBuildPrepared) { $arguments += '-SkipBuild' }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $RepeatScript @arguments 2>&1 |
+        ForEach-Object { Write-Host $_.ToString() }
     if ($LASTEXITCODE -ne 0) {
-        throw ("harness-repeat failed for suite '{0}' / arm '{1}' with exit code {2}." -f $suite, $arm, $LASTEXITCODE)
+        throw "harness-repeat failed for suite '$Suite' with exit code $LASTEXITCODE."
     }
     $script:HarnessBuildPrepared = $true
 
-    # Locate the summary JSON this invocation produced: newest matching file that is
-    # different from the pre-invocation newest.
-    $afterPath = Get-NewestSummaryStamp -suite $suite
-    if ([string]::IsNullOrWhiteSpace($afterPath)) {
-        throw ("No harness-repeat summary JSON found for suite '$suite' after arm '$arm'. " +
-            "Expected a new file under $RepeatSummaryDir.")
+    $after = Get-NewestSummaryPath -Suite $Suite
+    if ([string]::IsNullOrWhiteSpace($after) -or $after -eq $before) {
+        throw "No new harness-repeat summary was produced for suite '$Suite'."
     }
-    if ($afterPath -eq $beforePath) {
-        throw ("harness-repeat did not produce a NEW summary for suite '$suite' / arm '$arm' " +
-            "(newest is still '$afterPath'). Aborting rather than reusing a stale result.")
-    }
-
-    $summaryRaw = Get-Content -Path $afterPath -Raw -Encoding UTF8
-    $summary = $summaryRaw | ConvertFrom-Json
     return [pscustomobject]@{
-        arm         = $arm
-        suite       = $suite
-        summaryPath = $afterPath
-        summary     = $summary
+        suite = $Suite
+        summary_path = $after
+        summary = (Get-Content -LiteralPath $after -Raw -Encoding UTF8 | ConvertFrom-Json)
     }
 }
 
-# ---------------------------------------------------------------------------
-# Formatting helpers.
-# ---------------------------------------------------------------------------
-function Format-RatePercent {
-    param([double]$rate)
-    return ('{0:0.0}%' -f ($rate * 100.0))
-}
-
-# "rate+/-stddev" cell, e.g. "83.3%+/-10.5%". Both numbers come straight from the
-# repeat JSON's overall block (item-weighted rate; stddev over complete runs).
-function Format-Cell {
-    param($overall)
-    $rate = [double]$overall.mean_pass_rate
-    $stddev = [double]$overall.stddev_pass_rate
-    return ('{0}+/-{1}' -f (Format-RatePercent -rate $rate), (Format-RatePercent -rate $stddev))
-}
-
-function Get-ArmName {
-    param($card)
-    if ($null -eq $card) { return '' }
-    $property = $card.PSObject.Properties['arm']
-    if ($null -eq $property -or $null -eq $property.Value) { return '' }
-    return [string]$property.Value
-}
-
-function Get-CardValue {
-    param($card, [string]$name)
-    if ($null -eq $card) { return $null }
-    $property = $card.PSObject.Properties[$name]
-    if ($null -eq $property) { return $null }
-    return $property.Value
-}
-
-function Get-ArmCards {
-    param($value)
-    if ($null -eq $value) { return }
-
-    $armProperty = $value.PSObject.Properties['arm']
-    $rateProperty = $value.PSObject.Properties['mean_pass_rate']
-    if ($null -ne $armProperty -and $null -ne $rateProperty) {
-        Write-Output -NoEnumerate $value
-        return
-    }
-
-    if ($value -is [System.Collections.IEnumerable] -and $value -isnot [string]) {
-        foreach ($item in $value) {
-            Get-ArmCards -value $item
-        }
-    }
-}
-
-# Count partial runs recorded in a summary's runs[] array.
 function Get-PartialRunCount {
-    param($summary)
-    $count = 0
-    if ($null -eq $summary) { return 0 }
-    if (-not ($summary.PSObject.Properties.Name -contains 'runs')) { return 0 }
-    foreach ($run in @($summary.runs)) {
-        if ($run.PSObject.Properties.Name -contains 'partial' -and $run.partial) {
-            $count = $count + 1
-        }
-    }
-    return $count
+    param($Summary)
+    if ($null -eq $Summary -or -not ($Summary.PSObject.Properties.Name -contains 'runs')) { return 0 }
+    return @($Summary.runs | Where-Object { $_.PSObject.Properties.Name -contains 'partial' -and $_.partial }).Count
 }
 
-# ---------------------------------------------------------------------------
-# Main.
-# ---------------------------------------------------------------------------
+function Format-Percent {
+    param([double]$Value)
+    return ('{0:0.0}%' -f ($Value * 100.0))
+}
+
+if (-not (Test-Path -LiteralPath $RepeatScript)) {
+    throw "harness-repeat script not found at '$RepeatScript'."
+}
+
 Write-Host ""
-Write-Host "========================================================================" -ForegroundColor Cyan
-Write-Host "MODEL INTAKE RIG" -ForegroundColor Cyan
-Write-Host ("model:      {0}" -f $ModelId) -ForegroundColor Cyan
-Write-Host ("gatekeeper: {0}" -f $GatekeeperModelId) -ForegroundColor Cyan
-Write-Host ("suites:     {0}" -f ($Suites -join ', ')) -ForegroundColor Cyan
-Write-Host ("arms:       {0}" -f ($Arms -join ', ')) -ForegroundColor Cyan
-Write-Host ("repeats:    {0}" -f $Repeats) -ForegroundColor Cyan
-Write-Host "========================================================================" -ForegroundColor Cyan
+Write-Host '========================================================================' -ForegroundColor Cyan
+Write-Host 'MODEL INTAKE - PRODUCTION BASELINE' -ForegroundColor Cyan
+Write-Host "model:      $ModelId" -ForegroundColor Cyan
+Write-Host "gatekeeper: $GatekeeperModelId" -ForegroundColor Cyan
+Write-Host "suites:     $($Suites -join ', ')" -ForegroundColor Cyan
+Write-Host "repeats:    $Repeats" -ForegroundColor Cyan
+Write-Host '========================================================================' -ForegroundColor Cyan
 
-if (-not (Test-Path $RepeatScript)) {
-    throw "harness-repeat script not found at $RepeatScript."
-}
+$previousSettingsPath = $env:ST_SETTINGS_PATH
+$previousSkipPrewarm = $env:ST_HARNESS_SKIP_PREWARM
+$previousDisableFastPath = $env:ST_HARNESS_DISABLE_FASTPATH
+$tempRoot = $null
 
-# Validate arms early so we fail before touching LM Studio.
-foreach ($arm in $Arms) {
-    [void](Get-ArmEnv -arm $arm)
-}
-
-# 1) Discover + patch settings into a temp dir; point ST_SETTINGS_PATH at it.
-$templatePath = Resolve-SettingsTemplate -explicit $SettingsTemplate
-Write-Host ("Settings template: {0}" -f $templatePath) -ForegroundColor DarkGray
-
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('st-model-intake-' + [System.Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-$patchedSettingsPath = Join-Path $tempRoot 'settings.json'
-New-PatchedSettings -templatePath $templatePath -modelId $ModelId -gatekeeperModelId $GatekeeperModelId -destPath $patchedSettingsPath
-$env:ST_SETTINGS_PATH = $patchedSettingsPath
-Write-Host ("Patched settings: {0}" -f $patchedSettingsPath) -ForegroundColor DarkGray
-Write-Host ("ST_SETTINGS_PATH -> {0}" -f $patchedSettingsPath) -ForegroundColor DarkGray
-
-# 2) Ensure LM Studio has the model loaded.
-if ([string]::IsNullOrWhiteSpace($ReuseSummaryPath)) {
-    Assert-LmsAvailable
-    Ensure-ModelLoaded -modelId $ModelId
-}
-
-# 3) Run the matrix: arm x suite.
-# results[suite][arm] = the collected pscustomobject from Invoke-ArmSuite.
-$results = @{}
-foreach ($suite in $Suites) {
-    $results[$suite] = @{}
-}
-
-if (-not [string]::IsNullOrWhiteSpace($ReuseSummaryPath)) {
-    if (@($Suites).Count -ne 1 -or @($Arms).Count -ne 1) {
-        throw '-ReuseSummaryPath requires exactly one suite and one arm.'
+try {
+    $measurements = @()
+    if (-not [string]::IsNullOrWhiteSpace($ReuseSummaryPath)) {
+        if (-not (Test-Path -LiteralPath $ReuseSummaryPath)) {
+            throw "ReuseSummaryPath '$ReuseSummaryPath' does not exist."
+        }
+        $resolved = (Resolve-Path -LiteralPath $ReuseSummaryPath).Path
+        $summary = Get-Content -LiteralPath $resolved -Raw -Encoding UTF8 | ConvertFrom-Json
+        $suite = @($Suites)[0]
+        if (-not [string]::Equals([string]$summary.suite, $suite, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Reused summary suite '$($summary.suite)' does not match '$suite'."
+        }
+        if ([int]$summary.repeats -ne $Repeats) {
+            throw "Reused summary has $($summary.repeats) repeats; -Repeats is $Repeats."
+        }
+        $measurements = @([pscustomobject]@{ suite = $suite; summary_path = $resolved; summary = $summary })
+        Write-Host "Reusing completed summary: $resolved" -ForegroundColor Yellow
     }
-    if (-not (Test-Path $ReuseSummaryPath)) {
-        throw "ReuseSummaryPath '$ReuseSummaryPath' does not exist."
-    }
+    else {
+        $template = Resolve-SettingsTemplate -ExplicitPath $SettingsTemplate
+        $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('st-model-intake-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+        $patchedSettings = Join-Path $tempRoot 'settings.json'
+        New-PatchedSettings -TemplatePath $template -PrimaryModelId $ModelId -RouterModelId $GatekeeperModelId -DestinationPath $patchedSettings
+        $env:ST_SETTINGS_PATH = $patchedSettings
+        $env:ST_HARNESS_SKIP_PREWARM = '1'
+        $env:ST_HARNESS_DISABLE_FASTPATH = '1'
 
-    $resolvedSummaryPath = (Resolve-Path $ReuseSummaryPath).Path
-    $reusedSummary = Get-Content -Path $resolvedSummaryPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $suite = @($Suites)[0]
-    $arm = @($Arms)[0]
-    if (-not [string]::Equals([string]$reusedSummary.suite, [string]$suite, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Reused summary suite '$($reusedSummary.suite)' does not match requested suite '$suite'."
-    }
-    if ([int]$reusedSummary.repeats -ne $Repeats) {
-        throw "Reused summary has $($reusedSummary.repeats) repeat(s), but -Repeats is $Repeats. Pass the matching value."
-    }
-    $results[$suite][$arm] = [pscustomobject]@{
-        arm         = $arm
-        suite       = $suite
-        summaryPath = $resolvedSummaryPath
-        summary     = $reusedSummary
-    }
-    Write-Host ("Reusing completed summary: {0}" -f $resolvedSummaryPath) -ForegroundColor Yellow
-}
-else {
-    foreach ($arm in $Arms) {
+        Assert-LmStudioCli
+        Ensure-ModelLoaded -RequestedModelId $ModelId
         foreach ($suite in $Suites) {
-            # Keep the explicit wrapper returned last. Native child-process
-            # adapters may also emit incidental success-stream records.
-            $collected = @(Invoke-ArmSuite -arm $arm -suite $suite -k $Repeats)[-1]
-            $results[$suite][$arm] = $collected
+            $measurements += Invoke-SuiteMeasurement -Suite $suite -RepeatCount $Repeats
         }
+    }
+
+    $suiteCards = foreach ($measurement in $measurements) {
+        $summary = $measurement.summary
+        [pscustomobject]@{
+            suite = $measurement.suite
+            item_count = Get-SuiteItemCount -Suite $measurement.suite
+            repeats = $summary.repeats
+            mean_pass_rate = $summary.overall.mean_pass_rate
+            stddev_pass_rate = $summary.overall.stddev_pass_rate
+            aggregation = $summary.overall.aggregation
+            total_passes = $summary.overall.total_passes
+            total_item_results = $summary.overall.total_item_results
+            partial_run_count = Get-PartialRunCount -Summary $summary
+            summary_path = $measurement.summary_path
+        }
+    }
+
+    $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $safeModel = $ModelId -replace '[^A-Za-z0-9._-]', '_'
+    $outputDirectory = Join-Path $RepoRoot "artifacts/model-intake/$stamp-$safeModel"
+    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+
+    $scorecard = [pscustomobject]@{
+        schema_version = 2
+        generated_utc = (Get-Date).ToUniversalTime().ToString('O')
+        mode = 'production-baseline'
+        model_id = $ModelId
+        gatekeeper_id = $GatekeeperModelId
+        repeats = $Repeats
+        suites_requested = @($Suites)
+        honesty_note = 'Baseline production behavior only. Partial runs are surfaced and no experimental reasoning arms are retained.'
+        suites = @($suiteCards)
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $scorecardPath = Join-Path $outputDirectory 'scorecard.json'
+    [IO.File]::WriteAllText($scorecardPath, ($scorecard | ConvertTo-Json -Depth 10), $utf8NoBom)
+
+    $report = New-Object System.Collections.ArrayList
+    [void]$report.Add('# Model intake report')
+    [void]$report.Add('')
+    [void]$report.Add("- Model: ``$ModelId``")
+    [void]$report.Add("- Gatekeeper: ``$GatekeeperModelId``")
+    [void]$report.Add("- Repeats: $Repeats")
+    [void]$report.Add('- Mode: production baseline')
+    [void]$report.Add('')
+    [void]$report.Add('| Suite | Items | Pass rate | Stddev | Partial runs |')
+    [void]$report.Add('|---|---:|---:|---:|---:|')
+    foreach ($card in $suiteCards) {
+        [void]$report.Add(('| {0} | {1} | {2} | {3} | {4} |' -f
+            $card.suite,
+            $card.item_count,
+            (Format-Percent -Value ([double]$card.mean_pass_rate)),
+            (Format-Percent -Value ([double]$card.stddev_pass_rate)),
+            $card.partial_run_count))
+    }
+    [void]$report.Add('')
+    [void]$report.Add('This report measures the supported production baseline. Evaluate new strategies on short-lived branches with predeclared promotion gates; do not store rejected behavior behind dormant flags.')
+
+    $reportPath = Join-Path $outputDirectory 'report.md'
+    [IO.File]::WriteAllText($reportPath, (($report.ToArray()) -join "`r`n"), $utf8NoBom)
+
+    Write-Host ""
+    Write-Host "Scorecard: $scorecardPath" -ForegroundColor Green
+    Write-Host "Report:    $reportPath" -ForegroundColor Green
+}
+finally {
+    $env:ST_SETTINGS_PATH = $previousSettingsPath
+    $env:ST_HARNESS_SKIP_PREWARM = $previousSkipPrewarm
+    $env:ST_HARNESS_DISABLE_FASTPATH = $previousDisableFastPath
+    if ($null -ne $tempRoot -and (Test-Path -LiteralPath $tempRoot)) {
+        $temporarySettings = Join-Path $tempRoot 'settings.json'
+        Remove-Item -LiteralPath $temporarySettings -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tempRoot -Force -ErrorAction SilentlyContinue
     }
 }
-
-# 4) Build the scorecard object.
-$stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$sanitizedModel = ($ModelId -replace '[^A-Za-z0-9._-]', '_')
-$outDir = Join-Path $RepoRoot ('artifacts/model-intake/{0}-{1}' -f $stamp, $sanitizedModel)
-New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-
-$scoreSuites = New-Object System.Collections.ArrayList
-foreach ($suite in $Suites) {
-    $suiteItemCount = Get-SuiteItemCount -suite $suite
-    $armCards = New-Object System.Collections.ArrayList
-    foreach ($arm in $Arms) {
-        $collected = $results[$suite][$arm]
-        $summary = $collected.summary
-        $overall = $summary.overall
-
-        $perItem = New-Object System.Collections.ArrayList
-        foreach ($item in @($summary.per_item)) {
-            [void]$perItem.Add([pscustomobject]@{
-                id         = $item.id
-                passes     = $item.passes
-                runs       = $item.runs
-                mean_score = $item.mean_score
-            })
-        }
-
-        $partialCount = Get-PartialRunCount -summary $summary
-
-        [void]$armCards.Add([pscustomobject]@{
-            arm                = $arm
-            env                = (Get-ArmEnvDescription -arm $arm)
-            repeats            = $summary.repeats
-            mean_pass_rate     = $overall.mean_pass_rate
-            stddev_pass_rate   = $overall.stddev_pass_rate
-            aggregation        = $overall.aggregation
-            total_passes       = $overall.total_passes
-            total_item_results = $overall.total_item_results
-            stddev_runs_used   = $overall.stddev_runs_used
-            partial_run_count  = $partialCount
-            per_item           = @($perItem.ToArray())
-            summary_path       = $collected.summaryPath
-        })
-    }
-    [void]$scoreSuites.Add([pscustomobject]@{
-        suite      = $suite
-        item_count = $suiteItemCount
-        arms       = @($armCards.ToArray())
-    })
-}
-
-# 5) Recommendation per suite.
-# Rule: pick the arm with the highest item-weighted mean pass-rate, BUT prefer
-# baseline on ties within 1 stddev - scaffolding must earn its latency. "Within 1
-# stddev" uses the winning arm's stddev as the tolerance band.
-$recommendations = New-Object System.Collections.ArrayList
-foreach ($suiteCard in $scoreSuites) {
-    # A function in the measurement path may emit incidental success-stream
-    # records (notably native stderr wrappers in Windows PowerShell). Keep only
-    # the typed arm cards here so a valid single-arm run can still report.
-    $suiteArmCards = @(Get-ArmCards -value $suiteCard.arms)
-    if ($suiteArmCards.Count -eq 0) {
-        throw ("Suite '{0}' produced no valid arm cards; refusing to write a misleading report." -f $suiteCard.suite)
-    }
-
-    # Best arm by raw rate.
-    $best = $null
-    foreach ($armCard in $suiteArmCards) {
-        if ($null -eq $best) { $best = $armCard; continue }
-        if ([double](Get-CardValue -card $armCard -name 'mean_pass_rate') -gt
-            [double](Get-CardValue -card $best -name 'mean_pass_rate')) { $best = $armCard }
-    }
-
-    # Baseline card (if baseline was one of the arms tested).
-    $baselineCard = $null
-    foreach ($armCard in $suiteArmCards) {
-        if ((Get-ArmName -card $armCard) -eq 'baseline') { $baselineCard = $armCard }
-    }
-
-    $chosen = $best
-    $reason = ('highest item-weighted pass-rate ({0})' -f
-        (Format-RatePercent -rate ([double](Get-CardValue -card $best -name 'mean_pass_rate'))))
-
-    if ($null -ne $baselineCard -and (Get-ArmName -card $best) -ne 'baseline') {
-        # Tolerance band = winning arm's stddev. If baseline is within that band of
-        # the winner, prefer baseline (cheaper, lower latency, no extra sampling).
-        $band = [double](Get-CardValue -card $best -name 'stddev_pass_rate')
-        $gap = [double](Get-CardValue -card $best -name 'mean_pass_rate') -
-            [double](Get-CardValue -card $baselineCard -name 'mean_pass_rate')
-        if ($gap -le $band) {
-            $chosen = $baselineCard
-            $reason = ('baseline is within 1 stddev of the best arm ({0}); gap {1} <= band {2}. ' +
-                'Scaffolding must earn its latency, so baseline wins the tie.') -f `
-                (Get-ArmName -card $best), (Format-RatePercent -rate $gap), (Format-RatePercent -rate $band)
-        }
-        else {
-            $reason = ('{0} beats baseline by {1}, more than its {2} stddev band' -f `
-                (Get-ArmName -card $best), (Format-RatePercent -rate $gap), (Format-RatePercent -rate $band))
-        }
-    }
-
-    # Flag any arm on this suite that had partial runs.
-    $flagged = New-Object System.Collections.ArrayList
-    foreach ($armCard in $suiteArmCards) {
-        if ([int](Get-CardValue -card $armCard -name 'partial_run_count') -gt 0) {
-            [void]$flagged.Add([pscustomobject]@{
-                arm               = (Get-ArmName -card $armCard)
-                partial_run_count = (Get-CardValue -card $armCard -name 'partial_run_count')
-                repeats           = (Get-CardValue -card $armCard -name 'repeats')
-            })
-        }
-    }
-
-    [void]$recommendations.Add([pscustomobject]@{
-        suite            = $suiteCard.suite
-        recommended_arm  = (Get-ArmName -card $chosen)
-        env              = (Get-CardValue -card $chosen -name 'env')
-        reason           = $reason
-        chosen_rate      = (Get-CardValue -card $chosen -name 'mean_pass_rate')
-        chosen_stddev    = (Get-CardValue -card $chosen -name 'stddev_pass_rate')
-        best_arm         = (Get-ArmName -card $best)
-        best_rate        = (Get-CardValue -card $best -name 'mean_pass_rate')
-        partials_flagged = @($flagged.ToArray())
-    })
-}
-
-$scorecard = [pscustomobject]@{
-    generated_utc     = (Get-Date).ToUniversalTime().ToString('O')
-    model_id          = $ModelId
-    gatekeeper_id     = $GatekeeperModelId
-    repeats           = $Repeats
-    arms              = @($Arms)
-    suites_requested  = @($Suites)
-    settings_template = $templatePath
-    patched_settings  = $patchedSettingsPath
-    honesty_note      = ('All numbers item-weighted over K complete runs; suites are closed-book ' +
-        'compute/reasoning probes unless labeled open-book. Partial-run counts are surfaced per cell.')
-    suites            = @($scoreSuites.ToArray())
-    recommendations   = @($recommendations.ToArray())
-}
-
-# 6) Write scorecard.json (UTF-8 no BOM, to match harness-repeat's convention).
-$scorecardPath = Join-Path $outDir 'scorecard.json'
-$scorecardJson = $scorecard | ConvertTo-Json -Depth 12
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllText($scorecardPath, $scorecardJson, $utf8NoBom)
-
-# 7) Write report.md - compact table (rows=suites, cols=arms), recommendations.
-$md = New-Object System.Collections.ArrayList
-[void]$md.Add('# Model intake report')
-[void]$md.Add('')
-[void]$md.Add(('- Model: `{0}`' -f $ModelId))
-[void]$md.Add(('- Gatekeeper: `{0}`' -f $GatekeeperModelId))
-[void]$md.Add(('- Repeats (K): {0}' -f $Repeats))
-[void]$md.Add(('- Arms: {0}' -f ($Arms -join ', ')))
-[void]$md.Add(('- Generated (UTC): {0}' -f $scorecard.generated_utc))
-[void]$md.Add('')
-[void]$md.Add(('> All numbers item-weighted over K complete runs; suites are closed-book ' +
-    'compute/reasoning probes unless labeled open-book.'))
-[void]$md.Add('')
-[void]$md.Add('Each cell is `pass-rate+/-stddev` (item-weighted rate; stddev over complete runs). ' +
-    'A `(P:n)` suffix flags n partial run(s) folded into that cell - treat those numbers with suspicion.')
-[void]$md.Add('')
-
-# Results table.
-$headerCells = New-Object System.Collections.ArrayList
-[void]$headerCells.Add('suite (items)')
-foreach ($arm in $Arms) { [void]$headerCells.Add($arm) }
-[void]$md.Add('| ' + (($headerCells.ToArray()) -join ' | ') + ' |')
-
-$sepCells = New-Object System.Collections.ArrayList
-[void]$sepCells.Add('---')
-foreach ($arm in $Arms) { [void]$sepCells.Add('---') }
-[void]$md.Add('| ' + (($sepCells.ToArray()) -join ' | ') + ' |')
-
-foreach ($suiteCard in $scoreSuites) {
-    $rowCells = New-Object System.Collections.ArrayList
-    [void]$rowCells.Add(('{0} ({1})' -f $suiteCard.suite, $suiteCard.item_count))
-    foreach ($arm in $Arms) {
-        $armCard = $null
-        foreach ($c in @(Get-ArmCards -value $suiteCard.arms)) {
-            if ((Get-ArmName -card $c) -eq $arm) { $armCard = $c }
-        }
-        if ($null -eq $armCard) {
-            [void]$rowCells.Add('n/a')
-            continue
-        }
-        $overall = [pscustomobject]@{
-            mean_pass_rate   = (Get-CardValue -card $armCard -name 'mean_pass_rate')
-            stddev_pass_rate = (Get-CardValue -card $armCard -name 'stddev_pass_rate')
-        }
-        $cell = Format-Cell -overall $overall
-        if ([int](Get-CardValue -card $armCard -name 'partial_run_count') -gt 0) {
-            $cell = ('{0} (P:{1})' -f $cell, (Get-CardValue -card $armCard -name 'partial_run_count'))
-        }
-        [void]$rowCells.Add($cell)
-    }
-    [void]$md.Add('| ' + (($rowCells.ToArray()) -join ' | ') + ' |')
-}
-
-[void]$md.Add('')
-[void]$md.Add('## Recommended config')
-[void]$md.Add('')
-[void]$md.Add('Rule: highest item-weighted pass-rate wins, but baseline wins ties within 1 stddev - ' +
-    'scaffolding must earn its extra latency.')
-[void]$md.Add('')
-
-foreach ($rec in @($recommendations.ToArray())) {
-    [void]$md.Add(('### {0}' -f $rec.suite))
-    [void]$md.Add('')
-    [void]$md.Add(('- Recommended arm: **{0}**' -f $rec.recommended_arm))
-    [void]$md.Add(('- Rate: {0}+/-{1} (K={2})' -f `
-        (Format-RatePercent -rate ([double]$rec.chosen_rate)), `
-        (Format-RatePercent -rate ([double]$rec.chosen_stddev)), `
-        $Repeats))
-    [void]$md.Add(('- Reason: {0}' -f $rec.reason))
-    [void]$md.Add(('- Env vars to set: `{0}`' -f $rec.env))
-    if (@($rec.partials_flagged).Count -gt 0) {
-        $flagParts = New-Object System.Collections.ArrayList
-        foreach ($f in @($rec.partials_flagged)) {
-            [void]$flagParts.Add(('{0}: {1}/{2} run(s) partial' -f $f.arm, $f.partial_run_count, $f.repeats))
-        }
-        [void]$md.Add(('- WARNING - partial runs on this suite: {0}' -f (($flagParts.ToArray()) -join '; ')))
-    }
-    [void]$md.Add('')
-}
-
-$reportPath = Join-Path $outDir 'report.md'
-$mdText = ($md.ToArray()) -join "`r`n"
-$mdText | Out-File -FilePath $reportPath -Encoding utf8
-
-Write-Host ""
-Write-Host "========================================================================" -ForegroundColor Green
-Write-Host ("Scorecard: {0}" -f $scorecardPath) -ForegroundColor Green
-Write-Host ("Report:    {0}" -f $reportPath) -ForegroundColor Green
-Write-Host "========================================================================" -ForegroundColor Green
-
-exit 0

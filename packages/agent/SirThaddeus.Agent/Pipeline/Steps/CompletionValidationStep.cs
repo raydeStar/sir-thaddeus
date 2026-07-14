@@ -1,5 +1,4 @@
 using SirThaddeus.Agent.Validation;
-using SirThaddeus.Agent.Routing;
 
 namespace SirThaddeus.Agent.Pipeline.Steps;
 
@@ -61,18 +60,6 @@ public sealed class CompletionValidationStep : ITurnStep
 
         if (IsDeterministicLocalBusinessPlacesDraft(context))
             return new StepResult.Continue(context);
-
-        if (CanSkipHighConfidenceConversationValidation(context))
-        {
-            LogDecision(
-                context,
-                "skipped_high_confidence_conversation",
-                passed: true,
-                repairNeeded: false,
-                usedLlm: false,
-                elapsedMs: 0);
-            return new StepResult.Continue(context);
-        }
 
         CompletionValidationResult validation;
         try
@@ -193,59 +180,6 @@ public sealed class CompletionValidationStep : ITurnStep
                string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
     }
-
-    private bool CanSkipHighConfidenceConversationValidation(TurnContext context)
-    {
-        if (!IsTruthy(Environment.GetEnvironmentVariable(
-                "ST_SKIP_HIGH_CONFIDENCE_CONVERSATION_VALIDATION")))
-        {
-            return false;
-        }
-
-        var plan = TurnPlanCompiler.Compile(new TurnPlanningInput
-        {
-            UserText = context.UserText ?? string.Empty,
-            Features = context.Features
-        });
-
-        var onlySuppressedMemoryProvenance = context.ToolCallsMade.All(call =>
-            !call.Success &&
-            (string.Equals(call.ToolName, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(call.ToolName, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase)));
-        var eligible = onlySuppressedMemoryProvenance &&
-               string.IsNullOrWhiteSpace(context.ForcedTool) &&
-               plan.PrimaryKind == TurnPrimaryKind.Conversation &&
-               plan.Confidence >= 0.95 &&
-               !plan.RequiresExistingFullPath &&
-               !plan.DynamicMemoryRequired &&
-               !plan.FreshnessRequired &&
-               !plan.ToolsRequired &&
-               !plan.FilesOrUrlsRequired &&
-               !plan.DeepReasoningRequired &&
-               !plan.HighStakesHandlingRequired &&
-               !plan.StructuredResponseRequired;
-
-        if (IsLatencyTracingEnabled() && _log is not null)
-        {
-            _log(
-                "COMPLETION_VALIDATION_SKIP_ELIGIBILITY",
-                $"thread_id={context.ThreadId} turn_id={context.MessageId} eligible={eligible} " +
-                $"kind={plan.PrimaryKind} confidence={plan.Confidence:0.00} full_path={plan.RequiresExistingFullPath} " +
-                $"tool_calls={context.ToolCallsMade.Count} suppressed_memory_only={onlySuppressedMemoryProvenance} " +
-                $"forced_tool={!string.IsNullOrWhiteSpace(context.ForcedTool)} " +
-                $"memory={plan.DynamicMemoryRequired} freshness={plan.FreshnessRequired} tools={plan.ToolsRequired} " +
-                $"files={plan.FilesOrUrlsRequired} reasoning={plan.DeepReasoningRequired} " +
-                $"high_stakes={plan.HighStakesHandlingRequired} structured={plan.StructuredResponseRequired}");
-        }
-
-        return eligible;
-    }
-
-    private static bool IsTruthy(string? raw) =>
-        string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsDeterministicLocalBusinessPlacesDraft(TurnContext context)
     {

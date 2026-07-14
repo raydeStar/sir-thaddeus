@@ -118,25 +118,6 @@ internal sealed class WorkflowChatRunCoordinator
                 ShouldRetry = false
             };
         }
-        else if (firstResponse.FromConsensusVote)
-        {
-            // A self-consistency vote already sampled this answer N times and
-            // returned the majority. The confidence-gated retry would re-run the
-            // ENTIRE N-sample vote a second time behind a "please re-check"
-            // preamble — redundant work on exactly the turn that already spent
-            // the most compute, and a consensus answer does not get more
-            // reliable by voting again. Preserve it the same way the other
-            // deterministic responses above short-circuit the retry gate: raise
-            // the confidence floor + ShouldRetry=false so RetryGateEvaluator
-            // disallows the retry. Non-voted turns are untouched.
-            firstConfidence = new ConfidenceSnapshot
-            {
-                Score = Math.Max(firstConfidence.Score, 0.85),
-                Band = "High",
-                Summary = "Consensus-voted answer preserved without retry.",
-                ShouldRetry = false
-            };
-        }
         workflowState.LatestConfidence = firstConfidence;
         var selectedConfidence = firstConfidence;
 
@@ -308,8 +289,7 @@ internal sealed class WorkflowChatRunCoordinator
                 workflowState.LastRetryGateDecision?.IsAllowed,
                 workflowState.LastRetryGateDecision?.ReasonCode,
                 ExtractAssistantSourceCards(selectedResponse),
-                selectedResponse.SuppressSourceCardsUi,
-                FormatPlanSummary(selectedResponse.Plan)));
+                selectedResponse.SuppressSourceCardsUi));
 
         if (workflowState.Envelope.ShowChecklist)
         {
@@ -455,22 +435,6 @@ internal sealed class WorkflowChatRunCoordinator
         if (lower.Contains("memory") || lower.Contains("recall") || lower.Contains("remember"))
             return 0.62;
         return 0.70;
-    }
-
-    private static string? FormatPlanSummary(SirThaddeus.Agent.Planning.TaskPlan? plan)
-    {
-        if (plan is null)
-            return null;
-
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Kind: {plan.TaskKind}  |  Lane: {plan.Lane}");
-        if (plan.RequiredTools.Count > 0)
-            sb.AppendLine($"Tools: {string.Join(", ", plan.RequiredTools)}");
-        for (var i = 0; i < plan.Steps.Count; i++)
-            sb.AppendLine($"  {i + 1}. {plan.Steps[i]}");
-        sb.AppendLine($"Stop: {plan.StopCondition}");
-        sb.Append($"Success: {plan.SuccessCriteria}");
-        return sb.ToString();
     }
 
     private static IReadOnlyList<AssistantSourceCardPayload> ExtractAssistantSourceCards(AgentResponse response)

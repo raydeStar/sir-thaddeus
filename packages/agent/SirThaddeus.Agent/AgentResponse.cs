@@ -1,5 +1,4 @@
 using SirThaddeus.Agent.Dialogue;
-using SirThaddeus.Agent.Planning;
 using SirThaddeus.Agent.Search.DeepDive;
 using SirThaddeus.Agent.Workflow;
 
@@ -113,13 +112,6 @@ public sealed record AgentResponse
     public string? CorrelationId { get; init; }
 
     /// <summary>
-    /// Typed execution plan produced before any tool call.
-    /// Null when planning was skipped or failed to produce a valid plan.
-    /// UI displays this collapsed above the response.
-    /// </summary>
-    public TaskPlan? Plan { get; init; }
-
-    /// <summary>
     /// Deterministic completion confidence from the completion checker.
     /// Null when completion contracts were not evaluated for this turn.
     /// </summary>
@@ -143,19 +135,6 @@ public sealed record AgentResponse
     /// Null when confidence evaluation is disabled.
     /// </summary>
     public string? WorkflowConfidenceBand { get; init; }
-
-    /// <summary>
-    /// True only when this response is the majority-vote result of a
-    /// self-consistency run (see <c>SelfConsistencyStep.BuildVoteResult</c>),
-    /// i.e. it was already voted from N independent samples. The workflow
-    /// coordinator reads this to skip its confidence-gated retry: re-running
-    /// the whole N-sample vote with a "please re-check" preamble is redundant
-    /// work on exactly the turns that already got the most compute, and a
-    /// consensus answer does not become more reliable by sampling N more times.
-    /// Set ONLY by an actual vote Terminate — must stay a truthful signal, so
-    /// it defaults false and is never inferred from heuristics.
-    /// </summary>
-    public bool FromConsensusVote { get; init; }
 
     public static AgentResponse FromError(string error) => new()
     {

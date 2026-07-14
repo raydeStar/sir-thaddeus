@@ -212,9 +212,7 @@ if (toolsAvailable && settings.Memory.Enabled)
 }
 
 // Pipeline-backed orchestrator is the only path now — the legacy
-// AgentOrchestrator was retired after the harness stabilized at 81%+
-// parity. The old `ST_RUNTIME_USE_PIPELINE=0` escape hatch is gone;
-// there's nothing to toggle.
+// AgentOrchestrator was retired after the harness stabilized at 81% parity.
 IHeadlessAgent BuildOrchestrator(AppSettings currentSettings)
 {
     llm.UpdateOptions(RuntimeLlmOptionsFactory.BuildPrimary(currentSettings));
@@ -382,15 +380,6 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         // the hint motivates, this enforces. Pattern-gated so casual
         // chat and opinion prompts pass through untouched.
         new FreshnessRouterStep(),
-
-        // Self-consistency (opt-in via ST_SELF_CONSISTENCY=N): for strict-answer
-        // reasoning items, sample the model N times step-by-step and return the
-        // majority-vote answer — stabilizes the variance a single sample shows
-        // on multi-step problems. No-op when disabled or for non-strict prompts.
-        // The tool loop is passed as an optional collaborator so tool-aware mode
-        // (ST_SELF_CONSISTENCY_TOOLS=1) can vote over full tool-loop runs for
-        // compute-bound problems. It stays inert unless that flag is also set.
-        new SelfConsistencyStep(llm, toolLoop: toolLoop),
 
         toolLoop,
         new PostProcessStep(sanitize, "PostProcess:Sanitize"),

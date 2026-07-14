@@ -1050,11 +1050,6 @@ public sealed record DialogueSettings
     [JsonPropertyName("persistencePath")]
     public string PersistencePath { get; init; } = "auto";
 
-    /// <summary>
-    /// Feature flag to enable the experimental V2 routing and planning pipeline.
-    /// </summary>
-    [JsonPropertyName("orchestrationV2Enabled")]
-    public bool OrchestrationV2Enabled { get; init; } = false;
 }
 
 /// <summary>

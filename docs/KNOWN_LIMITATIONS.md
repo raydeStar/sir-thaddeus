@@ -103,6 +103,11 @@ This is documented in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Generating t
 
 [apps/headless-runtime/](../apps/headless-runtime/) remains for harness and transitional workflows. It should not be promoted as the public v1 product surface.
 
+Its top-level `Program.cs` is also a known complexity hotspot. New product
+composition belongs in `Thaddeus.Runtime`; decomposing or retiring the headless
+host should be a separate parity-focused change so harness behavior is not
+silently altered during unrelated cleanup.
+
 ---
 
 ## Posture
