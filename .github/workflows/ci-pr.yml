@@ -14,6 +14,9 @@ on:
 permissions:
   contents: read
 
+env:
+  BUILD_ARTIFACT_SUFFIX: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || github.ref_name }}
+
 jobs:
   test:
     runs-on: windows-latest
@@ -113,7 +116,7 @@ jobs:
       - name: Upload Windows build package artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: build-package-windows-${{ github.ref_name }}
+          name: build-package-windows-${{ env.BUILD_ARTIFACT_SUFFIX }}
           path: |
             artifacts/release/sir-thaddeus-win-x64-*.zip
             artifacts/release/sir-thaddeus-win-x64-*.sha256.txt
@@ -160,7 +163,7 @@ jobs:
       - name: Upload Linux build package artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: build-package-linux-${{ github.ref_name }}
+          name: build-package-linux-${{ env.BUILD_ARTIFACT_SUFFIX }}
           path: |
             artifacts/release/sir-thaddeus-linux-x64-*.tar.gz
             artifacts/release/sir-thaddeus-linux-x64-*.sha256.txt
@@ -207,7 +210,7 @@ jobs:
       - name: Upload macOS build package artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: build-package-macos-${{ github.ref_name }}
+          name: build-package-macos-${{ env.BUILD_ARTIFACT_SUFFIX }}
           path: |
             artifacts/release/sir-thaddeus-osx-arm64-*.tar.gz
             artifacts/release/sir-thaddeus-osx-arm64-*.sha256.txt
@@ -232,7 +235,7 @@ jobs:
       - name: Download build package artifacts
         uses: actions/download-artifact@v8
         with:
-          name: build-package-windows-${{ github.ref_name }}
+          name: build-package-windows-${{ env.BUILD_ARTIFACT_SUFFIX }}
           path: artifacts/release
 
       - name: Run smoke test on packaged zip
@@ -262,7 +265,7 @@ jobs:
       - name: Download Linux build package artifacts
         uses: actions/download-artifact@v8
         with:
-          name: build-package-linux-${{ github.ref_name }}
+          name: build-package-linux-${{ env.BUILD_ARTIFACT_SUFFIX }}
           path: artifacts/release
 
       - name: Run cross-platform smoke test on tar.gz
@@ -292,7 +295,7 @@ jobs:
       - name: Download macOS build package artifacts
         uses: actions/download-artifact@v8
         with:
-          name: build-package-macos-${{ github.ref_name }}
+          name: build-package-macos-${{ env.BUILD_ARTIFACT_SUFFIX }}
           path: artifacts/release
 
       - name: Run cross-platform smoke test on tar.gz
@@ -324,19 +327,19 @@ jobs:
       - name: Download Windows build package artifacts
         uses: actions/download-artifact@v8
         with:
-          name: build-package-windows-${{ github.ref_name }}
+          name: build-package-windows-${{ env.BUILD_ARTIFACT_SUFFIX }}
           path: release-assets
 
       - name: Download Linux build package artifacts
         uses: actions/download-artifact@v8
         with:
-          name: build-package-linux-${{ github.ref_name }}
+          name: build-package-linux-${{ env.BUILD_ARTIFACT_SUFFIX }}
           path: release-assets
 
       - name: Download macOS build package artifacts
         uses: actions/download-artifact@v8
         with:
-          name: build-package-macos-${{ github.ref_name }}
+          name: build-package-macos-${{ env.BUILD_ARTIFACT_SUFFIX }}
           path: release-assets
 
       - name: Set rolling release tag name
