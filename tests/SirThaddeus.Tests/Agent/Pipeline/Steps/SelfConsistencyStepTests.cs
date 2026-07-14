@@ -8,6 +8,29 @@ namespace SirThaddeus.Tests.Agent.Pipeline.Steps;
 public sealed class SelfConsistencyStepTests
 {
     [Fact]
+    public async Task Choice_consensus_preserves_labeled_final_answer_contract()
+    {
+        var llm = new QueueLlm("Final answer: C", "Final answer: C");
+        var step = new SelfConsistencyStep(llm, samples: 2, samplingTemperature: 0.01);
+        const string prompt = "Put the final answer on its own line as `Final answer: <answer>`.\n\n" +
+                              "Question: Which protocol maps names to addresses?\n" +
+                              "A. HTTP\nB. SMTP\nC. DNS\nD. SSH";
+
+        var context = new TurnContext
+        {
+            ThreadId = "t1",
+            MessageId = "m1",
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("base"), ChatMessage.User(prompt)],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var terminated = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Equal("Final answer: C", terminated.Response.Text);
+    }
+
+    [Fact]
     public async Task Strong_consensus_terminates_with_winning_answer()
     {
         var llm = new QueueLlm(

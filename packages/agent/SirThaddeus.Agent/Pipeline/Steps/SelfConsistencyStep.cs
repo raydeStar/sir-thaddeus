@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using SirThaddeus.Agent.Reasoning;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Pipeline.Steps;
@@ -253,9 +254,13 @@ public sealed class SelfConsistencyStep : ITurnStep
         // voted from N independent samples, so re-running the whole vote with a
         // "please re-check" preamble is redundant work on the turn that already
         // spent the most compute.
+        var answerText = ExplicitResponseContractDetector.RequiresLabeledFinalAnswerLine(context.UserText)
+            ? $"Final answer: {vote.Answer}"
+            : vote.Answer;
+
         return new StepResult.Terminate(new AgentResponse
         {
-            Text = vote.Answer,
+            Text = answerText,
             Success = true,
             FromConsensusVote = true,
             ToolCallsMade = toolCallsMade is { Count: > 0 }
