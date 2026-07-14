@@ -133,6 +133,7 @@ public sealed record TestAttemptResult
     public required string FinalResponse { get; init; }
     public required string ArtifactDirectory { get; init; }
     public required CursorJudgeResult? JudgeResult { get; init; }
+    public int LlmRoundTrips { get; init; }
     public IReadOnlyList<string> AppliedPatches { get; init; } = [];
     internal Execution.HarnessTiming Timing { get; init; } = Execution.HarnessTiming.Empty;
 }

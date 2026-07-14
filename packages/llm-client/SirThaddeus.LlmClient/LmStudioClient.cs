@@ -28,6 +28,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
     private long _promptTokensTotal;
     private long _completionTokensTotal;
     private long _totalTokensTotal;
+    private long _requestCount;
     private readonly HashSet<string> _confirmedLoadedModels = new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _autoLoadEnabled;
     private LlmEndpointGate _requestGate;
@@ -359,6 +360,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         // ── Attempt 1: full request with stop + repetition_penalty ───
         var body = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, temperatureOverride, includeExtras: true);
 
+        System.Threading.Interlocked.Increment(ref _requestCount);
         var response = await _http.PostAsJsonAsync(
             NormalizePath(GetOptionsSnapshot().ChatCompletionPath), body, _json, cancellationToken);
 
@@ -374,6 +376,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         {
             var bare = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, temperatureOverride, includeExtras: false);
 
+            System.Threading.Interlocked.Increment(ref _requestCount);
             response = await _http.PostAsJsonAsync(
                 NormalizePath(GetOptionsSnapshot().ChatCompletionPath), bare, _json, cancellationToken);
 
@@ -616,6 +619,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
 
         return new LlmUsageSnapshot
         {
+            RequestCount = System.Threading.Interlocked.Read(ref _requestCount),
             PromptTokens = System.Threading.Interlocked.Read(ref _promptTokensTotal),
             CompletionTokens = System.Threading.Interlocked.Read(ref _completionTokensTotal),
             TotalTokens = System.Threading.Interlocked.Read(ref _totalTokensTotal),

@@ -172,6 +172,7 @@ public sealed record TokenUsage
 /// </summary>
 public sealed record LlmUsageSnapshot
 {
+    public long RequestCount { get; init; }
     public long PromptTokens { get; init; }
     public long CompletionTokens { get; init; }
     public long TotalTokens { get; init; }

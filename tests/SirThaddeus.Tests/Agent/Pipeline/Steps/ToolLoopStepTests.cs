@@ -932,6 +932,20 @@ public class ToolLoopStepTests
         Assert.Equal(4, cont.Next.ToolCallsMade.Count);
     }
 
+    [Fact]
+    public async Task Uses_configured_primary_output_token_budget()
+    {
+        var llm = new FakeLlm(LlmReply.Final("done"));
+        var step = new ToolLoopStep(
+            llm,
+            new StubMcp(_ => string.Empty),
+            maxOutputTokens: 2048);
+
+        await step.ExecuteAsync(NewContext() with { ToolDefs = [] }, CancellationToken.None);
+
+        Assert.Equal([2048], llm.MaxTokenOverrides);
+    }
+
     private static TurnContext ComputeContext(string prompt) => NewContext() with
     {
         UserText = prompt,

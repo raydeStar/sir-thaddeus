@@ -4,12 +4,14 @@ using Microsoft.AspNetCore.Http;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Contracts;
+using SirThaddeus.LlmClient;
 
 internal static partial class RuntimeApiServer
 {
     private static void MapCoreEndpoints(
         WebApplication app,
         Func<CancellationToken, Task<SearchStatusResponse>> getSearchStatus,
+        Func<LlmUsageSnapshot> getLlmUsage,
         Func<AppSettings> getSettings,
         Action<AppSettings> persistSettings,
         IAuditLogger audit)
@@ -22,6 +24,8 @@ internal static partial class RuntimeApiServer
                 Runtime: "headless-runtime",
                 UtcNow: DateTimeOffset.UtcNow);
         });
+
+        app.MapGet("/api/diagnostics/llm-usage", () => Results.Json(getLlmUsage(), JsonOptions));
 
         app.MapGet("/api/search/status", async (CancellationToken ct) =>
         {

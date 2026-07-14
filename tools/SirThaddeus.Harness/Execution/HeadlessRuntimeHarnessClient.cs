@@ -8,6 +8,7 @@ using SirThaddeus.Config;
 using SirThaddeus.Contracts;
 using SirThaddeus.Harness.Models;
 using SirThaddeus.Harness.Tracing;
+using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Harness.Execution;
 
@@ -134,8 +135,10 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
 
         var workStopwatch = Stopwatch.StartNew();
         var auditCaptureStart = DateTimeOffset.UtcNow;
+        var usageBefore = await GetLlmUsageAsync(cancellationToken);
         var startResponse = await PostChatAsync(test.UserMessage, cancellationToken);
         var runOutcome = await ReadRunToCompletionAsync(startResponse.RunId, cancellationToken);
+        var usageAfter = await GetLlmUsageAsync(cancellationToken);
         workStopwatch.Stop();
         var workSeconds = workStopwatch.Elapsed.TotalSeconds;
 
@@ -161,7 +164,14 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
             Success = runOutcome.Success,
             Error = runOutcome.Success ? null : runOutcome.Error,
             ToolCallsMade = toolCalls,
-            LlmRoundTrips = 0,
+            LlmRoundTrips = (int)Math.Max(0, usageAfter.RequestCount - usageBefore.RequestCount),
+            TokenUsage = new AgentTokenUsage
+            {
+                TokensIn = (int)Math.Max(0, usageAfter.PromptTokens - usageBefore.PromptTokens),
+                TokensOut = (int)Math.Max(0, usageAfter.CompletionTokens - usageBefore.CompletionTokens),
+                TotalTokens = (int)Math.Max(0, usageAfter.TotalTokens - usageBefore.TotalTokens),
+                ContextWindowTokens = usageAfter.ContextWindowTokens
+            },
             Sources = runOutcome.Sources
         };
 
@@ -397,6 +407,14 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
         response.EnsureSuccessStatusCode();
         var payload = await response.Content.ReadFromJsonAsync<ChatStartResponse>(JsonOptions, cancellationToken);
         return payload ?? throw new InvalidOperationException("Headless runtime returned an empty chat start response.");
+    }
+
+    private async Task<LlmUsageSnapshot> GetLlmUsageAsync(CancellationToken cancellationToken)
+    {
+        using var response = await _http.GetAsync("api/diagnostics/llm-usage", cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<LlmUsageSnapshot>(JsonOptions, cancellationToken)
+               ?? new LlmUsageSnapshot();
     }
 
     private async Task<(bool Success, string FinalText, string? Error, IReadOnlyList<AgentSource> Sources)> ReadRunToCompletionAsync(

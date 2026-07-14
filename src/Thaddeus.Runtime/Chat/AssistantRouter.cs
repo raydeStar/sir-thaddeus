@@ -283,6 +283,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     CompletionValidator = validator,
                     CompletionRepairLoop = repair,
                     DialogueStateAccessor = dialogueAccessor,
+                    MaxOutputTokens = Math.Max(1, llm.MaxTokens),
                 };
             }
         };

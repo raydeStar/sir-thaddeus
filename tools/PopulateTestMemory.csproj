@@ -5,6 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,10 +18,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Prevent this utility project from globbing harness sources under tools/. -->
-    <Compile Remove="SirThaddeus.Harness\**\*.cs" />
-    <EmbeddedResource Remove="SirThaddeus.Harness\**\*" />
-    <None Remove="SirThaddeus.Harness\**\*" />
+    <!-- This root-level utility owns only its adjacent source file. -->
+    <Compile Include="PopulateTestMemory.cs" />
   </ItemGroup>
 
 </Project>
