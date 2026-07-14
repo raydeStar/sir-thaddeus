@@ -6,8 +6,7 @@ param(
     [ValidateRange(1, 100)]
     [int]$Repeats = 10,
 
-    [switch]$CandidateCohort,
-    [switch]$EnableValidationSkip
+    [switch]$CandidateCohort
 )
 
 Set-StrictMode -Version Latest
@@ -55,8 +54,6 @@ for ($run = 1; $run -le $Repeats; $run++) {
     $lock = Join-Path $runRoot 'runtime.lock'
 
     $env:ST_ROUTING_LATENCY_TRACE = '1'
-    $env:ST_TURN_PLAN_SHADOW = '1'
-    $env:ST_SKIP_HIGH_CONFIDENCE_CONVERSATION_VALIDATION = if ($EnableValidationSkip) { '1' } else { $null }
 
     $process = $null
     try {
@@ -88,8 +85,8 @@ for ($run = 1; $run -le $Repeats; $run++) {
 
         $random = [Random]::new(8122026 + $run)
         $ordered = @($cases | Sort-Object { $random.Next() })
-        Write-Host ("DESKTOP_CAMPAIGN run={0}/{1} first={2} validation_skip={3}" -f
-            $run, $Repeats, $ordered[0].Id, [bool]$EnableValidationSkip)
+        Write-Host ("DESKTOP_CAMPAIGN run={0}/{1} first={2}" -f
+            $run, $Repeats, $ordered[0].Id)
 
         foreach ($case in $ordered) {
             $thread = Invoke-RestMethod `

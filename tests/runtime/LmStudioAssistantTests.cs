@@ -183,16 +183,9 @@ public class LmStudioAssistantTests : IDisposable
         Assert.Contains("Offline mode is ON", fake.Calls.Single()[0].Content);
     }
 
-    // ── Self-consistency composition (roadmap 4.3) ────────────────────
-
     [Fact]
-    public void BuildTurnPipeline_places_self_consistency_immediately_before_the_tool_loop()
+    public void BuildTurnPipeline_uses_audited_mcp_as_the_only_permission_boundary()
     {
-        // Production parity: the benchmark runtime (BuildPipelineBackedOrchestrator)
-        // wires SelfConsistencyStep right before ToolLoopStep. The desktop/chat
-        // pipeline must mirror that position so the honest-tooling lever is
-        // reachable in normal chat, not just in the harness. The step is inert
-        // unless ST_SELF_CONSISTENCY is set, so default behavior is unchanged.
         var (_, assistant, _, _) = NewSut();
 
         var pipeline = assistant.BuildTurnPipeline(
@@ -200,12 +193,10 @@ public class LmStudioAssistantTests : IDisposable
             NullChatEventSink.Instance);
 
         var stepNames = pipeline.Steps.Select(s => s.Name).ToList();
-        var scIndex = stepNames.IndexOf("SelfConsistency");
         var toolLoopIndex = stepNames.IndexOf("ToolLoop");
 
-        Assert.True(scIndex >= 0, "SelfConsistency step must be composed into the chat pipeline.");
         Assert.True(toolLoopIndex >= 0, "ToolLoop step must be present in the chat pipeline.");
-        Assert.Equal(toolLoopIndex - 1, scIndex);
+        Assert.Equal(1, stepNames.Count(name => name == "ToolLoop"));
 
         var permissionGateField = typeof(SirThaddeus.Agent.Pipeline.Steps.ToolLoopStep)
             .GetField("_permissionGate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);

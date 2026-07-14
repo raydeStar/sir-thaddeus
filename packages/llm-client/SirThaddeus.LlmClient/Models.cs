@@ -203,8 +203,8 @@ public sealed record LlmRequestContext
 
     /// <summary>
     /// Per-request sampling temperature. When set, overrides the client's
-    /// configured temperature for this call only (used by self-consistency to
-    /// guarantee diverse samples). Null = use the configured temperature.
+    /// configured temperature for this call only. Null = use the configured
+    /// temperature.
     /// </summary>
     public double? TemperatureOverride { get; init; }
 }

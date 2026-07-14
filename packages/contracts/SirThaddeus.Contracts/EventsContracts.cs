@@ -55,6 +55,7 @@ public sealed record RunCompletedPayload(
     string? RetryGateReason = null,
     IReadOnlyList<AssistantSourceCardPayload>? SourceCards = null,
     bool SuppressSourceCardsUi = false,
+    [property: Obsolete("No active runtime produces plan summaries; retained for wire compatibility.")]
     string? PlanSummary = null);
 
 public sealed record RunFailedPayload(

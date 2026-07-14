@@ -23,9 +23,11 @@
 
 - Harness reruns reuse current builds, avoid duplicate pure-compute tool calls,
   and report warmup, reset, test-work, host, and harness-overhead timing.
-- Opt-in routing latency traces, shadow turn planning, and a narrowly gated
-  conversation-validation experiment remain disabled by default and cannot
-  grant tool or permission authority.
+- Rejected self-consistency, shadow turn-planning, validation-skip, and unused
+  V2 router/planner experiments are removed instead of remaining as dormant
+  feature flags.
+- Opt-in routing latency traces remain available as duration-only operational
+  diagnostics and cannot change tool, permission, or response behavior.
 - The matched benchmark workflow records raw-model controls, exact repeats,
   invalid-output counts, and disjoint confirmation slices without placing
   benchmark identifiers or expected answers in production code.

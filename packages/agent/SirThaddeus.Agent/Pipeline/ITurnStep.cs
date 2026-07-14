@@ -8,7 +8,7 @@ namespace SirThaddeus.Agent.Pipeline;
 /// <para>Steps hold no per-turn or cross-turn state. Anything that needs to
 /// survive beyond the call lives on <see cref="TurnContext"/> (flows to the
 /// next step) or in a long-lived dependency injected through the step's
-/// constructor (an LLM client, a feature flag provider, etc.).</para>
+/// constructor (an LLM client, a configuration provider, etc.).</para>
 ///
 /// <para>Implementations must be safe to call concurrently — different
 /// threads may run the same step instance against different contexts at

@@ -127,7 +127,7 @@ The runtime binds to `127.0.0.1` on an ephemeral port. A bearer token rotates ea
 | --- | ---: | ---: | --- |
 | 1.2B model, six math tasks | **0 / 6** | **5 / 6** with `calculator` | The tool loop changes capability. |
 | 20-item compute suite | roughly **0%** | **43%** with `python_eval` | Tools help; model reasoning still sets the ceiling. |
-| MMLU-Pro self-consistency | **37.9%** | **27.9%** | More inference can make a small model worse. The feature stays off. |
+| MMLU-Pro sampled voting | **37.9%** | **27.9%** | More inference made this model worse, so the experiment was removed. |
 
 The scorer grades actual values, not answer shape. A Docker canary aborts broken sandbox runs instead of blaming the model. Roughly **1,900 lines** of benchmark-specific shortcut solvers were removed so the suite exercises the real model and tool pipeline.
 
@@ -140,7 +140,7 @@ The July 2026 pass tightened the real answer and measurement paths rather than t
 | Strict numeric replies depended on one narrow wording pattern. | A shared answer contract recognizes natural requests such as “return just the number,” including unseen paraphrases. | Product behavior follows user intent instead of benchmark phrasing. |
 | Valid compute results were easiest to preserve when they arrived as plain integer strings and the request named the tool. | Actual compute-tool records are authoritative; numeric JSON values and scientific notation are accepted too. | Fewer correct tool results are discarded because of harmless formatting differences. |
 | A completed model-intake run could be lost to a later reporting failure, forcing the expensive measurement to run again. | Completed summaries can regenerate scorecards and reports with `-ReuseSummaryPath`. | Measurement is cheaper to recover and easier to audit. |
-| Windows-native output quirks could masquerade as model-load or reporting failures. | Model loading uses the real process exit code, reporting filters incidental stream records, and malformed arm data fails closed. | Infrastructure errors are less likely to be reported as model weakness—or as a misleading scorecard. |
+| Windows-native output quirks could masquerade as model-load or reporting failures. | Model loading uses the real process exit code, reporting filters incidental stream records, and malformed summary data fails closed. | Infrastructure errors are less likely to be reported as model weakness—or as a misleading scorecard. |
 
 ### Fresh model ceiling check
 
@@ -153,7 +153,7 @@ One baseline run per model on the same closed-book, 20-item `python-probe` suite
 
 That **+45 percentage-point** gap is a model comparison, not a claimed code-score uplift. A single run is a spot check, not a leaderboard. Its value is diagnostic: after routing, scoring, and result handling were audited, model selection remained the strongest immediate quality lever.
 
-Run [`dev/model-intake.ps1`](dev/model-intake.ps1) to turn a new model into a scorecard and recommended configuration. See [docs/TESTING.md](docs/TESTING.md) for methodology and [`tools/SirThaddeus.Harness/Suites/`](tools/SirThaddeus.Harness/Suites/) for the probes.
+Run [`dev/model-intake.ps1`](dev/model-intake.ps1) to produce a repeated production-baseline scorecard for a new model. See [docs/TESTING.md](docs/TESTING.md) for methodology and [`tools/SirThaddeus.Harness/Suites/`](tools/SirThaddeus.Harness/Suites/) for the probes.
 
 <a id="trust-model"></a>
 ## The Trust Model, Without Hand-Waving

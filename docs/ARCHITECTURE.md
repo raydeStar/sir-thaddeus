@@ -79,7 +79,7 @@ The old Avalonia desktop client has been removed. The current desktop path is th
 3. The SPA uses REST for CRUD operations and `/ws` for turn streaming and runtime events.
 4. User input is posted to `/api/threads/{id}/messages`.
 5. [src/Thaddeus.Runtime/Chat/AssistantRouter.cs](../src/Thaddeus.Runtime/Chat/AssistantRouter.cs) chooses between `StubAssistant` and `LmStudioAssistant` based on current settings and endpoint health.
-6. [src/Thaddeus.Runtime/Chat/LmStudioAssistant.cs](../src/Thaddeus.Runtime/Chat/LmStudioAssistant.cs) builds the system prompt, history window, tool definitions, and a per-turn pipeline.
+6. [src/Thaddeus.Runtime/Chat/LmStudioAssistant.cs](../src/Thaddeus.Runtime/Chat/LmStudioAssistant.cs) builds the system prompt, history window, and tool definitions; [LmStudioAssistant.Pipeline.cs](../src/Thaddeus.Runtime/Chat/LmStudioAssistant.Pipeline.cs) owns the per-turn composition documented in [ASSISTANT_PIPELINE.md](ASSISTANT_PIPELINE.md).
 7. The turn pipeline can inject memory context, personality shaping, dialogue-state continuity, guardrails, search fallback, footman tool-family narrowing, completion validation, and repair.
 8. [src/Thaddeus.Runtime/Chat/ChatTurnPublisher.cs](../src/Thaddeus.Runtime/Chat/ChatTurnPublisher.cs) streams deltas over WebSocket while the thread store persists the final message.
 9. The runtime state machine and activity log update in parallel so the UI can show progress and audit data immediately.

@@ -18,6 +18,8 @@ Getting Sir Thaddeus running and understanding what it will and won't do.
 
 Building, testing, and understanding the system.
 
+- [ASSISTANT_PIPELINE.md](ASSISTANT_PIPELINE.md) — the active chat pipeline, supported diagnostics, retired experiments, and promotion rules.
+
 - [ARCHITECTURE_PUBLIC.md](ARCHITECTURE_PUBLIC.md) — the short public overview: shell, runtime, workspace, assistant pipeline, MCP boundary, permission gate, storage.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the full subsystem-by-subsystem architecture, grounded in the current code.
 - [ARCHITECTURE_EXECUTIVE_SUMMARY.md](ARCHITECTURE_EXECUTIVE_SUMMARY.md) — the one-page version for quick review or handoff.
