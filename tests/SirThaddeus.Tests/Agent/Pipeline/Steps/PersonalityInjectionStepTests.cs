@@ -79,6 +79,60 @@ public class PersonalityInjectionStepTests
     }
 
     [Fact]
+    public async Task Explicit_direct_answer_contract_focuses_final_unresolved_task_and_keeps_personality_examples()
+    {
+        var runtime = new StubRuntime(
+            buildPrompt: task => $"[persona]\n{task}\n[/persona]",
+            fewShots:
+            [
+                new PersonalityFewShotExample
+                {
+                    User = "Explain DNS.",
+                    Assistant = "DNS maps names to network addresses."
+                }
+            ]);
+        var step = new PersonalityInjectionStep(runtime);
+        var prompt = "Put the final answer on its own line as `Final answer: <answer>`.\n\n" +
+                     "Example: A solved item. Answer: A.\n\nQuestion: Which option is correct?";
+        var ctx = new TurnContext
+        {
+            ThreadId = "t1",
+            MessageId = "m1",
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("base"), ChatMessage.User(prompt)]
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        var system = cont.Next.LlmMessages.First(message => message.Role == "system").Content;
+        Assert.Contains("[TurnFocus:latest_unresolved]", system, StringComparison.Ordinal);
+        Assert.Contains("answer only the final unresolved request", system, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(cont.Next.LlmMessages, message => message.Content == "Explain DNS.");
+    }
+
+    [Fact]
+    public async Task Tool_or_research_contract_does_not_receive_direct_answer_focus()
+    {
+        var runtime = new StubRuntime(buildPrompt: task => task);
+        var step = new PersonalityInjectionStep(runtime);
+        var prompt = "Research the latest release, verify it, and return only the version number.";
+        var ctx = new TurnContext
+        {
+            ThreadId = "t1",
+            MessageId = "m1",
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("base"), ChatMessage.User(prompt)]
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        var system = cont.Next.LlmMessages.First(message => message.Role == "system").Content;
+        Assert.DoesNotContain("[TurnFocus:latest_unresolved]", system, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Skips_examples_with_blank_user_or_assistant_field()
     {
         // Schema says both fields are required but profiles on disk may

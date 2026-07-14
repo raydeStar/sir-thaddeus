@@ -48,6 +48,7 @@ public sealed class ToolLoopStep : ITurnStep
     private readonly IReadOnlyList<IToolCallInterceptor> _interceptors;
     private readonly IReadOnlyList<IToolArgsRewriter> _argsRewriters;
     private readonly int _maxRoundTrips;
+    private readonly Action<string, string>? _log;
 
     public ToolLoopStep(
         ILlmClient llm,
@@ -57,7 +58,8 @@ public sealed class ToolLoopStep : ITurnStep
         IToolGroupClassifier? groupClassifier = null,
         IEnumerable<IToolCallInterceptor>? interceptors = null,
         IEnumerable<IToolArgsRewriter>? argsRewriters = null,
-        int maxRoundTrips = 6)
+        int maxRoundTrips = 6,
+        Action<string, string>? log = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
@@ -69,6 +71,7 @@ public sealed class ToolLoopStep : ITurnStep
         if (maxRoundTrips < 1)
             throw new ArgumentOutOfRangeException(nameof(maxRoundTrips), "Must be >= 1.");
         _maxRoundTrips = maxRoundTrips;
+        _log = log;
     }
 
     public string Name => "ToolLoop";
@@ -77,6 +80,7 @@ public sealed class ToolLoopStep : ITurnStep
     {
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
+        var initialAssemblyStarted = IsLatencyTracingEnabled() ? Stopwatch.GetTimestamp() : 0L;
 
         // Working lists — we append to history and tool-calls-made across
         // rounds, so a local mutable copy is cheaper than .With() per call.
@@ -87,6 +91,13 @@ public sealed class ToolLoopStep : ITurnStep
         // across rounds. Two consecutive identical failures nudges the model
         // to stop retrying.
         var callSignatureCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        // calculator and python_eval are pure within a turn: the same normalized
+        // arguments produce the same result. Small models frequently repeat an
+        // already-successful verification call, so retain the result without
+        // paying another MCP / Docker round-trip. Permission and interceptors
+        // still run for every requested call; only the final MCP execution is
+        // memoized, and failures are never cached.
+        var pureComputeResults = new Dictionary<string, ToolCallOutcome>(StringComparer.Ordinal);
         var lastCallOk = true;
         string? forcedToolForNextRound = null;
 
@@ -144,6 +155,15 @@ public sealed class ToolLoopStep : ITurnStep
             // output budget here lets local models burn the whole harness
             // timeout on a single overlong generation.
             var forcedToolChoice = tools is not null ? forcedTool : null;
+            if (round == 0 && IsLatencyTracingEnabled() && _log is not null)
+            {
+                var elapsedMs = Stopwatch.GetElapsedTime(initialAssemblyStarted).TotalMilliseconds;
+                _log(
+                    "PROMPT_ASSEMBLY_TIMING",
+                    $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+                    $"messages={messages.Count} tools={tools?.Count ?? 0} forced_tool={!string.IsNullOrWhiteSpace(forcedToolChoice)} " +
+                    $"elapsed_ms={elapsedMs:0.###}");
+            }
             LlmResponse response;
             try
             {
@@ -274,7 +294,7 @@ public sealed class ToolLoopStep : ITurnStep
 
                 var sw = Stopwatch.StartNew();
                 var outcome = await ExecuteSingleCallAsync(
-                        context, toolName, args, activityId, cancellationToken)
+                        context, toolName, args, activityId, pureComputeResults, cancellationToken)
                     .ConfigureAwait(false);
                 sw.Stop();
 
@@ -472,6 +492,15 @@ public sealed class ToolLoopStep : ITurnStep
         return new StepResult.Terminate(capResponse);
     }
 
+    private static bool IsLatencyTracingEnabled()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<string?> TryExecuteTimeNowAndBuildDraftAsync(
         TurnContext context,
         List<ToolCallRecord> toolCallsMade,
@@ -487,7 +516,13 @@ public sealed class ToolLoopStep : ITurnStep
             .ConfigureAwait(false);
 
         var sw = Stopwatch.StartNew();
-        var outcome = await ExecuteSingleCallAsync(context, ToolNames.TimeNow, args, activityId, cancellationToken)
+        var outcome = await ExecuteSingleCallAsync(
+                context,
+                ToolNames.TimeNow,
+                args,
+                activityId,
+                new Dictionary<string, ToolCallOutcome>(StringComparer.Ordinal),
+                cancellationToken)
             .ConfigureAwait(false);
         sw.Stop();
 
@@ -1409,6 +1444,7 @@ public sealed class ToolLoopStep : ITurnStep
         string toolName,
         string args,
         string activityId,
+        IDictionary<string, ToolCallOutcome> pureComputeResults,
         CancellationToken ct)
     {
         // Permission gate first — denial skips both interceptors and MCP.
@@ -1455,6 +1491,10 @@ public sealed class ToolLoopStep : ITurnStep
             }
         }
 
+        var cacheKey = BuildCallSignature(toolName, args);
+        if (IsPureComputeTool(toolName) && pureComputeResults.TryGetValue(cacheKey, out var cached))
+            return cached;
+
         // Fall through to the real MCP server.
         try
         {
@@ -1462,7 +1502,10 @@ public sealed class ToolLoopStep : ITurnStep
             if (TryExtractStructuredToolError(result, out var error))
                 return new ToolCallOutcome(result, Ok: false, Error: error);
 
-            return new ToolCallOutcome(result, Ok: true, Error: null);
+            var outcome = new ToolCallOutcome(result, Ok: true, Error: null);
+            if (IsCacheablePureComputeOutcome(toolName, outcome))
+                pureComputeResults[cacheKey] = outcome;
+            return outcome;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -1540,6 +1583,11 @@ public sealed class ToolLoopStep : ITurnStep
     {
         var name = call.Function.Name ?? string.Empty;
         var rawArgs = call.Function.Arguments ?? "{}";
+        return BuildCallSignature(name, rawArgs);
+    }
+
+    private static string BuildCallSignature(string toolName, string rawArgs)
+    {
         string normalized;
         try
         {
@@ -1550,6 +1598,15 @@ public sealed class ToolLoopStep : ITurnStep
         {
             normalized = rawArgs;
         }
-        return name + "|" + normalized;
+        return toolName + "|" + normalized;
     }
+
+    private static bool IsPureComputeTool(string toolName) =>
+        string.Equals(toolName, "calculator", StringComparison.OrdinalIgnoreCase) ||
+        LooksLikePythonEvalTool(toolName);
+
+    private static bool IsCacheablePureComputeOutcome(string toolName, ToolCallOutcome outcome) =>
+        outcome.Ok &&
+        IsPureComputeTool(toolName) &&
+        (!LooksLikePythonEvalTool(toolName) || !LooksLikeFailedOrEmptyPythonResult(outcome));
 }

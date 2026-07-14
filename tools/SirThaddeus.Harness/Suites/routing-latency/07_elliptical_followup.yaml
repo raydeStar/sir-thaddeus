@@ -1,0 +1,16 @@
+id: routing_latency_elliptical_followup
+name: Routing latency - elliptical follow-up
+category: ambiguous
+user_message: "What about tomorrow?"
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: []
+  forbidden_keywords: ["<think>", "</think>", "error", "timeout"]
+  max_response_chars: 600
+min_score: 5.0

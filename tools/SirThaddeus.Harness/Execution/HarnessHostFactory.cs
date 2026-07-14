@@ -1,5 +1,7 @@
+using SirThaddeus.Agent;
 using SirThaddeus.Config;
 using SirThaddeus.Harness.Cli;
+using SirThaddeus.Harness.Models;
 
 namespace SirThaddeus.Harness.Execution;
 
@@ -11,14 +13,34 @@ namespace SirThaddeus.Harness.Execution;
 /// </summary>
 internal static class HarnessHostFactory
 {
-    public static IHarnessHostAdapter Create(HarnessCommandOptions options, AppSettings settings)
+    public static IHarnessHostAdapter Create(
+        HarnessCommandOptions options,
+        AppSettings settings,
+        IReadOnlyList<HarnessSuite> suites)
     {
+        var requirements = HarnessHostRequirements.FromSuites(suites);
         return options.HostTarget switch
         {
-            HarnessHostTarget.HeadlessV1 => new HeadlessRuntimeHarnessClient(settings),
+            HarnessHostTarget.HeadlessV1 => new HeadlessRuntimeHarnessClient(settings, requirements.RequiresManagedSearch),
             HarnessHostTarget.HybridV2 => new HybridRuntimeHostAdapter(settings),
             _ => throw new InvalidOperationException(
                 $"Unhandled host target '{options.HostTarget}'.")
         };
+    }
+}
+
+internal sealed record HarnessHostRequirements(bool RequiresManagedSearch)
+{
+    public static HarnessHostRequirements FromSuites(IReadOnlyList<HarnessSuite> suites)
+    {
+        var requiresSearch = suites
+            .SelectMany(suite => suite.Tests)
+            .Any(test =>
+                !test.Assertions.AllowedToolsOnly ||
+                test.AllowedTools.Any(tool =>
+                    string.Equals(tool, ToolNames.WebSearch, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(tool, ToolNames.WebSearchAlt, StringComparison.OrdinalIgnoreCase)));
+
+        return new HarnessHostRequirements(requiresSearch);
     }
 }

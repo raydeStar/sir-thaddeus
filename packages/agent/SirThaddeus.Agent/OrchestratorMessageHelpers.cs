@@ -65,7 +65,10 @@ internal static partial class OrchestratorMessageHelpers
     /// sections. When <paramref name="preserveRationale"/> is true the text is
     /// returned unchanged.
     /// </summary>
-    internal static string StripThinkingScaffold(string text, bool preserveRationale = false)
+    internal static string StripThinkingScaffold(
+        string text,
+        bool preserveRationale = false,
+        bool preserveFinalAnswerLabel = false)
     {
         if (string.IsNullOrWhiteSpace(text))
             return text;
@@ -115,9 +118,12 @@ internal static partial class OrchestratorMessageHelpers
         }
 
         // ── Pass 3: "Final Answer:" anywhere in the text ─────────────
-        var finalAnswerIdx = cleaned.LastIndexOf("final answer:", StringComparison.OrdinalIgnoreCase);
-        if (finalAnswerIdx >= 0)
-            cleaned = cleaned[(finalAnswerIdx + "final answer:".Length)..].Trim();
+        if (!preserveFinalAnswerLabel)
+        {
+            var finalAnswerIdx = cleaned.LastIndexOf("final answer:", StringComparison.OrdinalIgnoreCase);
+            if (finalAnswerIdx >= 0)
+                cleaned = cleaned[(finalAnswerIdx + "final answer:".Length)..].Trim();
+        }
 
         return cleaned;
     }

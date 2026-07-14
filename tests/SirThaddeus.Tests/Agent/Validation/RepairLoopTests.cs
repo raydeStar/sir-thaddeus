@@ -46,6 +46,46 @@ public class RepairLoopTests
         Assert.Contains("did not adequately answer", prompt);
     }
 
+    [Fact]
+    public void BuildMultipleChoiceLetterRepairPrompt_RequiresOneLabeledLetter()
+    {
+        var prompt = RepairLoop.BuildMultipleChoiceLetterRepairPrompt(
+            "Choose the correct letter answer. A. canary B. full deployment",
+            "A canary is safer.");
+
+        Assert.Contains("A. canary B. full deployment", prompt);
+        Assert.Contains("A canary is safer.", prompt);
+        Assert.Contains("Final answer: <LETTER>", prompt);
+        Assert.Contains("Output no explanation", prompt);
+    }
+
+    [Fact]
+    public async Task TryRepairAsync_MultipleChoiceContract_AdoptsExactLetterWithoutGenericRevalidation()
+    {
+        var llm = new SequentialFakeLlmClient("Final answer: A");
+        var validator = new CompletionValidator(llm);
+        var loop = new RepairLoop(llm, validator) { MaxAttempts = 1 };
+        var request =
+            "Put the final answer on its own line as `Final answer: <answer>`.\n\n" +
+            "Choose the correct letter answer. A. canary B. full deployment";
+        var failedValidation = new CompletionValidationResult
+        {
+            Passed = false,
+            RepairNeeded = true,
+            MissingElement = "Response did not use one option letter."
+        };
+
+        var result = await loop.TryRepairAsync(
+            request,
+            "A canary is safer.",
+            failedValidation,
+            Array.Empty<ToolCallRecord>());
+
+        Assert.True(result.Repaired);
+        Assert.Equal("Final answer: A", result.FinalText);
+        Assert.Single(result.Attempts);
+    }
+
     // ── TryRepairAsync: Repair succeeds ──────────────────────────────
 
     [Fact]

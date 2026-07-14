@@ -20,4 +20,7 @@ public sealed record CompletionValidationResult
 
     /// <summary>Wall-clock milliseconds the validation took.</summary>
     public double ElapsedMs { get; init; }
+
+    /// <summary>True when validation required the helper LLM rather than a deterministic result.</summary>
+    public bool UsedLlm { get; init; }
 }

@@ -3,9 +3,11 @@ using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Pipeline.Steps;
 using SirThaddeus.Agent.Validation;
 using SirThaddeus.LlmClient;
+using SirThaddeus.Tests.Agent.Pipeline;
 
 namespace SirThaddeus.Tests.Agent.Pipeline.Steps;
 
+[Collection(RoutingLatencyEnvironmentCollection.Name)]
 public class CompletionValidationStepTests
 {
     [Fact]
@@ -82,6 +84,81 @@ public class CompletionValidationStepTests
         Assert.Equal(0, llm.CallCount);
     }
 
+    [Fact]
+    public async Task Experimental_flag_skips_only_high_confidence_conversation_validation()
+    {
+        using var env = new EnvironmentScope(
+            "ST_SKIP_HIGH_CONFIDENCE_CONVERSATION_VALIDATION",
+            "1");
+        var llm = new CountingLlm();
+        var step = new CompletionValidationStep(new CompletionValidator(llm), null);
+
+        var result = await step.ExecuteAsync(
+            WithDraft("Good morning!", "Good morning. How can I help?"),
+            CancellationToken.None);
+
+        Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(0, llm.CallCount);
+    }
+
+    [Fact]
+    public async Task Experimental_flag_retains_validation_for_ambiguous_turn()
+    {
+        using var env = new EnvironmentScope(
+            "ST_SKIP_HIGH_CONFIDENCE_CONVERSATION_VALIDATION",
+            "1");
+        var llm = new CountingLlm();
+        var step = new CompletionValidationStep(new CompletionValidator(llm), null);
+
+        var result = await step.ExecuteAsync(
+            WithDraft("Can you take care of that?", "What would you like me to handle?"),
+            CancellationToken.None);
+
+        Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(1, llm.CallCount);
+    }
+
+    [Fact]
+    public async Task Experimental_flag_allows_suppressed_memory_provenance_but_not_successful_recall()
+    {
+        using var env = new EnvironmentScope(
+            "ST_SKIP_HIGH_CONFIDENCE_CONVERSATION_VALIDATION",
+            "1");
+        var llm = new CountingLlm();
+        var step = new CompletionValidationStep(new CompletionValidator(llm), null);
+        var suppressed = WithDraft("Good morning!", "Good morning.") with
+        {
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.MemoryRetrieve,
+                    Arguments = "{}",
+                    Success = false,
+                    Result = ""
+                }
+            ]
+        };
+        var recalled = suppressed with
+        {
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.MemoryRetrieve,
+                    Arguments = "{}",
+                    Success = true,
+                    Result = "remembered context"
+                }
+            ]
+        };
+
+        await step.ExecuteAsync(suppressed, CancellationToken.None);
+        await step.ExecuteAsync(recalled, CancellationToken.None);
+
+        Assert.Equal(1, llm.CallCount);
+    }
+
     // Happy-path (validation + repair round-trip) requires a real
     // CompletionValidator / RepairLoop with a fake ILlmClient. Those
     // types are `sealed` and call `llm.ChatAsync` directly, so full
@@ -124,5 +201,20 @@ public class CompletionValidationStepTests
 
         public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<string?>("fake");
+    }
+
+    private sealed class EnvironmentScope : IDisposable
+    {
+        private readonly string _name;
+        private readonly string? _previous;
+
+        public EnvironmentScope(string name, string? value)
+        {
+            _name = name;
+            _previous = Environment.GetEnvironmentVariable(name);
+            Environment.SetEnvironmentVariable(name, value);
+        }
+
+        public void Dispose() => Environment.SetEnvironmentVariable(_name, _previous);
     }
 }

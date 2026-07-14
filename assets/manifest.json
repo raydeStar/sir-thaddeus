@@ -13,8 +13,9 @@
     {
       "id": "voice-deps-win-x64",
       "filename": "voice-deps-win-x64.zip",
-      "sha256": "1ff280e0e5ae78c4dffb138fab13e03fe827d6d4bfe896427848adcb315b0bde",
-      "sizeBytes": 115924882,
+      "url": "https://github.com/raydeStar/sir-thaddeus/releases/download/assets-v2/voice-deps-win-x64.zip",
+      "sha256": "5253c384bebc6132074a4cfad13991ed968841a30a239ecd6c931fd22ef2e046",
+      "sizeBytes": 92665159,
       "extractTo": "apps/voice-backend/deps/wheels",
       "description": "Python wheel packages for voice backend"
     },

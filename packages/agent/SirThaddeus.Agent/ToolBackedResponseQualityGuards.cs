@@ -16,7 +16,18 @@ public static class ToolBackedResponseQualityGuards
         if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(latestUserMessage) || toolCallsMade.Count == 0)
             return text;
 
+        if (toolCallsMade.All(call =>
+                !call.Success &&
+                (string.Equals(call.ToolName, ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(call.ToolName, ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase))))
+        {
+            return text;
+        }
+
         latestUserMessage = ExtractRetryInstructionUserRequest(latestUserMessage);
+
+        if (TryBuildCapabilityManifestSummary(toolCallsMade) is { Length: > 0 } capabilitySummary)
+            return capabilitySummary;
 
         if (LooksLikeRetryInstructionEcho(text) && LooksLikeOpenStatusRequest(latestUserMessage))
             return BuildConservativeOpenStatusFallback(latestUserMessage, toolCallsMade);
@@ -38,6 +49,21 @@ public static class ToolBackedResponseQualityGuards
 
             if (TryBuildWebSearchEvidenceFallback(latestUserMessage, toolCallsMade) is { Length: > 0 } webEvidenceFallback)
                 return webEvidenceFallback;
+
+            var successfulTools = toolCallsMade
+                .Where(call => call.Success)
+                .Select(call => call.ToolName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (successfulTools.Count > 0)
+            {
+                return $"I ran {string.Join(", ", successfulTools)}, but the local model could not safely " +
+                       "synthesize the returned data into an answer. Please retry; I will reuse a shorter context.";
+            }
+
+            return "The local model could not complete this response within its context limit. " +
+                   "Please retry with a shorter request or a larger configured context window.";
         }
 
         if (TryBuildStructuredResearchResponse(latestUserMessage, toolCallsMade) is { Length: > 0 } structuredResearch &&
@@ -137,6 +163,91 @@ public static class ToolBackedResponseQualityGuards
             request = request[..markerIndex].TrimEnd();
 
         return string.IsNullOrWhiteSpace(request) ? latestUserMessage : request;
+    }
+
+    private static string? TryBuildCapabilityManifestSummary(IReadOnlyList<ToolCallRecord> toolCallsMade)
+    {
+        var call = toolCallsMade.LastOrDefault(candidate =>
+            candidate.Success &&
+            string.Equals(candidate.ToolName, "tool_list_capabilities", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(candidate.Result));
+        if (call is null)
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(call.Result);
+            if (document.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                var rawGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var names = new List<string>();
+                foreach (var entry in document.RootElement.EnumerateArray())
+                {
+                    if (entry.ValueKind != JsonValueKind.Object)
+                        continue;
+
+                    if (entry.TryGetProperty("category", out var categoryElement) &&
+                        categoryElement.ValueKind == JsonValueKind.String &&
+                        categoryElement.GetString() is { Length: > 0 } category)
+                    {
+                        rawGroups.Add(category.Trim());
+                    }
+
+                    if (entry.TryGetProperty("name", out var nameElement) &&
+                        nameElement.ValueKind == JsonValueKind.String &&
+                        nameElement.GetString() is { Length: > 0 } name)
+                    {
+                        names.Add(name.Trim());
+                    }
+                }
+
+                if (rawGroups.Count > 0)
+                {
+                    var groupSummary = string.Join(", ", rawGroups.OrderBy(group => group, StringComparer.OrdinalIgnoreCase));
+                    var rawRepresentativeTools = string.Join(", ", names.Take(12));
+                    var rawSummary = $"Available capability groups ({document.RootElement.GetArrayLength()} tools): {groupSummary}.";
+                    return string.IsNullOrWhiteSpace(rawRepresentativeTools)
+                        ? rawSummary
+                        : rawSummary + $" Representative tools include: {rawRepresentativeTools}.";
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // The audit-safe redacted form is handled below.
+        }
+
+        var countMatch = Regex.Match(
+            call.Result,
+            @"tool_list_capabilities:\s*(?<count>\d+)\s+tool\(s\)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var groupsMatch = Regex.Match(
+            call.Result,
+            @"capability groups:\s*(?<groups>[^;\]]+)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!groupsMatch.Success)
+            return null;
+
+        var groups = groupsMatch.Groups["groups"].Value.Trim();
+        if (string.IsNullOrWhiteSpace(groups) ||
+            string.Equals(groups, "unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var toolsMatch = Regex.Match(
+            call.Result,
+            @"tools:\s*(?<tools>[^\]]+)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var representativeTools = toolsMatch.Success
+            ? toolsMatch.Groups["tools"].Value.Trim().TrimEnd('…', '.')
+            : string.Empty;
+        var count = countMatch.Success ? countMatch.Groups["count"].Value : "available";
+        var summary = $"Available capability groups ({count} tools): {groups}.";
+
+        return string.IsNullOrWhiteSpace(representativeTools)
+            ? summary
+            : summary + $" Representative tools include: {representativeTools}.";
     }
 
     private static bool LooksLikeRetryInstructionEcho(string text)

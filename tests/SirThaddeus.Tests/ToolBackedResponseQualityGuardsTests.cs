@@ -9,6 +9,97 @@ namespace SirThaddeus.Tests;
 public sealed class ToolBackedResponseQualityGuardsTests
 {
     [Fact]
+    public void FailedMemoryProvenance_DoesNotEnableToolBackedRewrites()
+    {
+        const string draft = "I may need a more direct source before answering.";
+        var response = ToolBackedResponseQualityGuards.Apply(
+            draft,
+            "Put the final answer on its own line. Example: cars at a dealership near a park.",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.MemoryRetrieve,
+                    Arguments = "{}",
+                    Success = false,
+                    Result = "Memory retrieval suppressed by the active tool contract."
+                }
+            ]);
+
+        Assert.Equal(draft, response);
+    }
+
+    [Fact]
+    public void CapabilityManifestSummary_ReplacesUngroundedDraftWithToolDerivedGroups()
+    {
+        var response = ToolBackedResponseQualityGuards.Apply(
+            "Today's date is Sunday.",
+            "Call tool_list_capabilities and summarize the capability groups.",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "tool_list_capabilities",
+                    Arguments = "{}",
+                    Success = true,
+                    Result = "[tool_list_capabilities: 4 tool(s); capability groups: file, memory, meta, web; " +
+                             "tools: file_read, memory_retrieve, tool_ping, web_search]"
+                }
+            ]);
+
+        Assert.Contains("Available capability groups (4 tools): file, memory, meta, web", response, StringComparison.Ordinal);
+        Assert.Contains("web_search", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("Today's date", response, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CapabilityManifestSummary_ParsesRawManifestWithoutHardCodedGroups()
+    {
+        const string manifest = """
+            [
+              {"name":"alpha_read","category":"alpha"},
+              {"name":"beta_write","category":"beta"}
+            ]
+            """;
+        var response = ToolBackedResponseQualityGuards.Apply(
+            "unrelated draft",
+            "Summarize the available capability groups.",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "tool_list_capabilities",
+                    Arguments = "{}",
+                    Success = true,
+                    Result = manifest
+                }
+            ]);
+
+        Assert.Equal(
+            "Available capability groups (2 tools): alpha, beta. Representative tools include: alpha_read, beta_write.",
+            response);
+    }
+
+    [Fact]
+    public void RawTransportFailureWithoutSourceDetails_ReturnsSafeToolSynthesisFallback()
+    {
+        var response = ToolBackedResponseQualityGuards.Apply(
+            "LLM returned 400 (Bad Request): n_keep >= n_ctx",
+            "Search for a recent technology headline.",
+            [
+                new ToolCallRecord
+                {
+                    ToolName = ToolNames.WebSearch,
+                    Arguments = "{\"query\":\"recent technology headline\"}",
+                    Success = true,
+                    Result = "[search: 1 result(s) returned]"
+                }
+            ]);
+
+        Assert.Contains("ran web_search", response, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not safely synthesize", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("LLM returned", response, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("n_keep", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void LocationAwarePlacesArgsRewriter_WhenPlacesDiscoverUsesNearMe_AddsConfiguredLocationHint()
     {
         var rewriter = new LocationAwarePlacesArgsRewriter(() => "Olympia, WA");

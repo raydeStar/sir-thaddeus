@@ -29,6 +29,10 @@ public static class SuiteReporter
         public required int Attempts { get; init; }
         public string? ArtifactDirectory { get; init; }
         public string? FinalResponse { get; init; }
+        public double RuntimeWarmupSeconds { get; init; }
+        public double ResetSeconds { get; init; }
+        public double TestWorkSeconds { get; init; }
+        public double HostTotalSeconds { get; init; }
     }
 
     public sealed record ReportContext
@@ -154,6 +158,7 @@ public static class SuiteReporter
             .ToDictionary(g => g.Key, g => Math.Round(g.Average(r => r.Score.OverallScore), 3), StringComparer.OrdinalIgnoreCase);
         var hardGateFailureCount = results.Sum(r => r.Score.HardGateFailures.Count);
         var recurringFailures = TopRecurringFailureReasons(results);
+        var timing = BuildTimingSummary(results, context.DurationSeconds);
         var failingTests = results
             .Where(r => !r.Passed)
             .OrderByDescending(FailureSeverity)
@@ -187,6 +192,7 @@ public static class SuiteReporter
             pass_rate = results.Count > 0 ? Math.Round((double)passCount / results.Count, 3) : 0,
             average_score = Math.Round(avgScore, 3),
             hard_gate_failure_count = hardGateFailureCount,
+            timing,
             average_score_by_profile = profileAverages,
             top_recurring_failure_reasons = recurringFailures,
             failing_tests_by_severity = failingTests,
@@ -204,6 +210,13 @@ public static class SuiteReporter
                 problems = r.Score.Problems,
                 requiredFixes = r.Score.RequiredFixes,
                 latencyMs = r.Score.LatencyMs,
+                timing = new
+                {
+                    runtime_warmup_ms = ToMilliseconds(r.RuntimeWarmupSeconds),
+                    reset_ms = ToMilliseconds(r.ResetSeconds),
+                    test_work_ms = ToMilliseconds(r.TestWorkSeconds),
+                    host_total_ms = ToMilliseconds(r.HostTotalSeconds)
+                },
                 tokensIn = r.Score.TokensIn,
                 tokensOut = r.Score.TokensOut,
                 score = r.Score.FinalScore,
@@ -254,6 +267,8 @@ public static class SuiteReporter
         builder.AppendLine($"- Judge: {context.JudgeMode ?? "none"}");
         builder.AppendLine($"- Duration: {(context.DurationSeconds.HasValue ? $"{context.DurationSeconds.Value:F1}s" : "-")}");
         builder.AppendLine($"- Artifacts: {context.ArtifactsRoot ?? ""}");
+        var timing = BuildTimingSummary(results, context.DurationSeconds);
+        builder.AppendLine($"- Timing: warmup {timing.runtime_warmup_seconds:F1}s · reset {timing.reset_seconds:F1}s · test work {timing.test_work_seconds:F1}s · harness overhead {timing.harness_overhead_seconds:F1}s");
         builder.AppendLine();
         builder.AppendLine("## Totals");
         builder.AppendLine();
@@ -326,6 +341,33 @@ public static class SuiteReporter
 
         File.WriteAllText(outputPath, builder.ToString());
     }
+
+    private static TimingSummary BuildTimingSummary(
+        IReadOnlyList<TestResult> results,
+        double? durationSeconds)
+    {
+        var warmup = results.Sum(r => r.RuntimeWarmupSeconds);
+        var reset = results.Sum(r => r.ResetSeconds);
+        var work = results.Sum(r => r.TestWorkSeconds);
+        var host = results.Sum(r => r.HostTotalSeconds);
+        var overhead = Math.Max(0, (durationSeconds ?? host) - host);
+        return new TimingSummary(
+            Math.Round(warmup, 3),
+            Math.Round(reset, 3),
+            Math.Round(work, 3),
+            Math.Round(host, 3),
+            Math.Round(overhead, 3));
+    }
+
+    private static long ToMilliseconds(double seconds) =>
+        (long)Math.Round(seconds * 1000, MidpointRounding.AwayFromZero);
+
+    private sealed record TimingSummary(
+        double runtime_warmup_seconds,
+        double reset_seconds,
+        double test_work_seconds,
+        double host_total_seconds,
+        double harness_overhead_seconds);
 
     // ── Per-test line ──────────────────────────────────────────
 

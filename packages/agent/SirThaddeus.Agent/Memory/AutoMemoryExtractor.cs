@@ -59,13 +59,21 @@ public sealed class AutoMemoryExtractor : IAutoMemoryExtractor
             return;
         }
 
+        LogLatency("AUTO_MEMORY_EXTRACT_QUEUED", turnId, durationMs: null);
+
         // Run as a detached background task
         _ = Task.Run(async () =>
         {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            LogLatency("AUTO_MEMORY_EXTRACT_STARTED", turnId, durationMs: null);
             try
             {
                 _telemetry?.RecordExtractionAttempt();
                 await ExtractAndStoreAsync(userMessage, activeProfileId, turnId);
+                LogLatency(
+                    "AUTO_MEMORY_EXTRACT_COMPLETED",
+                    turnId,
+                    System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             }
             catch (Exception ex)
             {
@@ -84,8 +92,11 @@ public sealed class AutoMemoryExtractor : IAutoMemoryExtractor
         if (string.IsNullOrWhiteSpace(text))
             return;
 
+        LogLatency("AUTO_MEMORY_CHUNK_QUEUED", turnId, durationMs: null, role);
+
         _ = Task.Run(async () =>
         {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 var trimmedText = text.Trim();
@@ -103,12 +114,39 @@ public sealed class AutoMemoryExtractor : IAutoMemoryExtractor
                 };
 
                 await _memoryStore.StoreChunkAsync(chunk);
+                LogLatency(
+                    "AUTO_MEMORY_CHUNK_COMPLETED",
+                    turnId,
+                    System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                    role);
             }
             catch (Exception ex)
             {
                 _log?.Invoke("AUTO_MEMORY_CHUNK_STORE_ERROR", ex.Message);
             }
         });
+    }
+
+    private void LogLatency(string action, string turnId, double? durationMs, string? role = null)
+    {
+        if (_log is null || !LatencyTracingEnabled())
+            return;
+
+        var correlationId = System.Diagnostics.Activity.Current?
+            .GetBaggageItem("routing_correlation_id") ?? string.Empty;
+        _log(
+            action,
+            $"correlation_id={correlationId} turn_id={turnId} role={role ?? string.Empty} " +
+            $"duration_ms={(durationMs.HasValue ? durationMs.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) : string.Empty)}");
+    }
+
+    private static bool LatencyTracingEnabled()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task ExtractAndStoreAsync(

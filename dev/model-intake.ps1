@@ -282,6 +282,7 @@ function Get-SuiteItemCount {
 # ---------------------------------------------------------------------------
 $RepeatScript = Join-Path $RepoRoot 'dev/harness-repeat.ps1'
 $RepeatSummaryDir = Join-Path $RepoRoot 'artifacts/harness-repeat'
+$script:HarnessBuildPrepared = $false
 
 function Get-NewestSummaryStamp {
     param([string]$suite)
@@ -308,12 +309,21 @@ function Invoke-ArmSuite {
     Write-Host ("--- arm={0} suite={1} repeats={2} ---" -f $arm, $suite, $k) -ForegroundColor Cyan
     Write-Host ("    env: {0}" -f (Get-ArmEnvDescription -arm $arm)) -ForegroundColor DarkGray
 
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $RepeatScript -Suite $suite -Repeats $k 2>&1 |
+    $repeatArgs = @('-Suite', $suite, '-Repeats', $k)
+    if ($script:HarnessBuildPrepared) {
+        $repeatArgs += '-SkipBuild'
+    }
+
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $RepeatScript @repeatArgs 2>&1 |
         ForEach-Object {
             $text = $_
             if ($_ -is [System.Management.Automation.ErrorRecord]) { $text = $_.ToString() }
             Write-Host ([string]$text)
         }
+    if ($LASTEXITCODE -ne 0) {
+        throw ("harness-repeat failed for suite '{0}' / arm '{1}' with exit code {2}." -f $suite, $arm, $LASTEXITCODE)
+    }
+    $script:HarnessBuildPrepared = $true
 
     # Locate the summary JSON this invocation produced: newest matching file that is
     # different from the pre-invocation newest.

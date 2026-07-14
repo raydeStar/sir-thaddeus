@@ -40,7 +40,9 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
     /// /api/harness/reset endpoint between tests so the runtime process
     /// can be reused.
     /// </summary>
-    public static HarnessRuntimeSandbox CreateShared(AppSettings baseSettings)
+    public static HarnessRuntimeSandbox CreateShared(
+        AppSettings baseSettings,
+        bool enableManagedSearch = true)
     {
         ArgumentNullException.ThrowIfNull(baseSettings);
 
@@ -48,7 +50,7 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
             Path.GetTempPath(),
             "SirThaddeus.Harness",
             $"shared-{Guid.NewGuid():N}");
-        return CreateInternal(baseSettings, sandboxRoot, test: null);
+        return CreateInternal(baseSettings, sandboxRoot, test: null, enableManagedSearch);
     }
 
     public static HarnessRuntimeSandbox Create(AppSettings baseSettings, HarnessTestCase test)
@@ -60,13 +62,14 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
             Path.GetTempPath(),
             "SirThaddeus.Harness",
             $"{SanitizePathSegment(test.Id)}-{Guid.NewGuid():N}");
-        return CreateInternal(baseSettings, sandboxRoot, test);
+        return CreateInternal(baseSettings, sandboxRoot, test, enableManagedSearch: true);
     }
 
     private static HarnessRuntimeSandbox CreateInternal(
         AppSettings baseSettings,
         string sandboxRoot,
-        HarnessTestCase? test)
+        HarnessTestCase? test,
+        bool enableManagedSearch)
     {
         var dataDirectory = Path.Combine(sandboxRoot, "data");
         var profilesDirectory = Path.Combine(sandboxRoot, "profiles");
@@ -80,7 +83,7 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
 
         var sandboxSettings = baseSettings with
         {
-            WebSearch = BuildHarnessWebSearchSettings(baseSettings.WebSearch),
+            WebSearch = BuildHarnessWebSearchSettings(baseSettings.WebSearch, enableManagedSearch),
             RuntimeSafety = baseSettings.RuntimeSafety with
             {
                 PanicMode = false,
@@ -142,7 +145,9 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
             environment);
     }
 
-    private static WebSearchSettings BuildHarnessWebSearchSettings(WebSearchSettings baseSettings)
+    private static WebSearchSettings BuildHarnessWebSearchSettings(
+        WebSearchSettings baseSettings,
+        bool enableManagedSearch)
     {
         var normalizedMode = (baseSettings.Mode ?? "auto").Trim().ToLowerInvariant();
         var harnessMode = normalizedMode switch
@@ -155,12 +160,15 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         return baseSettings with
         {
             Mode = harnessMode,
-            SearxngAutoStart = true
+            SearxngAutoStart = enableManagedSearch
         };
     }
 
     public void Dispose()
     {
+        if (IsPreserveSandboxEnabled())
+            return;
+
         try
         {
             if (Directory.Exists(RootDirectory))
@@ -170,6 +178,15 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         {
             // Best-effort cleanup. Sandbox directories live under temp.
         }
+    }
+
+    private static bool IsPreserveSandboxEnabled()
+    {
+        var raw = System.Environment.GetEnvironmentVariable("ST_HARNESS_PRESERVE_SANDBOX");
+        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
 
 namespace SirThaddeus.Agent;
@@ -16,6 +17,9 @@ public static class GeneralResponseQualityGuards
             return BuildArchitectureComparisonFallback();
         }
 
+        if (TryBuildPureSocialAcknowledgment(latestUserMessage) is { Length: > 0 } socialAcknowledgment)
+            return socialAcknowledgment;
+
         text = ReplaceBareCancelledMediaInstallment(text, latestUserMessage);
         text = PreserveSimpleArithmeticNumerals(text, latestUserMessage);
         text = CompressOverlongTcpHandshakeExplanation(text, latestUserMessage);
@@ -25,6 +29,35 @@ public static class GeneralResponseQualityGuards
 
         return text;
     }
+
+    private static string? TryBuildPureSocialAcknowledgment(string userMessage)
+    {
+        var lower = userMessage.Trim().ToLowerInvariant();
+        var expressesThanks = lower.Contains("thank you", StringComparison.Ordinal) ||
+                              lower.Contains("thanks", StringComparison.Ordinal) ||
+                              lower.Contains("appreciate", StringComparison.Ordinal);
+        if (!expressesThanks)
+            return null;
+
+        var pureGratitude = lower.Length <= 120 &&
+                            !ContainsAny(
+                                lower,
+                                "can you", "could you", "would you", "please", " now ", "also",
+                                "explain", "write", "find", "search", "show", "open", "create", "fix", "help me");
+        if (!IntentFeatureExtractor.LooksLikeGreetingOnlyOrSmallTalk(lower) && !pureGratitude)
+            return null;
+
+        var asksHowAssistantIs = lower.Contains("how are you", StringComparison.Ordinal) ||
+                                 lower.Contains("how're you", StringComparison.Ordinal) ||
+                                 lower.Contains("how are things", StringComparison.Ordinal);
+
+        return asksHowAssistantIs
+            ? "I'm doing well, thanks for asking—and you're very welcome. I'm glad I could help."
+            : "You're very welcome—I'm glad I could help.";
+    }
+
+    private static bool ContainsAny(string value, params string[] candidates) =>
+        candidates.Any(candidate => value.Contains(candidate, StringComparison.Ordinal));
 
     private static string ReplaceBareCancelledMediaInstallment(string text, string userMessage)
     {

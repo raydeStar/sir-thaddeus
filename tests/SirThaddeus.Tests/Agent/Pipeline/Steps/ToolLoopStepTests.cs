@@ -446,6 +446,53 @@ public class ToolLoopStepTests
         Assert.Equal("111", cont.Next.AssistantDraft);
     }
 
+    [Fact]
+    public async Task Exact_duplicate_successful_python_calls_reuse_the_turn_local_result()
+    {
+        const string args = "{\"code\":\"print(73)\"}";
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", args),
+            LlmReply.Tool("python_eval", args),
+            LlmReply.Final("73"));
+        var mcpCalls = 0;
+        var mcp = new StubMcp(_ =>
+        {
+            mcpCalls++;
+            return "{\"stdout\":\"73\\n\",\"exit_code\":0}";
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use python_eval and return just the number.");
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("73", cont.Next.AssistantDraft);
+        Assert.Equal(2, cont.Next.ToolCallsMade.Count);
+        Assert.Equal(1, mcpCalls);
+    }
+
+    [Fact]
+    public async Task Failed_python_calls_are_not_cached()
+    {
+        const string args = "{\"code\":\"print(missing_name)\"}";
+        var llm = new FakeLlm(
+            LlmReply.Tool("python_eval", args),
+            LlmReply.Tool("python_eval", args),
+            LlmReply.Final("unable to compute"));
+        var mcpCalls = 0;
+        var mcp = new StubMcp(_ =>
+        {
+            mcpCalls++;
+            return "{\"stdout\":\"\",\"stderr\":\"NameError\",\"exit_code\":1}";
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var ctx = ComputeContext("Use python_eval and return just the number.");
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.Equal(2, mcpCalls);
+    }
+
     [Theory]
     [InlineData("Count the matching rows with python_eval and answer with just a number.")]
     [InlineData("Use python_eval for the calculation; output only an integer.")]

@@ -1,0 +1,16 @@
+id: routing_latency_implicit_memory
+name: Routing latency - implicit personal context
+category: memory
+user_message: "Would that fit the way I usually like to work? Be honest if you do not have enough context."
+allowed_tools: [memory_retrieve]
+mode: live
+assertions:
+  required_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: []
+  forbidden_keywords: ["<think>", "</think>", "error", "timeout"]
+  max_response_chars: 700
+min_score: 6.0

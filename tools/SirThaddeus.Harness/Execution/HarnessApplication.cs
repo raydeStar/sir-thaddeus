@@ -36,7 +36,7 @@ public sealed class HarnessApplication
         var summaries = new List<string>();
         var reportResults = new List<SuiteReporter.TestResult>();
 
-        await using var host = HarnessHostFactory.Create(options, settings);
+        await using var host = HarnessHostFactory.Create(options, settings, selectedSuites);
 
         foreach (var suite in selectedSuites)
         {
@@ -116,6 +116,7 @@ public sealed class HarnessApplication
 
                 summaries.Add(BuildSummaryLine(suite.Name, test, best, passed, minScore));
                 suiteScoreCards.Add(best.Score);
+                var aggregateTiming = AggregateTiming(attempts);
 
                 reportResults.Add(new SuiteReporter.TestResult
                 {
@@ -127,7 +128,11 @@ public sealed class HarnessApplication
                     Passed = passed,
                     Attempts = attempts.Count,
                     ArtifactDirectory = best.ArtifactDirectory,
-                    FinalResponse = best.FinalResponse
+                    FinalResponse = best.FinalResponse,
+                    RuntimeWarmupSeconds = aggregateTiming.RuntimeWarmupSeconds,
+                    ResetSeconds = aggregateTiming.ResetSeconds,
+                    TestWorkSeconds = aggregateTiming.TestWorkSeconds,
+                    HostTotalSeconds = aggregateTiming.TotalSeconds
                 });
             }
 
@@ -185,6 +190,13 @@ public sealed class HarnessApplication
             builder.Append($" attempts={attempts.Count}");
         Console.WriteLine(builder.ToString());
     }
+
+    private static HarnessTiming AggregateTiming(IReadOnlyList<TestAttemptResult> attempts) =>
+        new(
+            RuntimeWarmupSeconds: attempts.Sum(a => a.Timing.RuntimeWarmupSeconds),
+            ResetSeconds: attempts.Sum(a => a.Timing.ResetSeconds),
+            TestWorkSeconds: attempts.Sum(a => a.Timing.TestWorkSeconds),
+            TotalSeconds: attempts.Sum(a => a.Timing.TotalSeconds));
 
     private static string BuildSummaryLine(
         string suiteName,

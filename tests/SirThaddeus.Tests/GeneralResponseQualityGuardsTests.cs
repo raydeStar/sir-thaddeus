@@ -4,6 +4,34 @@ namespace SirThaddeus.Tests;
 
 public sealed class GeneralResponseQualityGuardsTests
 {
+    [Theory]
+    [InlineData("Hey, how are you doing? Just wanted to say thanks for your help.", "I'm doing well")]
+    [InlineData("Thank you, I really appreciate the help!", "You're very welcome")]
+    public void Apply_WhenTurnIsPureSocialThanks_ReturnsGroundedAcknowledgment(
+        string userMessage,
+        string expectedPrefix)
+    {
+        var result = GeneralResponseQualityGuards.Apply(
+            "Today's date is Sunday. Would you like clarification?",
+            userMessage);
+
+        Assert.StartsWith(expectedPrefix, result, StringComparison.Ordinal);
+        Assert.DoesNotContain("date", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("?", result, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Apply_WhenThanksIncludesActionableRequest_DoesNotReplaceDraft()
+    {
+        const string draft = "A hash table maps keys to values.";
+
+        var result = GeneralResponseQualityGuards.Apply(
+            draft,
+            "Thanks—now explain how a hash table works.");
+
+        Assert.Equal(draft, result);
+    }
+
     [Fact]
     public void Apply_WhenTcpHandshakeExplanationIsOverlong_CompressesToConciseStructuredAnswer()
     {

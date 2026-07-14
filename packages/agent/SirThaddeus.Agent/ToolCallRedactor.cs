@@ -186,6 +186,7 @@ public static class ToolCallRedactor
                 return $"[tool_list_capabilities: {output.Length} chars]";
 
             var names = new List<string>();
+            var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in doc.RootElement.EnumerateArray())
             {
                 if (entry.TryGetProperty("name", out var nameEl) &&
@@ -194,6 +195,14 @@ public static class ToolCallRedactor
                     var name = nameEl.GetString();
                     if (!string.IsNullOrWhiteSpace(name))
                         names.Add(name);
+                }
+
+                if (entry.TryGetProperty("category", out var categoryEl) &&
+                    categoryEl.ValueKind == JsonValueKind.String)
+                {
+                    var category = categoryEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(category))
+                        groups.Add(category.Trim());
                 }
                 if (names.Count >= 40) break; // keep the summary bounded
             }
@@ -205,7 +214,11 @@ public static class ToolCallRedactor
             // consumers (e.g. harness scoring) that require capitalized
             // or digit-bearing tokens see meaningful content.
             var joined = string.Join(", ", names);
-            return $"[tool_list_capabilities: {names.Count} tool(s): {Truncate(joined, 400)}]";
+            var groupSummary = groups.Count == 0
+                ? "unavailable"
+                : string.Join(", ", groups.OrderBy(group => group, StringComparer.OrdinalIgnoreCase));
+            return $"[tool_list_capabilities: {names.Count} tool(s); " +
+                   $"capability groups: {groupSummary}; tools: {Truncate(joined, 300)}]";
         }
         catch
         {

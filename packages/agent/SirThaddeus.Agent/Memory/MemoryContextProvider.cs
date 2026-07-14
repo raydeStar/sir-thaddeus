@@ -94,6 +94,7 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
                 argsObj["activeProfileId"] = request.ActiveProfileId;
 
             var args = JsonSerializer.Serialize(argsObj);
+            var retrievalStarted = _timeProvider.GetTimestamp();
             var callTask = CallToolWithAliasAsync(
                 MemoryRetrieveToolName,
                 MemoryRetrieveToolNameAlt,
@@ -106,6 +107,7 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
 
             if (!ReferenceEquals(completed, callTask))
             {
+                WriteLatency(request, "timeout", ElapsedMs(retrievalStarted));
                 _telemetry?.RecordRetrievalTimeout();
                 return new MemoryContextResult
                 {
@@ -122,6 +124,7 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
             }
 
             var call = await callTask;
+            WriteLatency(request, call.Success ? "complete" : "error", ElapsedMs(retrievalStarted));
             if (!call.Success)
             {
                 return new MemoryContextResult
@@ -493,6 +496,45 @@ public sealed class MemoryContextProvider : IMemoryContextProvider
         {
             // Best-effort telemetry.
         }
+    }
+
+    private void WriteLatency(MemoryContextRequest request, string outcome, long durationMs)
+    {
+        if (!LatencyTracingEnabled())
+            return;
+
+        var correlationId = System.Diagnostics.Activity.Current?
+            .GetBaggageItem("routing_correlation_id") ?? string.Empty;
+        var turnId = System.Diagnostics.Activity.Current?.GetBaggageItem("turn_id") ?? string.Empty;
+        try
+        {
+            _audit.Append(new AuditEvent
+            {
+                Actor = "agent",
+                Action = "MEMORY_RETRIEVAL_TIMING",
+                Result = outcome,
+                Details = new Dictionary<string, object>
+                {
+                    ["correlation_id"] = correlationId,
+                    ["turn_id"] = turnId,
+                    ["conversation_id"] = request.ConversationId ?? string.Empty,
+                    ["duration_ms"] = durationMs
+                }
+            });
+        }
+        catch
+        {
+            // Opt-in diagnostics must never affect memory fail-open behavior.
+        }
+    }
+
+    private static bool LatencyTracingEnabled()
+    {
+        var raw = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record ToolCallOutcome(string ToolName, string Result, bool Success);

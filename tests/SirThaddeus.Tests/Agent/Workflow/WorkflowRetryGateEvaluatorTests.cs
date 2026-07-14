@@ -74,6 +74,25 @@ public sealed class WorkflowRetryGateEvaluatorTests
     }
 
     [Fact]
+    public void Evaluate_BlocksSearchRetry_WhenRequestHasNoToolCapability()
+    {
+        var evaluator = new RetryGateEvaluator();
+        var state = CreateState(
+            maxRetries: 2,
+            retriesUsed: 0,
+            maxToolCalls: 8,
+            toolCallsUsed: 0,
+            timeBudgetSec: 30,
+            needsTools: false);
+        var confidence = new ConfidenceSnapshot { ShouldRetry = true };
+
+        var decision = evaluator.Evaluate(state, confidence, TimeSpan.FromSeconds(5));
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal("search_retry_not_applicable", decision.ReasonCode);
+    }
+
+    [Fact]
     public void Evaluate_BlocksRetry_ForConsensusPreservedSnapshot_EvenWithBudgetLeft()
     {
         // WorkflowChatRunCoordinator preserves a self-consistency vote by
@@ -98,7 +117,13 @@ public sealed class WorkflowRetryGateEvaluatorTests
         Assert.Equal("confidence_not_retry", decision.ReasonCode);
     }
 
-    private static TaskRunState CreateState(int maxRetries, int retriesUsed, int maxToolCalls, int toolCallsUsed, int timeBudgetSec)
+    private static TaskRunState CreateState(
+        int maxRetries,
+        int retriesUsed,
+        int maxToolCalls,
+        int toolCallsUsed,
+        int timeBudgetSec,
+        bool needsTools = true)
     {
         return new TaskRunState
         {
@@ -106,6 +131,7 @@ public sealed class WorkflowRetryGateEvaluatorTests
             {
                 UserRequest = "Find details",
                 Complexity = TaskComplexity.MultiStepResearch,
+                NeedsTools = needsTools,
                 MaxRetries = maxRetries,
                 MaxToolCalls = maxToolCalls,
                 TimeBudget = TimeSpan.FromSeconds(timeBudgetSec)

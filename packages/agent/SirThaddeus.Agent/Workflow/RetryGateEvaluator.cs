@@ -16,6 +16,13 @@ public sealed class RetryGateEvaluator : IRetryGateEvaluator
             return BuildBlocked("confidence_not_retry", "Confidence does not require retry.");
         }
 
+        if (!state.Envelope.NeedsTools)
+        {
+            return BuildBlocked(
+                "search_retry_not_applicable",
+                "The available retry strategies require live tools, but this request is direct-answer only.");
+        }
+
         if (remainingRetries <= 0)
         {
             return BuildBlocked("retry_budget_exhausted", "Retry budget exhausted.");

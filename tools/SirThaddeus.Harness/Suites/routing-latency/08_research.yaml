@@ -1,0 +1,16 @@
+id: routing_latency_research
+name: Routing latency - explicit research
+category: research
+user_message: "Research the latest stable .NET release and give me its version with one source."
+allowed_tools: [web_search, browser_navigate]
+mode: live
+assertions:
+  required_tools: [web_search]
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: false
+expectations:
+  required_keywords: []
+  forbidden_keywords: ["<think>", "</think>", "as an ai"]
+  max_response_chars: 900
+min_score: 6.0

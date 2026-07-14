@@ -73,14 +73,8 @@ internal sealed class WorkflowChatRunCoordinator
         var stopwatch = Stopwatch.StartNew();
         workflowDecorator.SetRunBudget(workflowState.Envelope.TimeBudget, stopwatch);
 
-        var firstPassPrompt = request.Prompt;
-        if (ShouldForceToolBackedLookup(workflowState.Envelope, request.Prompt))
-        {
-            firstPassPrompt = BuildToolBackedLookupPrompt(request.Prompt);
-        }
-
         var firstResponse = await effectiveOrchestrator.ProcessAsync(
-            firstPassPrompt,
+            request.Prompt,
             conversationId,
             runState.CancellationToken);
 
@@ -246,6 +240,16 @@ internal sealed class WorkflowChatRunCoordinator
                     ["confidenceBand"] = firstConfidence.Band,
                     ["confidenceScore"] = firstConfidence.Score.ToString("0.000", CultureInfo.InvariantCulture)
                 });
+        }
+
+        var guardedSelectedText = ToolBackedResponseQualityGuards.Apply(
+            selectedResponse.Text,
+            request.Prompt,
+            selectedResponse.ToolCallsMade);
+        if (!string.Equals(guardedSelectedText, selectedResponse.Text, StringComparison.Ordinal))
+        {
+            selectedResponse = selectedResponse with { Text = guardedSelectedText };
+            workflowState.DraftAnswer = guardedSelectedText;
         }
 
         var normalizedExplicitLookupContract = ExplicitWebNoResultsContractNormalizer.TryBuildResponse(
@@ -612,42 +616,6 @@ internal sealed class WorkflowChatRunCoordinator
         return $"{originalPrompt}\n\n" +
                "The previous answer may be low-confidence. Re-check with stronger evidence and explicit caveats.\n\n" +
                $"Previous answer for verification:\n{firstAnswer}";
-    }
-
-    private static bool ShouldForceToolBackedLookup(TaskEnvelope envelope, string prompt)
-    {
-        var lower = (prompt ?? string.Empty).Trim().ToLowerInvariant();
-        if (TaskClassifier.IsWorkflowDirectAnswerPrompt(lower))
-            return false;
-
-        if (!envelope.NeedsTools)
-            return false;
-
-        if (envelope.Complexity == TaskComplexity.Trivial)
-            return false;
-
-        if (!string.Equals(envelope.Intent, "lookup", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        return lower.Contains("hours") ||
-               lower.Contains("price") ||
-               lower.Contains("cheapest") ||
-               lower.Contains("stock") ||
-               lower.Contains("available") ||
-               lower.Contains("availability") ||
-               lower.Contains("latest") ||
-               lower.Contains("verify") ||
-               lower.Contains("compare") ||
-               lower.Contains("flight") ||
-               lower.Contains("today");
-    }
-
-    private static string BuildToolBackedLookupPrompt(string originalPrompt)
-    {
-        return $"{originalPrompt}\n\n" +
-               "Verification requirement: use web_search to gather live evidence before finalizing. " +
-               "If snippets are insufficient, use browser_navigate on one source. " +
-               "Do not answer from memory alone.";
     }
 
     private async Task PublishNarrationIfAnyAsync(

@@ -1,0 +1,16 @@
+id: routing_latency_reasoning
+name: Routing latency - tool-free reasoning
+category: reasoning
+user_message: "Think carefully: if every cedar is a tree and no tree is a mineral, can any cedar be a mineral? Explain briefly."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: ["no"]
+  forbidden_keywords: ["<think>", "</think>", "error", "timeout"]
+  max_response_chars: 500
+min_score: 7.0

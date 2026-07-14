@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SirThaddeus.Agent;
 using SirThaddeus.Config;
 using SirThaddeus.Harness.Execution;
 using SirThaddeus.Harness.Models;
@@ -45,5 +46,69 @@ public sealed class HarnessRuntimeSandboxTests
         Assert.Equal(string.Empty, persisted.RuntimeSafety.SafeModeReason);
         Assert.Equal(string.Empty, persisted.RuntimeSafety.SafeModeSinceUtc);
         Assert.Equal(sandbox.SettingsPath, sandbox.Environment["ST_SETTINGS_PATH"]);
+    }
+
+    [Fact]
+    public void CreateShared_Can_disable_managed_search_for_explicit_non_web_suites()
+    {
+        var baseSettings = new AppSettings
+        {
+            WebSearch = new WebSearchSettings
+            {
+                Mode = "auto",
+                SearxngAutoStart = true
+            }
+        };
+
+        using var sandbox = HarnessRuntimeSandbox.CreateShared(baseSettings, enableManagedSearch: false);
+
+        Assert.False(sandbox.Settings.WebSearch.SearxngAutoStart);
+    }
+
+    [Fact]
+    public void Host_requirements_only_start_managed_search_when_selected_tests_can_use_it()
+    {
+        var computeSuite = new HarnessSuite
+        {
+            Name = "compute",
+            Tests =
+            [
+                new HarnessTestCase
+                {
+                    Id = "compute",
+                    AllowedTools = ["python_eval"],
+                    Assertions = new HarnessAssertions { AllowedToolsOnly = true }
+                }
+            ]
+        };
+        var webSuite = new HarnessSuite
+        {
+            Name = "web",
+            Tests =
+            [
+                new HarnessTestCase
+                {
+                    Id = "web",
+                    AllowedTools = [ToolNames.WebSearch],
+                    Assertions = new HarnessAssertions { AllowedToolsOnly = true }
+                }
+            ]
+        };
+        var unrestrictedSuite = new HarnessSuite
+        {
+            Name = "unrestricted",
+            Tests =
+            [
+                new HarnessTestCase
+                {
+                    Id = "unrestricted",
+                    Assertions = new HarnessAssertions { AllowedToolsOnly = false }
+                }
+            ]
+        };
+
+        Assert.False(HarnessHostRequirements.FromSuites([computeSuite]).RequiresManagedSearch);
+        Assert.True(HarnessHostRequirements.FromSuites([webSuite]).RequiresManagedSearch);
+        Assert.True(HarnessHostRequirements.FromSuites([unrestrictedSuite]).RequiresManagedSearch);
     }
 }

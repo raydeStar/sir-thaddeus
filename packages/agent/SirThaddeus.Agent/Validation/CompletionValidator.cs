@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using SirThaddeus.Agent.Routing;
 using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Agent.Validation;
@@ -49,7 +50,7 @@ public sealed class CompletionValidator
             var result = await ValidateWithLlmAsync(
                 userRequest, assistantResponse, hasToolResults, cancellationToken);
             sw.Stop();
-            return result with { ElapsedMs = sw.Elapsed.TotalMilliseconds };
+            return result with { ElapsedMs = sw.Elapsed.TotalMilliseconds, UsedLlm = true };
         }
         catch
         {
@@ -58,7 +59,8 @@ public sealed class CompletionValidator
             return new CompletionValidationResult
             {
                 Passed = true,
-                ElapsedMs = sw.Elapsed.TotalMilliseconds
+                ElapsedMs = sw.Elapsed.TotalMilliseconds,
+                UsedLlm = true
             };
         }
     }
@@ -79,6 +81,36 @@ public sealed class CompletionValidator
                 RepairNeeded = true,
                 MissingElement = "Response is empty.",
                 SuggestedRepair = "Generate a substantive response to the user's request."
+            };
+        }
+
+        // Enforce an explicit, mechanically verifiable response contract before
+        // asking another model to judge the answer. This checks shape only; it
+        // never infers or validates the answer value.
+        if (ExplicitResponseContractDetector.RequiresLabeledMultipleChoiceLetter(userRequest) &&
+            !ExplicitResponseContractDetector.HasLabeledMultipleChoiceLetter(assistantResponse))
+        {
+            return new CompletionValidationResult
+            {
+                Passed = false,
+                RepairNeeded = true,
+                MissingElement =
+                    "Response did not put exactly one requested option letter in the labeled final-answer line.",
+                SuggestedRepair =
+                    "Keep any useful work brief and end with exactly `Final answer: <letter>`, using one offered option letter."
+            };
+        }
+
+        if (ExplicitResponseContractDetector.RequiresLabeledFinalAnswerLine(userRequest) &&
+            !ExplicitResponseContractDetector.HasLabeledFinalAnswerLine(assistantResponse))
+        {
+            return new CompletionValidationResult
+            {
+                Passed = false,
+                RepairNeeded = true,
+                MissingElement = "Response omitted the explicitly requested labeled final-answer line.",
+                SuggestedRepair =
+                    "Keep the correct content and add a final line in the exact form `Final answer: <answer>`."
             };
         }
 

@@ -75,6 +75,32 @@ public sealed class WorkflowTaskClassifierTests
         Assert.False(envelope.ShowChecklist);
     }
 
+    [Fact]
+    public async Task ExplicitAnswerContract_IgnoresResearchWordsInsideQuotedExamples()
+    {
+        var envelope = await _classifier.ClassifyAsync(
+            "Put the final answer on its own line as `Final answer: <answer>`.\n\n" +
+            "Example: Compare the plans and research current pricing.\n\n" +
+            "Question: Which option is correct? A. One B. Two",
+            CancellationToken.None);
+
+        Assert.Equal(TaskComplexity.Trivial, envelope.Complexity);
+        Assert.Equal("direct_answer", envelope.Intent);
+        Assert.False(envelope.NeedsTools);
+        Assert.False(envelope.ShowChecklist);
+    }
+
+    [Fact]
+    public async Task ResearchRequest_WithOutputContract_RemainsResearch()
+    {
+        var envelope = await _classifier.ClassifyAsync(
+            "Research the current release status, verify it with sources, and return only the version number.",
+            CancellationToken.None);
+
+        Assert.Equal(TaskComplexity.MultiStepResearch, envelope.Complexity);
+        Assert.True(envelope.NeedsTools);
+    }
+
     // ── MultiStepResearch prompts ────────────────────────────────────────────
 
     [Fact]

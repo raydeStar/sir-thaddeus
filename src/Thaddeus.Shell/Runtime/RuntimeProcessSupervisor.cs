@@ -13,9 +13,12 @@ namespace Thaddeus.Shell.Runtime;
 /// </summary>
 public sealed class RuntimeProcessSupervisor : IAsyncDisposable
 {
+    private static readonly TimeSpan DefaultStartupTimeout = TimeSpan.FromSeconds(15);
+
     private readonly ILogger<RuntimeProcessSupervisor> _logger;
     private readonly string _lockFilePath;
     private readonly bool _testMode;
+    private readonly TimeSpan _startupTimeout;
     private Process? _process;
 
     /// <summary>
@@ -30,11 +33,17 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
     public RuntimeProcessSupervisor(
         ILogger<RuntimeProcessSupervisor> logger,
         string? lockFilePath = null,
-        bool testMode = false)
+        bool testMode = false,
+        TimeSpan? startupTimeout = null)
     {
         _logger = logger;
         _lockFilePath = lockFilePath ?? RuntimeLockFileReader.GetDefaultPath();
         _testMode = testMode;
+        _startupTimeout = startupTimeout ?? DefaultStartupTimeout;
+        if (_startupTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(startupTimeout), "Startup timeout must be positive.");
+        }
     }
 
     /// <summary>Spawns or attaches and returns the resolved lock-file contents.</summary>
@@ -141,7 +150,7 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
 
     private async Task<RuntimeLockFile> WaitForLockFileAsync(CancellationToken ct)
     {
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(15);
+        var deadline = DateTimeOffset.UtcNow + _startupTimeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
@@ -153,7 +162,7 @@ public sealed class RuntimeProcessSupervisor : IAsyncDisposable
             }
             await Task.Delay(100, ct).ConfigureAwait(false);
         }
-        throw new TimeoutException("Runtime did not become ready within 15 seconds.");
+        throw new TimeoutException($"Runtime did not become ready within {_startupTimeout.TotalSeconds:0.#} seconds.");
     }
 
     private static (string command, string workingDirectory, IReadOnlyList<string> args) ResolveRuntimeLaunchInfo()

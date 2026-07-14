@@ -215,7 +215,7 @@ jobs:
     needs: [package-windows, package-linux, package-macos]
     if: >
       github.event_name == 'push' &&
-      github.ref == 'refs/heads/dev'
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     runs-on: windows-latest
     timeout-minutes: 25
 
@@ -244,7 +244,7 @@ jobs:
     needs: [package-linux]
     if: >
       github.event_name == 'push' &&
-      github.ref == 'refs/heads/dev'
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -273,7 +273,7 @@ jobs:
     needs: [package-macos]
     if: >
       github.event_name == 'push' &&
-      github.ref == 'refs/heads/dev'
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     runs-on: macos-latest
     timeout-minutes: 25
 
@@ -305,9 +305,9 @@ jobs:
       needs.package-windows.result == 'success' &&
       needs.package-linux.result == 'success' &&
       needs.package-macos.result == 'success' &&
-      (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped') &&
-      (needs.smoke-test-linux.result == 'success' || needs.smoke-test-linux.result == 'skipped') &&
-      (needs.smoke-test-macos.result == 'success' || needs.smoke-test-macos.result == 'skipped') &&
+      needs.smoke-test.result == 'success' &&
+      needs.smoke-test-linux.result == 'success' &&
+      needs.smoke-test-macos.result == 'success' &&
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     runs-on: ubuntu-latest

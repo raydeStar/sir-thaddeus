@@ -1,0 +1,16 @@
+id: routing_latency_utility
+name: Routing latency - deterministic utility
+category: utility
+user_message: "What is 18 percent of 250? Reply with the number and one short sentence."
+allowed_tools: []
+mode: live
+assertions:
+  required_tools: []
+  allowed_tools_only: true
+  require_structured_errors: true
+  require_no_hallucinated_citations: true
+expectations:
+  required_keywords: ["45"]
+  forbidden_keywords: ["<think>", "</think>", "error", "timeout"]
+  max_response_chars: 300
+min_score: 7.0
