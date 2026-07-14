@@ -68,8 +68,9 @@ jobs:
     name: Package Windows Build Artifact
     needs: test
     if: >
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'))
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -122,8 +123,9 @@ jobs:
     name: Package Linux Build Artifact
     needs: test
     if: >
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -168,8 +170,9 @@ jobs:
     name: Package macOS Build Artifact
     needs: test
     if: >
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'))
     runs-on: macos-latest
     timeout-minutes: 45
 
@@ -214,8 +217,9 @@ jobs:
     name: Smoke Test Package (Windows)
     needs: [package-windows, package-linux, package-macos]
     if: >
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'))
     runs-on: windows-latest
     timeout-minutes: 25
 
@@ -243,8 +247,9 @@ jobs:
     name: Smoke Test Package (Linux)
     needs: [package-linux]
     if: >
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'))
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -272,8 +277,9 @@ jobs:
     name: Smoke Test Package (macOS)
     needs: [package-macos]
     if: >
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'))
     runs-on: macos-latest
     timeout-minutes: 25
 

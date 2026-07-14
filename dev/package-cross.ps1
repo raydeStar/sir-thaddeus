@@ -239,15 +239,20 @@ $filesToCopy = @(
 )
 
 foreach ($entry in $filesToCopy) {
-    $srcPath = Join-Path $RepoRoot $entry.Source
-    $destName = if ($entry.Dest) { $entry.Dest } else { Split-Path $entry.Source -Leaf }
+    $source = [string]$entry["Source"]
+    $srcPath = Join-Path $RepoRoot $source
+    $destName = if ($entry.ContainsKey("Dest") -and -not [string]::IsNullOrWhiteSpace([string]$entry["Dest"])) {
+        [string]$entry["Dest"]
+    } else {
+        Split-Path $source -Leaf
+    }
     if (Test-Path $srcPath) {
         Copy-Item -Path $srcPath -Destination (Join-Path $stageDir $destName) -Force
         Write-Host "  Staged: $destName"
-    } elseif ($entry.Required) {
-        Fail "Required file missing: $($entry.Source)"
+    } elseif ($entry.ContainsKey("Required") -and [bool]$entry["Required"]) {
+        Fail "Required file missing: $source"
     } else {
-        Write-Host "  WARN: optional file not found: $($entry.Source)" -ForegroundColor Yellow
+        Write-Host "  WARN: optional file not found: $source" -ForegroundColor Yellow
     }
 }
 
