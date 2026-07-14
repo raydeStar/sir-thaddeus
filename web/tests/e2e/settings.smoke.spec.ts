@@ -42,6 +42,14 @@ test.describe('settings smoke', () => {
     const gkState = await gkBanner.getAttribute('data-state');
     expect(['active', 'unreachable', 'not-configured']).toContain(gkState);
 
+    // Diagnostics is a separately owned settings feature. Keep its tab and
+    // both viewer modes covered when the route is reorganized.
+    await page.getByTestId('settings-tab-logs').click();
+    await expect(page.getByTestId('settings-logs-paths')).toBeVisible();
+    await expect(page.getByTestId('settings-logs-pane-traces')).toBeVisible();
+    await page.getByTestId('settings-logs-pane-runtime').click();
+    await expect(page.getByTestId('settings-logs-pane-runtime')).toHaveAttribute('aria-selected', 'true');
+
     // Save.
     await page.getByTestId('settings-save').click();
     await expect(page.getByTestId('settings-saved')).toBeVisible({ timeout: 5_000 });
