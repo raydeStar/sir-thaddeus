@@ -21,9 +21,13 @@ public class PythonSandboxToolsTests
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             });
-            if (probe is null)
+            if (probe is null || !probe.WaitForExit(5_000) || probe.ExitCode != 0)
                 return false;
-            return probe.WaitForExit(5_000) && probe.ExitCode == 0;
+
+            // The sandbox image is Linux-only. A reachable Windows-container
+            // daemon cannot run it and must not enable these integration tests.
+            var serverOs = probe.StandardOutput.ReadToEnd().Trim();
+            return string.Equals(serverOs, "linux", StringComparison.OrdinalIgnoreCase);
         }
         catch
         {

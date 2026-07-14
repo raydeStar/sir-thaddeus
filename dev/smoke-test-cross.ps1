@@ -87,7 +87,14 @@ elseif ($ArchivePath) {
         Write-Host "ERROR: tar extraction failed (exit code $LASTEXITCODE)" -ForegroundColor Red
         exit 1
     }
-    $testDir = $extractDir
+    # Release archives intentionally wrap their contents in one versioned
+    # top-level directory. Validate the package root, not its parent.
+    $archiveRoots = @(Get-ChildItem -LiteralPath $extractDir -Force)
+    $testDir = if ($archiveRoots.Count -eq 1 -and $archiveRoots[0].PSIsContainer) {
+        $archiveRoots[0].FullName
+    } else {
+        $extractDir
+    }
     Write-Host "  Extracted to: $testDir"
 }
 else {
@@ -98,8 +105,8 @@ else {
 Write-Section "Cross-Platform Smoke Test: $testDir"
 
 # Detect platform from archive contents or environment
-$isLinux = $IsLinux -or ($ArchivePath -match 'linux')
-$isMacOS = $IsMacOS -or ($ArchivePath -match 'osx')
+$targetIsLinux = $IsLinux -or ($ArchivePath -match 'linux')
+$targetIsMacOS = $IsMacOS -or ($ArchivePath -match 'osx')
 
 $exeSuffix = ""  # No .exe on Linux/macOS
 
@@ -149,7 +156,7 @@ else {
 }
 
 # Launcher script
-if ($isLinux) {
+if ($targetIsLinux) {
     $launcher = Join-Path $testDir "launch.sh"
     if (Test-Path $launcher) {
         Pass "launch.sh present"
@@ -158,7 +165,7 @@ if ($isLinux) {
         Warn "launch.sh missing"
     }
 }
-elseif ($isMacOS) {
+elseif ($targetIsMacOS) {
     $launcher = Join-Path $testDir "launch.command"
     if (Test-Path $launcher) {
         Pass "launch.command present"
@@ -198,7 +205,7 @@ if (-not $SkipLaunch) {
     }
     else {
         # Ensure the binary is executable on Linux/macOS
-        if ($isLinux -or $isMacOS) {
+        if ($targetIsLinux -or $targetIsMacOS) {
             chmod +x $headlessBinary 2>$null
         }
 

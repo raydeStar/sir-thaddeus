@@ -136,7 +136,7 @@ public sealed class HelperModelTimeoutTests
     {
         var audit = new TestAuditLogger();
         var extractor = new SlotExtract(
-            new SlowFakeLlmClient(delayMs: 500),
+            new CancellationOnlyLlmClient(),
             audit,
             timeout: TimeSpan.FromMilliseconds(20));
 
@@ -190,6 +190,28 @@ public sealed class HelperModelTimeoutTests
 
         public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<string?>("timeout-throwing-fake");
+    }
+
+    private sealed class CancellationOnlyLlmClient : ILlmClient
+    {
+        public async Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools = null,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Cancellation-only fake completed unexpectedly.");
+        }
+
+        public Task<LlmResponse> ChatAsync(
+            IReadOnlyList<ChatMessage> messages,
+            IReadOnlyList<ToolDefinition>? tools,
+            int maxTokensOverride,
+            CancellationToken cancellationToken = default)
+            => ChatAsync(messages, tools, cancellationToken);
+
+        public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<string?>("cancellation-only-fake");
     }
 
     private sealed class CountingLlmClient : ILlmClient
