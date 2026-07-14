@@ -65,7 +65,10 @@ public sealed class StartupDiagnosticsTests
                 Llm = new LlmSettings { BaseUrl = $"http://127.0.0.1:{port}" },
             };
 
-            var report = await StartupDiagnostics.RunAsync(settings, perCheckTimeout: TimeSpan.FromSeconds(2));
+            // Shared CI runners can briefly starve the loopback listener while the
+            // wider test suite runs in parallel. This test verifies a successful
+            // response, not the production timeout budget, so leave ample headroom.
+            var report = await StartupDiagnostics.RunAsync(settings, perCheckTimeout: TimeSpan.FromSeconds(10));
 
             var llmCheck = report.Checks.Single(c => c.Name == "llm.reachable");
             Assert.Equal(StartupCheckStatus.Ok, llmCheck.Status);
