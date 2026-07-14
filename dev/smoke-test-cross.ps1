@@ -87,7 +87,14 @@ elseif ($ArchivePath) {
         Write-Host "ERROR: tar extraction failed (exit code $LASTEXITCODE)" -ForegroundColor Red
         exit 1
     }
-    $testDir = $extractDir
+    # Release archives intentionally wrap their contents in one versioned
+    # top-level directory. Validate the package root, not its parent.
+    $archiveRoots = @(Get-ChildItem -LiteralPath $extractDir -Force)
+    $testDir = if ($archiveRoots.Count -eq 1 -and $archiveRoots[0].PSIsContainer) {
+        $archiveRoots[0].FullName
+    } else {
+        $extractDir
+    }
     Write-Host "  Extracted to: $testDir"
 }
 else {
