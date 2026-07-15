@@ -21,7 +21,7 @@ internal static partial class WikiRootCreateSelectionPolicy
         if (IsNonActionRequest(lower) || ContainsWord(lower, "page"))
             return null;
 
-        if (!ExplicitRootCreateRegex().IsMatch(lower))
+        if (!ExplicitRootCreateRegex().IsMatch(lower) && !DirectNeedForRootRegex().IsMatch(lower))
             return null;
 
         return advertisedTools.Any(tool =>
@@ -58,7 +58,12 @@ internal static partial class WikiRootCreateSelectionPolicy
     }
 
     [GeneratedRegex(
-        @"^(?:(?:please|kindly)\s*,?\s*|(?:can|could|would|will)\s+you\s+(?:please\s+)?|(?:i\s+(?:want|need|would\s+like)\s+you\s+to)\s+|(?:i(?:'d|\s+would)\s+like\s+you\s+to)\s+|(?:go\s+ahead\s+and)\s+)?(?:create|add|make|start|open)\b.{0,96}\bwiki(?:\s+canvas)?\s+root\b",
+        @"^(?:(?:please|kindly)\s*,?\s*|(?:can|could|would|will)\s+you\s+(?:please\s+)?|(?:i\s+(?:want|need|would\s+like)\s+you\s+to)\s+|(?:i(?:'d|\s+would)\s+like\s+you\s+to)\s+|(?:go\s+ahead\s+and)\s+)?(?:create|add|make|start|open|establish|initialize|prepare|provision|build|set\s+up|spin\s+up)\b.{0,96}\bwiki(?:\s+canvas)?\s+root\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ExplicitRootCreateRegex();
+
+    [GeneratedRegex(
+        @"^i\s+need\s+(?:a\s+)?(?:new\s+)?wiki(?:\s+canvas)?\s+root\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex DirectNeedForRootRegex();
 }
