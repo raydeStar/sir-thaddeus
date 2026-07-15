@@ -13,11 +13,25 @@ public sealed class HarnessToolEvidenceStore
     private readonly ConcurrentDictionary<string, ToolCallRecord[]> _byMessageId =
         new(StringComparer.Ordinal);
 
-    public void Capture(string messageId, IReadOnlyList<ToolCallRecord> toolCalls)
+    public void Append(
+        string messageId,
+        string toolName,
+        string arguments,
+        string result,
+        bool success)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(messageId);
-        ArgumentNullException.ThrowIfNull(toolCalls);
-        _byMessageId[messageId] = toolCalls.Select(call => call with { }).ToArray();
+        var call = new ToolCallRecord
+        {
+            ToolName = toolName,
+            Arguments = arguments,
+            Result = result,
+            Success = success
+        };
+        _byMessageId.AddOrUpdate(
+            messageId,
+            _ => [call],
+            (_, existing) => [.. existing, call]);
     }
 
     public IReadOnlyList<ToolCallRecord> Get(string messageId) =>

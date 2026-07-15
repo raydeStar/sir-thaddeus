@@ -283,7 +283,16 @@ public sealed partial class LmStudioAssistant : IAssistant
             gateAdapter,
             sessionId: messageId);
 
-        var pipeline = BuildTurnPipeline(auditedMcp, sink);
+        IMcpToolClient pipelineMcp = auditedMcp;
+        if (HarnessControlPlane.IsHarnessReuseEnabled() && HarnessToolEvidence is not null)
+        {
+            pipelineMcp = new HarnessEvidenceMcpToolClient(
+                auditedMcp,
+                HarnessToolEvidence,
+                messageId);
+        }
+
+        var pipeline = BuildTurnPipeline(pipelineMcp, sink);
 
         var initialContext = new TurnContext
         {
@@ -319,9 +328,6 @@ public sealed partial class LmStudioAssistant : IAssistant
             _logger.LogWarning(ex, "lmstudio_assistant.pipeline_failed thread={ThreadId}", threadId);
             response = new AgentResponse { Text = $"(LLM error: {ex.Message})", Success = false };
         }
-
-        if (HarnessControlPlane.IsHarnessReuseEnabled())
-            HarnessToolEvidence?.Capture(messageId, response.ToolCallsMade);
 
         var fullReply = response.Text;
 
