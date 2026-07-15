@@ -229,6 +229,33 @@ public class LmStudioAssistantTests : IDisposable
     }
 
     [Fact]
+    public async Task RespondAsync_honors_harness_tool_allowlist()
+    {
+        var previous = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        Environment.SetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS", "wiki_root_create");
+        try
+        {
+            var tools = new[]
+            {
+                McpTool("wiki_root_create"),
+                McpTool("python_eval"),
+            };
+            var (store, assistant, _, fake) = NewSut(tools: tools);
+            var thread = await store.CreateAsync("t", CancellationToken.None);
+
+            await assistant.RespondAsync(thread.Id, "create the requested wiki", CancellationToken.None);
+
+            var sentTools = fake.ToolCalls.Single();
+            Assert.Single(sentTools);
+            Assert.Equal("wiki_root_create", sentTools[0].Function.Name);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS", previous);
+        }
+    }
+
+    [Fact]
     public async Task RespondAsync_keeps_calculator_and_python_eval_when_footman_narrows_to_chat()
     {
         // The footman classifies a greeting as AgentState.Chat, which narrows

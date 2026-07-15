@@ -241,6 +241,34 @@ hard-gate failure counts. They also separate runtime warmup, per-test reset,
 test work, host total, and remaining harness overhead so latency regressions can
 be attributed instead of inferred from one wall-clock number.
 
+### Final-state observations
+
+The v2 harness target can arrange disposable Wiki Canvas state before a turn
+and write a normalized post-turn snapshot to `observations.json`. This is for
+strict outcome scoring in the separate evaluator repository; it does not score
+assistant prose and it does not send expected final state to the model.
+
+```json
+{
+  "state_setup": {
+    "wiki_roots": [
+      {
+        "name": "Research",
+        "pages": [{ "title": "Plan", "markdown": "before" }]
+      }
+    ]
+  },
+  "observations": [
+    { "type": "wiki", "root_names": ["Research"] }
+  ]
+}
+```
+
+Run these fixtures with `--target v2`. Setup and observation scope are recorded
+in `input.json` for reproducibility. Expected state and scorer predicates stay
+outside the product repository. The harness tool allowlist is authoritative for
+these runs, so the Footman cannot remove a fixture-pinned tool.
+
 ### Routing latency diagnostics
 
 Routing diagnostics are opt-in and do not change normal execution:

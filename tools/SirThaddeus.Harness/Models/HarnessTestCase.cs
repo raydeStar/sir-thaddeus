@@ -67,6 +67,54 @@ public sealed record HarnessTestCase
     [JsonPropertyName("stub")]
     [YamlMember(Alias = "stub")]
     public HarnessStubConfig Stub { get; init; } = new();
+
+    [JsonPropertyName("state_setup")]
+    [YamlMember(Alias = "state_setup")]
+    public HarnessStateSetup StateSetup { get; init; } = new();
+
+    [JsonPropertyName("observations")]
+    [YamlMember(Alias = "observations")]
+    public List<HarnessObservationRequest> Observations { get; init; } = [];
+}
+
+public sealed record HarnessStateSetup
+{
+    [JsonPropertyName("wiki_roots")]
+    [YamlMember(Alias = "wiki_roots")]
+    public List<HarnessWikiRootSetup> WikiRoots { get; init; } = [];
+}
+
+public sealed record HarnessWikiRootSetup
+{
+    [JsonPropertyName("name")]
+    [YamlMember(Alias = "name")]
+    public string Name { get; init; } = "";
+
+    [JsonPropertyName("pages")]
+    [YamlMember(Alias = "pages")]
+    public List<HarnessWikiPageSetup> Pages { get; init; } = [];
+}
+
+public sealed record HarnessWikiPageSetup
+{
+    [JsonPropertyName("title")]
+    [YamlMember(Alias = "title")]
+    public string Title { get; init; } = "";
+
+    [JsonPropertyName("markdown")]
+    [YamlMember(Alias = "markdown")]
+    public string Markdown { get; init; } = "";
+}
+
+public sealed record HarnessObservationRequest
+{
+    [JsonPropertyName("type")]
+    [YamlMember(Alias = "type")]
+    public string Type { get; init; } = "";
+
+    [JsonPropertyName("root_names")]
+    [YamlMember(Alias = "root_names")]
+    public List<string> RootNames { get; init; } = [];
 }
 
 public sealed record HarnessAssertions

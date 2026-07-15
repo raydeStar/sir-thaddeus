@@ -7,6 +7,7 @@ using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Pipeline.Steps;
 using SirThaddeus.Agent.Routing;
 using SirThaddeus.Agent.Search;
+using SirThaddeus.Agent.Tools;
 using SirThaddeus.Agent.Validation;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
@@ -389,38 +390,22 @@ public sealed partial class LmStudioAssistant : IAssistant
     /// </summary>
     private async Task<IReadOnlyList<ToolDefinition>> BuildToolDefinitionsAsync(CancellationToken ct)
     {
-        IReadOnlyList<McpToolInfo> mcpTools;
-        try
-        {
-            mcpTools = await _mcp.ListToolsAsync(ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "mcp.list_tools_failed");
-            return Array.Empty<ToolDefinition>();
-        }
+        var builder = new ToolDefinitionBuilder(_mcp);
+        var definitions = await builder.BuildAsync(
+            memoryEnabled: true,
+            panicModeEnabled: false,
+            safeModeEnabled: false,
+            logEvent: (_, message) => _logger.LogDebug("tool.discovery {Message}", message),
+            cancellationToken: ct).ConfigureAwait(false);
 
-        if (mcpTools.Count == 0) return Array.Empty<ToolDefinition>();
+        if (!OfflineMode)
+            return definitions;
 
-        var defs = new List<ToolDefinition>(mcpTools.Count);
-        foreach (var t in mcpTools)
-        {
-            if (OfflineMode && RuntimeToolGroupClassifier.Instance.Classify(t.Name) == ToolGroup.Web.ToString())
-                continue;
-
-            defs.Add(new ToolDefinition
-            {
-                Function = new FunctionDefinition
-                {
-                    Name = t.Name,
-                    Description = t.Description,
-                    // Parameters schema is an arbitrary JSON object; the MCP
-                    // client already returns it in the right shape.
-                    Parameters = t.InputSchema,
-                }
-            });
-        }
-        return defs;
+        return definitions
+            .Where(definition =>
+                RuntimeToolGroupClassifier.Instance.Classify(definition.Function.Name)
+                != ToolGroup.Web.ToString())
+            .ToArray();
     }
 
     private IEnumerable<LlmChatMessage> BuildHistory(ChatThread? thread)
