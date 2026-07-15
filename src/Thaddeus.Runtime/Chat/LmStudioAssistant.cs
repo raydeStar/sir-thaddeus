@@ -12,6 +12,7 @@ using SirThaddeus.Agent.Validation;
 using SirThaddeus.AuditLog;
 using SirThaddeus.LlmClient;
 using SirThaddeus.PersonalityEngine;
+using SirThaddeus.RuntimeHost.Harness;
 using Thaddeus.Runtime.Chat.Pipeline;
 using Thaddeus.Runtime.Tools;
 using Thaddeus.SharedTypes;
@@ -138,6 +139,12 @@ public sealed partial class LmStudioAssistant : IAssistant
     /// Null disables repair (validator can still run diagnostically).
     /// </summary>
     public RepairLoop? CompletionRepairLoop { get; init; }
+
+    /// <summary>
+    /// Optional isolated-run capture for exact tool evidence. It is populated
+    /// only when the runtime was launched in harness mode.
+    /// </summary>
+    public HarnessToolEvidenceStore? HarnessToolEvidence { get; init; }
 
     /// <summary>
     /// Optional per-conversation dialogue-state accessor for
@@ -312,6 +319,9 @@ public sealed partial class LmStudioAssistant : IAssistant
             _logger.LogWarning(ex, "lmstudio_assistant.pipeline_failed thread={ThreadId}", threadId);
             response = new AgentResponse { Text = $"(LLM error: {ex.Message})", Success = false };
         }
+
+        if (HarnessControlPlane.IsHarnessReuseEnabled())
+            HarnessToolEvidence?.Capture(messageId, response.ToolCallsMade);
 
         var fullReply = response.Text;
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
@@ -24,10 +25,21 @@ internal static partial class RuntimeApiServer
     /// </summary>
     private static void MapHarnessEndpoints(
         WebApplication app,
+        ConcurrentDictionary<string, RunState> runs,
         Func<AppSettings> getSettings,
         ApiPermissionGate? permissionGate,
         Action? resetToolBudgets)
     {
+        app.MapGet("/api/harness/runs/{runId}/tool-evidence", (string runId) =>
+        {
+            if (!HarnessControlPlane.IsHarnessReuseEnabled())
+                return Results.NotFound();
+
+            return runs.TryGetValue(runId, out var state)
+                ? Results.Json(state.GetHarnessToolEvidence(), JsonOptions)
+                : Results.NotFound();
+        });
+
         app.MapPost("/api/harness/reset", (HarnessResetRequest request) =>
         {
             if (!HarnessControlPlane.IsHarnessReuseEnabled())

@@ -6,6 +6,7 @@ using SirThaddeus.Agent.Workflow;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
 using SirThaddeus.Contracts;
+using SirThaddeus.RuntimeHost.Harness;
 using System.Text.Json;
 
 internal sealed class WorkflowChatRunCoordinator
@@ -275,6 +276,9 @@ internal sealed class WorkflowChatRunCoordinator
             workflowState.Checklist.CurrentPhase = "Delivering response";
             PublishChecklist(runState, workflowState);
         }
+
+        if (HarnessControlPlane.IsHarnessReuseEnabled())
+            runState.SetHarnessToolEvidence(selectedResponse.ToolCallsMade);
 
         runState.Append(RuntimeEventTypes.TokenDelta, new TokenDeltaPayload(selectedResponse.Text, 0));
         runState.Append(

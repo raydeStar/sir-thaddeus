@@ -110,8 +110,10 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
 
         var workStopwatch = Stopwatch.StartNew();
         var usageBefore = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
-        var (finalText, success, error) =
+        var (finalText, success, error, messageId) =
             await RunChatAsync(test.UserMessage, cancellationToken).ConfigureAwait(false);
+        var fullToolEvidence = await GetHarnessToolEvidenceAsync(messageId, cancellationToken)
+            .ConfigureAwait(false);
         var usageAfter = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
         workStopwatch.Stop();
         var workSeconds = workStopwatch.Elapsed.TotalSeconds;
@@ -121,8 +123,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         // snippet, which the scorer can't use to detect token incorporation;
         // the audit file has the full input/output. Same canonical path as v1.
         var auditFile = ResolveAuditFilePath();
-        var (toolCalls, toolTurns, steps) =
-            AuditTraceBuilder.BuildFromAuditFile(auditFile, auditCaptureStart);
+        var trace = AuditTraceBuilder.BuildFromAuditFile(auditFile, auditCaptureStart);
+        var (toolCalls, toolTurns, steps) = ToolEvidenceTraceEnricher.Enrich(trace, fullToolEvidence);
 
         var finalSteps = steps.ToList();
         finalSteps.Add(new TraceStep
@@ -521,6 +523,20 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             ?? new LlmUsageSnapshot();
     }
 
+    private async Task<IReadOnlyList<ToolCallRecord>> GetHarnessToolEvidenceAsync(
+        string messageId,
+        CancellationToken cancellationToken)
+    {
+        Debug.Assert(_http is not null);
+        using var response = await _http!.GetAsync(
+            $"api/harness/messages/{Uri.EscapeDataString(messageId)}/tool-evidence",
+            cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ToolCallRecord[]>(JsonOptions, cancellationToken)
+            .ConfigureAwait(false)
+            ?? [];
+    }
+
     private async Task<JsonElement?> CaptureObservedStateAsync(
         IReadOnlyList<HarnessObservationRequest> requests,
         CancellationToken cancellationToken)
@@ -585,7 +601,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             JsonOptions);
     }
 
-    private async Task<(string FinalText, bool Success, string? Error)>
+    private async Task<(string FinalText, bool Success, string? Error, string MessageId)>
         RunChatAsync(string userMessage, CancellationToken cancellationToken)
     {
         Debug.Assert(_http is not null);
@@ -643,10 +659,15 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
                     ? ft.GetString() ?? string.Empty
                     : string.Empty;
                 var cancelled = payload.TryGetProperty("cancelled", out var c) && c.GetBoolean();
-                return (finalText, !cancelled, cancelled ? "cancelled" : null);
+                var messageId = payload.TryGetProperty("messageId", out var messageIdElement)
+                    ? messageIdElement.GetString()
+                    : null;
+                if (string.IsNullOrWhiteSpace(messageId))
+                    throw new InvalidOperationException("chat.turn.complete messageId missing");
+                return (finalText, !cancelled, cancelled ? "cancelled" : null, messageId);
             }
         }
-        return (finalText, false, "WebSocket closed before turn completed");
+        return (finalText, false, "WebSocket closed before turn completed", string.Empty);
     }
 
     private string ResolveAuditFilePath()

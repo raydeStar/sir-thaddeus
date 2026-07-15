@@ -138,6 +138,7 @@ public static class Program
             });
             builder.Services.AddSingleton<StubAssistant>();
             builder.Services.AddSingleton<LlmRuntimeRegistry>();
+            builder.Services.AddSingleton<HarnessToolEvidenceStore>();
             builder.Services.AddSingleton<IAssistant, AssistantRouter>();
             builder.Services.AddSingleton<IActivityLog>(_ => new InMemoryActivityLog(capacity: 500));
             // The SQLite-backed semantic memory store. Previously this was

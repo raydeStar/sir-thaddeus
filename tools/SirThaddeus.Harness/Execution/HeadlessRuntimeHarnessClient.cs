@@ -143,6 +143,7 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
         var usageBefore = await GetLlmUsageAsync(cancellationToken);
         var startResponse = await PostChatAsync(test.UserMessage, cancellationToken);
         var runOutcome = await ReadRunToCompletionAsync(startResponse.RunId, cancellationToken);
+        var fullToolEvidence = await GetHarnessToolEvidenceAsync(startResponse.RunId, cancellationToken);
         var usageAfter = await GetLlmUsageAsync(cancellationToken);
         workStopwatch.Stop();
         var workSeconds = workStopwatch.Elapsed.TotalSeconds;
@@ -152,7 +153,8 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
             auditBaseline,
             await GetAuditEntriesAsync(cancellationToken));
 
-        var (toolCalls, toolTurns, steps) = BuildToolTraceFromAudit(auditEntries);
+        var trace = BuildToolTraceFromAudit(auditEntries);
+        var (toolCalls, toolTurns, steps) = ToolEvidenceTraceEnricher.Enrich(trace, fullToolEvidence);
 
         var finalSteps = steps.ToList();
         finalSteps.Add(new TraceStep
@@ -420,6 +422,17 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<LlmUsageSnapshot>(JsonOptions, cancellationToken)
                ?? new LlmUsageSnapshot();
+    }
+
+    private async Task<IReadOnlyList<ToolCallRecord>> GetHarnessToolEvidenceAsync(
+        string runId,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _http.GetAsync(
+            $"api/harness/runs/{Uri.EscapeDataString(runId)}/tool-evidence",
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ToolCallRecord[]>(JsonOptions, cancellationToken) ?? [];
     }
 
     private async Task<(bool Success, string FinalText, string? Error, IReadOnlyList<AgentSource> Sources)> ReadRunToCompletionAsync(

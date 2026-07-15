@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using SirThaddeus.Agent;
 using SirThaddeus.Contracts;
 
 internal static partial class RuntimeApiServer
@@ -10,6 +11,7 @@ internal static partial class RuntimeApiServer
         private readonly List<RuntimeEventEnvelope> _history = [];
         private readonly List<ChannelWriter<RuntimeEventEnvelope>> _subscribers = [];
         private readonly CancellationTokenSource _cancellation = new();
+        private IReadOnlyList<ToolCallRecord> _harnessToolEvidence = [];
         private bool _completed;
 
         public RunState(string runId)
@@ -21,6 +23,23 @@ internal static partial class RuntimeApiServer
         public CancellationToken CancellationToken => _cancellation.Token;
 
         public void Cancel() => _cancellation.Cancel();
+
+        public void SetHarnessToolEvidence(IReadOnlyList<ToolCallRecord> toolCalls)
+        {
+            ArgumentNullException.ThrowIfNull(toolCalls);
+            lock (_gate)
+            {
+                _harnessToolEvidence = toolCalls.Select(call => call with { }).ToArray();
+            }
+        }
+
+        public IReadOnlyList<ToolCallRecord> GetHarnessToolEvidence()
+        {
+            lock (_gate)
+            {
+                return _harnessToolEvidence.Select(call => call with { }).ToArray();
+            }
+        }
 
         public void Complete()
         {
