@@ -10,6 +10,7 @@ using SirThaddeus.Config;
 using SirThaddeus.Contracts;
 using SirThaddeus.Harness.Models;
 using SirThaddeus.Harness.Tracing;
+using SirThaddeus.LlmClient;
 using Thaddeus.SharedTypes;
 
 namespace SirThaddeus.Harness.Execution;
@@ -108,8 +109,10 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         var auditCaptureStart = DateTimeOffset.UtcNow;
 
         var workStopwatch = Stopwatch.StartNew();
+        var usageBefore = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
         var (finalText, success, error) =
             await RunChatAsync(test.UserMessage, cancellationToken).ConfigureAwait(false);
+        var usageAfter = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
         workStopwatch.Stop();
         var workSeconds = workStopwatch.Elapsed.TotalSeconds;
 
@@ -136,7 +139,14 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             Success = success,
             Error = success ? null : error,
             ToolCallsMade = toolCalls,
-            LlmRoundTrips = 0
+            LlmRoundTrips = (int)Math.Max(0, usageAfter.RequestCount - usageBefore.RequestCount),
+            TokenUsage = new AgentTokenUsage
+            {
+                TokensIn = (int)Math.Max(0, usageAfter.PromptTokens - usageBefore.PromptTokens),
+                TokensOut = (int)Math.Max(0, usageAfter.CompletionTokens - usageBefore.CompletionTokens),
+                TotalTokens = (int)Math.Max(0, usageAfter.TotalTokens - usageBefore.TotalTokens),
+                ContextWindowTokens = usageAfter.ContextWindowTokens
+            }
         };
 
         totalStopwatch.Stop();
@@ -498,6 +508,17 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
                 pageResponse.EnsureSuccessStatusCode();
             }
         }
+    }
+
+    private async Task<LlmUsageSnapshot> GetLlmUsageAsync(CancellationToken cancellationToken)
+    {
+        Debug.Assert(_http is not null);
+        using var response = await _http!.GetAsync("api/harness/llm-usage", cancellationToken)
+            .ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<LlmUsageSnapshot>(JsonOptions, cancellationToken)
+            .ConfigureAwait(false)
+            ?? new LlmUsageSnapshot();
     }
 
     private async Task<JsonElement?> CaptureObservedStateAsync(

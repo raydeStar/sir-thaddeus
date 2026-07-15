@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using SirThaddeus.Contracts;
+using SirThaddeus.LlmClient;
 using SirThaddeus.RuntimeHost.Harness;
+using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Memory;
 using Thaddeus.Runtime.Tools;
 
@@ -57,6 +59,16 @@ public static class HarnessApi
                 HarnessJsonContext.Default.HarnessResetResponse);
         });
 
+        app.MapGet("/api/harness/llm-usage", (LlmRuntimeRegistry registry) =>
+        {
+            if (!HarnessControlPlane.IsHarnessReuseEnabled())
+                return Results.NotFound();
+
+            return Results.Json(
+                registry.GetUsageSnapshot(),
+                HarnessJsonContext.Default.LlmUsageSnapshot);
+        });
+
         return app;
     }
 }
@@ -67,6 +79,7 @@ public static class HarnessApi
     PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(HarnessResetRequest))]
 [JsonSerializable(typeof(HarnessResetResponse))]
+[JsonSerializable(typeof(LlmUsageSnapshot))]
 public partial class HarnessJsonContext : JsonSerializerContext
 {
 }
