@@ -32,6 +32,7 @@ public static class HarnessApi
             HarnessResetRequest request,
             ToolPermissionGate gate,
             IMemoStore memos,
+            HarnessToolEvidenceStore toolEvidence,
             CancellationToken ct) =>
         {
             if (!HarnessControlPlane.IsHarnessReuseEnabled())
@@ -41,6 +42,7 @@ public static class HarnessApi
             var (cleared, set) = HarnessControlPlane.ApplyStubOverrides(request.StubOverrides);
 
             gate.ClearSessionGrants();
+            toolEvidence.Clear();
 
             if (request.ClearChatHistory)
                 HarnessControlPlane.ResetHistoryFiles();
@@ -57,6 +59,18 @@ public static class HarnessApi
                     StubVarsSet: set,
                     AllowedToolsApplied: allowedToolsApplied),
                 HarnessJsonContext.Default.HarnessResetResponse);
+        });
+
+        app.MapGet("/api/harness/messages/{messageId}/tool-evidence", (
+            string messageId,
+            HarnessToolEvidenceStore toolEvidence) =>
+        {
+            if (!HarnessControlPlane.IsHarnessReuseEnabled())
+                return Results.NotFound();
+
+            return Results.Json(
+                toolEvidence.Get(messageId),
+                HarnessJsonContext.Default.IReadOnlyListToolCallRecord);
         });
 
         app.MapGet("/api/harness/llm-usage", (LlmRuntimeRegistry registry) =>
@@ -80,6 +94,7 @@ public static class HarnessApi
 [JsonSerializable(typeof(HarnessResetRequest))]
 [JsonSerializable(typeof(HarnessResetResponse))]
 [JsonSerializable(typeof(LlmUsageSnapshot))]
+[JsonSerializable(typeof(IReadOnlyList<SirThaddeus.Agent.ToolCallRecord>))]
 public partial class HarnessJsonContext : JsonSerializerContext
 {
 }

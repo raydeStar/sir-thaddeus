@@ -54,9 +54,12 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         ILoggerFactory loggerFactory,
         ModuleRuntimeService modules,
         LlmRuntimeRegistry llmRuntime,
+        HarnessToolEvidenceStore harnessToolEvidence,
         SirThaddeus.Memory.IMemoryStore? memoryStore = null)
         : this(settings, stub,
-              CreateDefaultFactory(mcp, gate, store, publisher, audit, loggerFactory, llmRuntime, memoryStore),
+              CreateDefaultFactory(
+                  mcp, gate, store, publisher, audit, loggerFactory, llmRuntime,
+                  harnessToolEvidence, memoryStore),
               loggerFactory.CreateLogger<AssistantRouter>(),
               modules)
     {
@@ -128,6 +131,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         IMcpToolClient mcp, ToolPermissionGate gate, IThreadStore store, ChatTurnPublisher publisher,
         IAuditLogger audit, ILoggerFactory loggerFactory,
         LlmRuntimeRegistry llmRuntime,
+        HarnessToolEvidenceStore harnessToolEvidence,
         SirThaddeus.Memory.IMemoryStore? memoryStore)
     {
         var cacheLock = new object();
@@ -282,6 +286,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     GuardrailsPipeline = guardrails,
                     CompletionValidator = validator,
                     CompletionRepairLoop = repair,
+                    HarnessToolEvidence = harnessToolEvidence,
                     DialogueStateAccessor = dialogueAccessor,
                     MaxOutputTokens = Math.Max(1, llm.MaxTokens),
                 };

@@ -11,6 +11,7 @@ using SirThaddeus.Contracts;
 using SirThaddeus.Harness.Models;
 using SirThaddeus.Harness.Tracing;
 using SirThaddeus.LlmClient;
+using SirThaddeus.RuntimeHost;
 using Thaddeus.SharedTypes;
 
 namespace SirThaddeus.Harness.Execution;
@@ -54,6 +55,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
     private static readonly object _buildLock = new();
 
     private readonly AppSettings _baseSettings;
+    private readonly bool _requiresManagedSearch;
+    private readonly SearxngHostLauncher _searxngLauncher = new();
     private readonly List<string> _stdout = [];
     private readonly List<string> _stderr = [];
 
@@ -72,9 +75,10 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
     // chat message; the WS reader publishes into them as events arrive.
     private Channel<JsonDocument>? _events;
 
-    public HybridRuntimeHostAdapter(AppSettings settings)
+    public HybridRuntimeHostAdapter(AppSettings settings, bool requiresManagedSearch = false)
     {
         _baseSettings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _requiresManagedSearch = requiresManagedSearch;
     }
 
     public Task InitializeAsync(CancellationToken cancellationToken)
@@ -110,8 +114,10 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
 
         var workStopwatch = Stopwatch.StartNew();
         var usageBefore = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
-        var (finalText, success, error) =
+        var (finalText, success, error, messageId) =
             await RunChatAsync(test.UserMessage, cancellationToken).ConfigureAwait(false);
+        var fullToolEvidence = await GetHarnessToolEvidenceAsync(messageId, cancellationToken)
+            .ConfigureAwait(false);
         var usageAfter = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
         workStopwatch.Stop();
         var workSeconds = workStopwatch.Elapsed.TotalSeconds;
@@ -121,8 +127,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         // snippet, which the scorer can't use to detect token incorporation;
         // the audit file has the full input/output. Same canonical path as v1.
         var auditFile = ResolveAuditFilePath();
-        var (toolCalls, toolTurns, steps) =
-            AuditTraceBuilder.BuildFromAuditFile(auditFile, auditCaptureStart);
+        var trace = AuditTraceBuilder.BuildFromAuditFile(auditFile, auditCaptureStart);
+        var (toolCalls, toolTurns, steps) = ToolEvidenceTraceEnricher.Enrich(trace, fullToolEvidence);
 
         var finalSteps = steps.ToList();
         finalSteps.Add(new TraceStep
@@ -212,6 +218,9 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             $"hybrid-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_sandboxRoot);
         _lockFilePath = Path.Combine(_sandboxRoot, "runtime.lock");
+
+        if (_requiresManagedSearch)
+            await EnsureManagedSearchAsync(cancellationToken).ConfigureAwait(false);
 
         // Pre-write a settings file pointing at the user's configured LLM
         // so v2 hits the same LM Studio the v1 harness uses. Otherwise it
@@ -521,6 +530,36 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             ?? new LlmUsageSnapshot();
     }
 
+    private async Task EnsureManagedSearchAsync(CancellationToken cancellationToken)
+    {
+        var settings = _baseSettings.WebSearch with
+        {
+            Mode = "auto",
+            SearxngAutoStart = true
+        };
+        var result = await _searxngLauncher.EnsureRunningAsync(settings, cancellationToken)
+            .ConfigureAwait(false);
+        if (result.Status is not (SearxngLaunchStatus.Started or SearxngLaunchStatus.AlreadyRunning))
+        {
+            throw new InvalidOperationException(
+                $"Hybrid harness requires managed search, but SearxNG did not start: {result.Message}");
+        }
+    }
+
+    private async Task<IReadOnlyList<ToolCallRecord>> GetHarnessToolEvidenceAsync(
+        string messageId,
+        CancellationToken cancellationToken)
+    {
+        Debug.Assert(_http is not null);
+        using var response = await _http!.GetAsync(
+            $"api/harness/messages/{Uri.EscapeDataString(messageId)}/tool-evidence",
+            cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ToolCallRecord[]>(JsonOptions, cancellationToken)
+            .ConfigureAwait(false)
+            ?? [];
+    }
+
     private async Task<JsonElement?> CaptureObservedStateAsync(
         IReadOnlyList<HarnessObservationRequest> requests,
         CancellationToken cancellationToken)
@@ -585,7 +624,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             JsonOptions);
     }
 
-    private async Task<(string FinalText, bool Success, string? Error)>
+    private async Task<(string FinalText, bool Success, string? Error, string MessageId)>
         RunChatAsync(string userMessage, CancellationToken cancellationToken)
     {
         Debug.Assert(_http is not null);
@@ -643,10 +682,15 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
                     ? ft.GetString() ?? string.Empty
                     : string.Empty;
                 var cancelled = payload.TryGetProperty("cancelled", out var c) && c.GetBoolean();
-                return (finalText, !cancelled, cancelled ? "cancelled" : null);
+                var messageId = payload.TryGetProperty("messageId", out var messageIdElement)
+                    ? messageIdElement.GetString()
+                    : null;
+                if (string.IsNullOrWhiteSpace(messageId))
+                    throw new InvalidOperationException("chat.turn.complete messageId missing");
+                return (finalText, !cancelled, cancelled ? "cancelled" : null, messageId);
             }
         }
-        return (finalText, false, "WebSocket closed before turn completed");
+        return (finalText, false, "WebSocket closed before turn completed", string.Empty);
     }
 
     private string ResolveAuditFilePath()
@@ -740,6 +784,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
     public ValueTask DisposeAsync()
     {
         DisposeProcessAndConnections();
+        _searxngLauncher.Dispose();
         try
         {
             if (_sandboxRoot is not null && Directory.Exists(_sandboxRoot))

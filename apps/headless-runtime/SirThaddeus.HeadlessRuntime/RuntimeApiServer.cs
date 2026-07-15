@@ -87,7 +87,7 @@ internal static partial class RuntimeApiServer
         MapProfileEndpoints(app, getSettings, PersistSettings);
         MapPersonalityEndpoints(app, getSettings, PersistSettings);
 
-        MapHarnessEndpoints(app, getSettings, permissionGate, resetToolBudgets);
+        MapHarnessEndpoints(app, runs, getSettings, permissionGate, resetToolBudgets);
 
         await app.RunAsync(cancellationToken);
     }
