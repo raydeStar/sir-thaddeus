@@ -10,7 +10,7 @@ namespace SirThaddeus.Agent.Pipeline.Steps;
 /// </summary>
 internal static partial class WikiRootCreateSelectionPolicy
 {
-    private const string RootCreate = "wiki_root_create";
+    private const string RootCreateToolName = "wiki_root_create";
 
     public static string? TrySelect(string? userText, IReadOnlyList<ToolDefinition> advertisedTools)
     {
@@ -25,8 +25,8 @@ internal static partial class WikiRootCreateSelectionPolicy
             return null;
 
         return advertisedTools.Any(tool =>
-            string.Equals(tool.Function?.Name, RootCreate, StringComparison.OrdinalIgnoreCase))
-            ? RootCreate
+            string.Equals(tool.Function?.Name, RootCreateToolName, StringComparison.OrdinalIgnoreCase))
+            ? RootCreateToolName
             : null;
     }
 

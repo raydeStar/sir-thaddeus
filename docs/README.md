@@ -18,6 +18,7 @@ Getting Sir Thaddeus running and understanding what it will and won't do.
 
 Building, testing, and understanding the system.
 
+- [BENCHMARKING.md](BENCHMARKING.md) — separate model-capacity and harness-capability scorecards, the general reasoning portfolio, and safe benchmark customization.
 - [ASSISTANT_PIPELINE.md](ASSISTANT_PIPELINE.md) — the active chat pipeline, supported diagnostics, retired experiments, and promotion rules.
 - [EXPERIMENTATION.md](EXPERIMENTATION.md) — the one-mechanism branch loop, benchmark-integrity boundary, controls, and promotion gates.
 

@@ -59,14 +59,19 @@ prompt, routing, model-comparison, latency, VRAM, or benchmark work.
   Thaddeus control under the same model and sampling configuration.
 - Use a development slice of roughly ten minutes or less for rejection and
   iteration. A small development win is not promotion evidence.
-- Reject a losing candidate immediately. If it wins, rerun the exact candidate.
+- Reject a clearly losing candidate immediately. If it wins or reaches the
+  exact-repeat gate with a credible directional improvement, retain it long
+  enough to rerun the exact candidate.
 - Use a disjoint frozen validation set only after the exact repeat succeeds.
 - Run broad product regressions only after the candidate survives the focused
   gates.
 - Record correctness, validity, paired wins/losses, model calls, tokens,
   latency, peak memory/VRAM, and escalation or tool-use rates when applicable.
-- Delete failed implementation branches, but preserve their manifests, raw
-  artifacts, and verdicts in the experiment record.
+- Delete clearly non-working implementation branches, but preserve their
+  manifests, raw artifacts, and verdicts in the experiment record. A candidate
+  that reaches exact repeat or validation may remain as a labeled, unmerged
+  research branch until the campaign decision; do not keep it as dormant
+  production code or imply that retention is promotion.
 - Treat every material mutation after a failed run as a new candidate. Do not
   tune repeatedly against a holdout until one run happens to pass.
 
@@ -106,14 +111,17 @@ prompt, routing, model-comparison, latency, VRAM, or benchmark work.
 
 ## Branch and delivery policy
 
-- Keep only `master` and `dev` as persistent branches.
+- Keep only `master` and `dev` as permanent product branches. A promising
+  experiment that reaches exact repeat or validation may remain temporarily as
+  a clearly labeled research branch while its verdict is reviewed.
 - Create short-lived branches from the current production baseline. Use
   `codex/experiment-<mechanism>` for behavioral experiments and `codex/<change>`
   for normal product work.
 - `master` is protected. Deliver changes through a PR and wait for the actual
   remote checks.
 - Keep `dev` synchronized with `master` between experiments.
-- Delete the temporary branch after merge or rejection.
+- Delete the temporary branch after merge or a clear rejection. Retained,
+  below-promotion candidates must stay unmerged and carry a current verdict.
 - Preserve unrelated user work and do not rewrite or discard a dirty worktree.
 
 ## Verification ladder

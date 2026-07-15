@@ -10,10 +10,12 @@ Track two scorecards separately.
 
 ### Model-capacity scorecard
 
-Use MMLU-mini and other closed-book reasoning controls to measure knowledge,
-reasoning, validity, and raw-language preservation. Changes such as prompt
-selection, context compaction, adapters, or specialist-model routing belong in
-this lane.
+Use MMLU-Pro and a balanced closed-book battery to measure knowledge, practical
+math, science, document reasoning, instruction following, validity, and
+raw-language preservation. Changes such as prompt selection, context
+compaction, adapters, or specialist-model routing belong in this lane. See
+[BENCHMARKING.md](BENCHMARKING.md) for the current portfolio and customization
+rules.
 
 ### Capability-harness scorecard
 
@@ -32,24 +34,24 @@ frozen baseline
 one predeclared candidate
       |
 paired development run (about 10 minutes or less)
+      |-- clearly loses --> reject, preserve evidence, delete code
       |
-  loses ---------> reject, preserve evidence, delete code
-      |
-    wins
-      |
-exact candidate repeat
-      |
-  fails ---------> reject, preserve evidence, delete code
-      |
-   passes
-      |
-disjoint validation + product regression + resource gates
-      |
-promote through PR or reject
+      `-- wins or reaches a credible repeat gate
+              |
+         exact candidate repeat
+              |-- clearly fails --> reject, preserve evidence, delete code
+              |-- repeatable but below promotion --> retain unmerged with a verdict
+              |
+              `-- passes
+                      |
+                 disjoint validation + product regression + resource gates
+                      |
+                 promote through PR or retain/reject with a verdict
 ```
 
 Small development slices are rejection and iteration tools. They do not
-establish statistical truth.
+establish statistical truth. Reaching exact repeat is sufficient to retain a
+promising research branch for review, but it is not sufficient to merge it.
 
 ## Predeclaration
 
@@ -107,7 +109,9 @@ category results, and repeat stability.
 - Use one mechanism per `codex/experiment-<mechanism>` branch.
 - Keep evaluation-only changes out of production packages when possible.
 - Do not stack unrelated candidates.
-- Delete failed code and the temporary branch after recording the verdict.
+- Delete clearly failed code and its temporary branch after recording the
+  verdict. A candidate that reaches exact repeat or validation may remain as a
+  labeled, unmerged research branch until the campaign is closed.
 - Merge only after exact repeat, disjoint validation, product regression, and
   protected CI succeed.
 - Synchronize `dev` with the resulting `master` before the next experiment.

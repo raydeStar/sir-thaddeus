@@ -24,16 +24,16 @@ public static partial class WikiMcpTools
         return ExecuteAsync(async (store, ct) =>
         {
             var rootResolution = await ResolveUniqueRootAsync(store, rootName, ct).ConfigureAwait(false);
-            if (rootResolution.Failure is not null)
-                return rootResolution.Failure;
+            if (rootResolution.Error is not null)
+                return Fail(rootResolution.Error);
 
             var folderResolution = await ResolveOptionalUniqueFolderAsync(
                 store,
                 rootResolution.Root!,
                 folderName,
                 ct).ConfigureAwait(false);
-            if (folderResolution.Failure is not null)
-                return folderResolution.Failure;
+            if (folderResolution.Error is not null)
+                return Fail(folderResolution.Error);
 
             var document = await store.CreatePageAsync(
                 rootResolution.Root!.Id,
@@ -62,8 +62,8 @@ public static partial class WikiMcpTools
         return ExecuteAsync(async (store, ct) =>
         {
             var resolution = await ResolveUniquePageAsync(store, rootName, pageTitle, ct).ConfigureAwait(false);
-            if (resolution.Failure is not null)
-                return resolution.Failure;
+            if (resolution.Error is not null)
+                return Fail(resolution.Error);
 
             var page = resolution.Page!;
             var document = await store.UpdatePageAsync(
@@ -95,8 +95,8 @@ public static partial class WikiMcpTools
         return ExecuteAsync(async (store, ct) =>
         {
             var resolution = await ResolveUniquePageAsync(store, rootName, pageTitle, ct).ConfigureAwait(false);
-            if (resolution.Failure is not null)
-                return resolution.Failure;
+            if (resolution.Error is not null)
+                return Fail(resolution.Error);
 
             var page = resolution.Page!;
             var document = await store.RenamePageAsync(page.Id, newTitle, page.Version, ct).ConfigureAwait(false);
@@ -121,8 +121,8 @@ public static partial class WikiMcpTools
         return ExecuteAsync(async (store, ct) =>
         {
             var resolution = await ResolveUniquePageAsync(store, rootName, pageTitle, ct).ConfigureAwait(false);
-            if (resolution.Failure is not null)
-                return resolution.Failure;
+            if (resolution.Error is not null)
+                return Fail(resolution.Error);
 
             var page = resolution.Page!;
             var deleted = await store.DeletePageAsync(page.Id, ct).ConfigureAwait(false);
@@ -150,8 +150,8 @@ public static partial class WikiMcpTools
         return ExecuteAsync(async (store, ct) =>
         {
             var resolution = await ResolveUniquePageAsync(store, rootName, pageTitle, ct).ConfigureAwait(false);
-            if (resolution.Failure is not null)
-                return resolution.Failure;
+            if (resolution.Error is not null)
+                return Fail(resolution.Error);
 
             var page = resolution.Page!;
             var document = await store.GetPageAsync(page.Id, ct).ConfigureAwait(false);
@@ -184,14 +184,14 @@ public static partial class WikiMcpTools
         }, cancellationToken);
     }
 
-    private static async Task<RootResolution> ResolveUniqueRootAsync(
+    private static async Task<(WikiRoot? Root, string? Error)> ResolveUniqueRootAsync(
         LocalWikiStore store,
         string? rootName,
         CancellationToken cancellationToken)
     {
         var normalized = NormalizeOptional(rootName);
         if (normalized is null)
-            return new(null, Fail("Wiki root name is required."));
+            return (null, "Wiki root name is required.");
 
         var roots = await store.ListRootsAsync(cancellationToken).ConfigureAwait(false);
         var matches = roots
@@ -200,29 +200,29 @@ public static partial class WikiMcpTools
             .ToArray();
         return matches.Length switch
         {
-            1 => new(matches[0], null),
-            0 => new(null, Fail($"No Wiki root is named '{normalized}'.")),
-            _ => new(null, Fail($"More than one Wiki root is named '{normalized}'; use an unambiguous target."))
+            1 => (matches[0], null),
+            0 => (null, $"No Wiki root is named '{normalized}'."),
+            _ => (null, $"More than one Wiki root is named '{normalized}'; use an unambiguous target.")
         };
     }
 
-    private static async Task<PageResolution> ResolveUniquePageAsync(
+    private static async Task<(WikiPage? Page, string? Error)> ResolveUniquePageAsync(
         LocalWikiStore store,
         string? rootName,
         string? pageTitle,
         CancellationToken cancellationToken)
     {
         var rootResolution = await ResolveUniqueRootAsync(store, rootName, cancellationToken).ConfigureAwait(false);
-        if (rootResolution.Failure is not null)
-            return new(null, rootResolution.Failure);
+        if (rootResolution.Error is not null)
+            return (null, rootResolution.Error);
 
         var normalizedTitle = NormalizeOptional(pageTitle);
         if (normalizedTitle is null)
-            return new(null, Fail("Wiki page title is required."));
+            return (null, "Wiki page title is required.");
 
         var tree = await store.GetTreeAsync(rootResolution.Root!.Id, cancellationToken).ConfigureAwait(false);
         if (tree is null)
-            return new(null, Fail($"Wiki root '{rootResolution.Root.Name}' was no longer available."));
+            return (null, $"Wiki root '{rootResolution.Root.Name}' was no longer available.");
 
         var matches = tree.Pages
             .Where(page => string.Equals(page.Title, normalizedTitle, StringComparison.OrdinalIgnoreCase))
@@ -230,13 +230,13 @@ public static partial class WikiMcpTools
             .ToArray();
         return matches.Length switch
         {
-            1 => new(matches[0], null),
-            0 => new(null, Fail($"No page titled '{normalizedTitle}' exists in Wiki root '{rootResolution.Root.Name}'.")),
-            _ => new(null, Fail($"More than one page is titled '{normalizedTitle}' in Wiki root '{rootResolution.Root.Name}'; use an unambiguous target."))
+            1 => (matches[0], null),
+            0 => (null, $"No page titled '{normalizedTitle}' exists in Wiki root '{rootResolution.Root.Name}'."),
+            _ => (null, $"More than one page is titled '{normalizedTitle}' in Wiki root '{rootResolution.Root.Name}'; use an unambiguous target.")
         };
     }
 
-    private static async Task<FolderResolution> ResolveOptionalUniqueFolderAsync(
+    private static async Task<(WikiFolder? Folder, string? Error)> ResolveOptionalUniqueFolderAsync(
         LocalWikiStore store,
         WikiRoot root,
         string? folderName,
@@ -244,11 +244,11 @@ public static partial class WikiMcpTools
     {
         var normalized = NormalizeOptional(folderName);
         if (normalized is null)
-            return new(null, null);
+            return (null, null);
 
         var tree = await store.GetTreeAsync(root.Id, cancellationToken).ConfigureAwait(false);
         if (tree is null)
-            return new(null, Fail($"Wiki root '{root.Name}' was no longer available."));
+            return (null, $"Wiki root '{root.Name}' was no longer available.");
 
         var matches = tree.Folders
             .Where(folder => string.Equals(folder.Name, normalized, StringComparison.OrdinalIgnoreCase))
@@ -256,13 +256,9 @@ public static partial class WikiMcpTools
             .ToArray();
         return matches.Length switch
         {
-            1 => new(matches[0], null),
-            0 => new(null, Fail($"No folder named '{normalized}' exists in Wiki root '{root.Name}'.")),
-            _ => new(null, Fail($"More than one folder is named '{normalized}' in Wiki root '{root.Name}'; use an unambiguous target."))
+            1 => (matches[0], null),
+            0 => (null, $"No folder named '{normalized}' exists in Wiki root '{root.Name}'."),
+            _ => (null, $"More than one folder is named '{normalized}' in Wiki root '{root.Name}'; use an unambiguous target.")
         };
     }
-
-    private sealed record RootResolution(WikiRoot? Root, object? Failure);
-    private sealed record PageResolution(WikiPage? Page, object? Failure);
-    private sealed record FolderResolution(WikiFolder? Folder, object? Failure);
 }

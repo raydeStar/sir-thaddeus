@@ -289,6 +289,9 @@ The optional mini-MMLU helper scripts expect `local-benchmark-runner` as a
 sibling checkout by default. Override `-BenchmarkRunnerRoot` and `-PythonPath`
 when using a different layout. These scripts compare run artifacts; production
 routing never receives expected answers, suite IDs, or scoring thresholds.
+Use [BENCHMARKING.md](BENCHMARKING.md) to choose the scorecard lane, core
+general-capability portfolio, controls, and development/validation tier before
+customizing a suite.
 
 ### Overnight harness runs
 
