@@ -287,6 +287,69 @@ public sealed class WikiMcpToolsTests : IDisposable
         Assert.False(readDeletedDoc.RootElement.GetProperty("ok").GetBoolean());
     }
 
+    [Fact]
+    public async Task SemanticPageTools_ResolveNamesAndPreserveVersionedWrites()
+    {
+        await CreateRootAsync();
+
+        var createJson = await WikiMcpTools.WikiPageCreateByName(
+            "harness wiki",
+            "Runbook",
+            "# Runbook\n\nOriginal step.\n\nKeep this line.");
+        using var createDoc = JsonDocument.Parse(createJson);
+        Assert.True(createDoc.RootElement.GetProperty("ok").GetBoolean());
+
+        var updateJson = await WikiMcpTools.WikiPageUpdateByName(
+            "Harness Wiki",
+            "runbook",
+            "# Runbook\n\nUpdated step.\n\nKeep this line.");
+        using var updateDoc = JsonDocument.Parse(updateJson);
+        Assert.True(updateDoc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal(2, updateDoc.RootElement.GetProperty("document").GetProperty("page").GetProperty("version").GetInt64());
+
+        var patchJson = await WikiMcpTools.WikiPagePatchSelectionByName(
+            "Harness Wiki",
+            "Runbook",
+            "Updated step.",
+            "Verified step.");
+        using var patchDoc = JsonDocument.Parse(patchJson);
+        Assert.True(patchDoc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("Verified step.", patchDoc.RootElement.GetProperty("document").GetProperty("markdown").GetString());
+        Assert.Contains("Keep this line.", patchDoc.RootElement.GetProperty("document").GetProperty("markdown").GetString());
+
+        var renameJson = await WikiMcpTools.WikiPageRenameByName(
+            "Harness Wiki",
+            "Runbook",
+            "Operations Guide");
+        using var renameDoc = JsonDocument.Parse(renameJson);
+        Assert.True(renameDoc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("Operations Guide", renameDoc.RootElement.GetProperty("document").GetProperty("page").GetProperty("title").GetString());
+
+        var deleteJson = await WikiMcpTools.WikiPageDeleteByName("Harness Wiki", "Operations Guide");
+        using var deleteDoc = JsonDocument.Parse(deleteJson);
+        Assert.True(deleteDoc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.True(deleteDoc.RootElement.GetProperty("deleted").GetBoolean());
+    }
+
+    [Fact]
+    public async Task SemanticPageTools_FailClosedWhenPageTitleIsAmbiguous()
+    {
+        var rootId = await CreateRootAsync();
+        var firstFolder = await CreateFolderAsync(rootId, "First");
+        var secondFolder = await CreateFolderAsync(rootId, "Second");
+        await CreatePageAsync(rootId, firstFolder, "Notes", "First copy");
+        await CreatePageAsync(rootId, secondFolder, "Notes", "Second copy");
+
+        var updateJson = await WikiMcpTools.WikiPageUpdateByName(
+            "Harness Wiki",
+            "Notes",
+            "Should not be written");
+        using var updateDoc = JsonDocument.Parse(updateJson);
+
+        Assert.False(updateDoc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("more than one", updateDoc.RootElement.GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task<string> CreateRootAsync()
     {
         var json = await WikiMcpTools.WikiRootCreate("Harness Wiki");
