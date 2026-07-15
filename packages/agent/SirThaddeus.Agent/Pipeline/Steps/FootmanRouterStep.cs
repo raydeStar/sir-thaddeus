@@ -117,7 +117,9 @@ public sealed class FootmanRouterStep : ITurnStep
         if (_footman is null) return true;
         if (context.IsAutomationRun) return true;
         if (context.ToolDefs.Count == 0) return true;
-        if (HarnessAllowsOnlyMemoryRetrieve()) return true;
+        // Harness fixtures already pin the exact tool surface. Reclassifying
+        // that surface can only remove required tools and invalidate the run.
+        if (HarnessHasPinnedToolAllowlist()) return true;
         if (HasWeatherGeocode(context) && HasWeatherCue(context.UserText)) return true;
         if (HasTimeNow(context) && HasTimezoneLookup(context) && HasLocationScopedTimeCue(context.UserText)) return true;
         if (HasMemoryRetrieve(context) && HasPersonalContextCue(context.UserText)) return true;
@@ -194,17 +196,9 @@ public sealed class FootmanRouterStep : ITurnStep
                lower.Contains(" our ", StringComparison.Ordinal);
     }
 
-    private static bool HarnessAllowsOnlyMemoryRetrieve()
+    private static bool HarnessHasPinnedToolAllowlist()
     {
         var raw = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
-        if (string.IsNullOrWhiteSpace(raw))
-            return false;
-
-        var tools = raw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(tool => !string.IsNullOrWhiteSpace(tool))
-            .ToList();
-        return tools.Count == 1 &&
-               (string.Equals(tools[0], ToolNames.MemoryRetrieve, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(tools[0], ToolNames.MemoryRetrieveAlt, StringComparison.OrdinalIgnoreCase));
+        return !string.IsNullOrWhiteSpace(raw);
     }
 }

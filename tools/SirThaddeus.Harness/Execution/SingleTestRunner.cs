@@ -1,3 +1,4 @@
+using System.Text.Json;
 using SirThaddeus.Agent;
 using SirThaddeus.Config;
 using SirThaddeus.Harness.Artifacts;
@@ -77,6 +78,13 @@ internal sealed class SingleTestRunner
         };
 
         await _artifactWriter.WriteStepsAsync(artifacts, steps, cancellationToken);
+        if (headlessResult.ObservedState is { } observedState)
+        {
+            await _artifactWriter.WriteObservationsAsync(
+                artifacts,
+                observedState,
+                cancellationToken);
+        }
         await _artifactWriter.WriteFinalAsync(artifacts, response.Text, cancellationToken);
         await _artifactWriter.WriteScoreAsync(artifacts, score, cancellationToken);
         await _artifactWriter.WriteDiffAsync(
@@ -141,6 +149,7 @@ internal sealed record HostExecutionResult
     public required AgentResponse Response { get; init; }
     public required IReadOnlyList<TraceStep> Steps { get; init; }
     public required IReadOnlyList<RecordedToolTurn> ToolTurns { get; init; }
+    public JsonElement? ObservedState { get; init; }
     public HarnessTiming Timing { get; init; } = HarnessTiming.Empty;
 }
 

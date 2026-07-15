@@ -6,6 +6,7 @@ using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Tests.Agent.Pipeline.Steps;
 
+[Collection("RuntimeEnvironmentVariables")]
 public class FootmanRouterStepTests
 {
     [Fact]
@@ -43,6 +44,31 @@ public class FootmanRouterStepTests
         Assert.IsType<StepResult.Continue>(result);
         Assert.Equal(0, footman.CallCount);
         Assert.Empty(sink.FootmanEvents);
+    }
+
+    [Fact]
+    public async Task Skips_when_harness_has_pinned_tool_allowlist()
+    {
+        var previous = Environment.GetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS");
+        Environment.SetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS", "wiki_root_create");
+        try
+        {
+            var sink = new CapturingSink();
+            var footman = new StubFootman(AgentState.Chat, 0.99, false, "heuristic_chat");
+            var step = NewStep(footman, sink);
+            var context = WithTools("create the wiki", false, "wiki_root_create");
+
+            var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+            var continuation = Assert.IsType<StepResult.Continue>(result);
+            Assert.Same(context.ToolDefs, continuation.Next.ToolDefs);
+            Assert.Equal(0, footman.CallCount);
+            Assert.Empty(sink.FootmanEvents);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ST_HARNESS_ALLOWED_TOOLS", previous);
+        }
     }
 
     [Fact]

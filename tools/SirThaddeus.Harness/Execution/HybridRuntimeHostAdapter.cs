@@ -10,6 +10,7 @@ using SirThaddeus.Config;
 using SirThaddeus.Contracts;
 using SirThaddeus.Harness.Models;
 using SirThaddeus.Harness.Tracing;
+using Thaddeus.SharedTypes;
 
 namespace SirThaddeus.Harness.Execution;
 
@@ -98,6 +99,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
 
         var resetStopwatch = Stopwatch.StartNew();
         await ApplyHarnessResetAsync(test, cancellationToken).ConfigureAwait(false);
+        await ApplyStateSetupAsync(test.StateSetup, cancellationToken).ConfigureAwait(false);
         resetStopwatch.Stop();
         var resetSeconds = resetStopwatch.Elapsed.TotalSeconds;
 
@@ -138,12 +140,15 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         };
 
         totalStopwatch.Stop();
+        var observedState = await CaptureObservedStateAsync(test.Observations, cancellationToken)
+            .ConfigureAwait(false);
 
         return new HostExecutionResult
         {
             Response = response,
             Steps = finalSteps,
             ToolTurns = toolTurns,
+            ObservedState = observedState,
             Timing = new HarnessTiming(
                 RuntimeWarmupSeconds: warmupSeconds,
                 ResetSeconds: resetSeconds,
@@ -249,11 +254,11 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         await PrewarmAgentPipelineAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private void WriteHarnessSettingsFile(string sandboxRoot)
+    internal void WriteHarnessSettingsFile(string sandboxRoot)
     {
         // v2 reads runtime-settings.json from the lock file's directory by
-        // default. We write a minimal document that points the LLM at the
-        // user's configured base URL so harness LM Studio expectations
+        // default. Start from the complete production defaults, then override
+        // the evaluator's frozen provider settings so LM Studio expectations
         // match v1's. Permissions stay "ask" by default — the harness
         // auto-approves via the WS permission flow.
         var llm = _baseSettings.Llm;
@@ -261,17 +266,27 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         if (!string.IsNullOrWhiteSpace(baseUrl) && !baseUrl.EndsWith("/v1"))
             baseUrl = baseUrl.TrimEnd('/') + "/v1";
 
-        var doc = new
+        var defaults = SettingsDocument.Defaults();
+        var doc = defaults with
         {
-            llm = new
+            Llm = defaults.Llm with
             {
-                provider = "lmstudio",
-                modelId = string.IsNullOrWhiteSpace(llm.Model) ? "auto" : llm.Model,
-                baseUrl = string.IsNullOrWhiteSpace(baseUrl) ? "http://127.0.0.1:1234/v1" : baseUrl,
-                apiKey = (string?)null,
-                maxTokens = 4096,
-                contextWindowTokens = 16384,
-                temperature = 0.7
+                Provider = "lmstudio",
+                ModelId = string.IsNullOrWhiteSpace(llm.Model) ? "auto" : llm.Model,
+                BaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? "http://127.0.0.1:1234/v1" : baseUrl,
+                ApiKey = null,
+                MaxTokens = llm.MaxTokens,
+                ContextWindowTokens = llm.ContextWindowTokens,
+                Temperature = llm.Temperature,
+                GatekeeperBaseUrl = string.IsNullOrWhiteSpace(llm.GatekeeperBaseUrl)
+                    ? baseUrl
+                    : llm.GatekeeperBaseUrl,
+                GatekeeperModelId = string.IsNullOrWhiteSpace(llm.GatekeeperModelId)
+                    ? llm.Model
+                    : llm.GatekeeperModelId,
+                ReusePrimaryForGatekeeperOnSharedEndpoint = llm.ReusePrimaryModelForGatekeeperOnSharedEndpoint,
+                EnableStartupWarmup = false,
+                EnableKeepWarm = false,
             }
         };
 
@@ -452,6 +467,103 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         response.EnsureSuccessStatusCode();
     }
 
+    private async Task ApplyStateSetupAsync(
+        HarnessStateSetup setup,
+        CancellationToken cancellationToken)
+    {
+        if (setup.WikiRoots.Count == 0)
+            return;
+
+        Debug.Assert(_http is not null);
+        foreach (var root in setup.WikiRoots)
+        {
+            using var rootResponse = await _http!.PostAsJsonAsync(
+                "api/wiki/roots",
+                new { name = root.Name, path = (string?)null },
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+            rootResponse.EnsureSuccessStatusCode();
+            using var rootDocument = JsonDocument.Parse(
+                await rootResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+            var rootId = rootDocument.RootElement.GetProperty("id").GetString()
+                ?? throw new InvalidOperationException("Wiki setup root response did not include an id.");
+
+            foreach (var page in root.Pages)
+            {
+                using var pageResponse = await _http.PostAsJsonAsync(
+                    $"api/wiki/roots/{Uri.EscapeDataString(rootId)}/pages",
+                    new { title = page.Title, folderId = (string?)null, markdown = page.Markdown },
+                    JsonOptions,
+                    cancellationToken).ConfigureAwait(false);
+                pageResponse.EnsureSuccessStatusCode();
+            }
+        }
+    }
+
+    private async Task<JsonElement?> CaptureObservedStateAsync(
+        IReadOnlyList<HarnessObservationRequest> requests,
+        CancellationToken cancellationToken)
+    {
+        var rootNames = requests
+            .Where(request => string.Equals(request.Type, "wiki", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(request => request.RootNames)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.Ordinal);
+        if (rootNames.Count == 0)
+            return null;
+
+        Debug.Assert(_http is not null);
+        using var rootsResponse = await _http!.GetAsync("api/wiki/roots", cancellationToken)
+            .ConfigureAwait(false);
+        rootsResponse.EnsureSuccessStatusCode();
+        using var rootsDocument = JsonDocument.Parse(
+            await rootsResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+
+        var snapshots = new List<ObservedWikiRoot>();
+        foreach (var root in rootsDocument.RootElement.GetProperty("roots").EnumerateArray())
+        {
+            var name = root.GetProperty("name").GetString() ?? string.Empty;
+            if (!rootNames.Contains(name))
+                continue;
+
+            var rootId = root.GetProperty("id").GetString()
+                ?? throw new InvalidOperationException("Observed wiki root did not include an id.");
+            using var treeResponse = await _http.GetAsync(
+                $"api/wiki/roots/{Uri.EscapeDataString(rootId)}/tree",
+                cancellationToken).ConfigureAwait(false);
+            treeResponse.EnsureSuccessStatusCode();
+            using var treeDocument = JsonDocument.Parse(
+                await treeResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+
+            var pages = new List<ObservedWikiPage>();
+            foreach (var page in treeDocument.RootElement.GetProperty("pages").EnumerateArray())
+            {
+                var pageId = page.GetProperty("id").GetString()
+                    ?? throw new InvalidOperationException("Observed wiki page did not include an id.");
+                using var pageResponse = await _http.GetAsync(
+                    $"api/wiki/pages/{Uri.EscapeDataString(pageId)}",
+                    cancellationToken).ConfigureAwait(false);
+                pageResponse.EnsureSuccessStatusCode();
+                using var pageDocument = JsonDocument.Parse(
+                    await pageResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                pages.Add(new ObservedWikiPage(
+                    pageDocument.RootElement.GetProperty("page").GetProperty("title").GetString()
+                        ?? string.Empty,
+                    pageDocument.RootElement.GetProperty("markdown").GetString() ?? string.Empty));
+            }
+
+            snapshots.Add(new ObservedWikiRoot(
+                name,
+                pages.OrderBy(page => page.Title, StringComparer.Ordinal).ToArray()));
+        }
+
+        return JsonSerializer.SerializeToElement(
+            new ObservedState(
+                new ObservedWikiState(
+                    snapshots.OrderBy(root => root.Name, StringComparer.Ordinal).ToArray())),
+            JsonOptions);
+    }
+
     private async Task<(string FinalText, bool Success, string? Error)>
         RunChatAsync(string userMessage, CancellationToken cancellationToken)
     {
@@ -619,5 +731,9 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         return ValueTask.CompletedTask;
     }
 
+    private sealed record ObservedState(ObservedWikiState Wiki);
+    private sealed record ObservedWikiState(IReadOnlyList<ObservedWikiRoot> Roots);
+    private sealed record ObservedWikiRoot(string Name, IReadOnlyList<ObservedWikiPage> Pages);
+    private sealed record ObservedWikiPage(string Title, string Markdown);
     private sealed record HybridLockFile(int Port, string Token);
 }

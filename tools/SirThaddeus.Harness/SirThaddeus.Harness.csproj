@@ -9,6 +9,7 @@
     <ProjectReference Include="..\..\packages\memory-sqlite\SirThaddeus.Memory.Sqlite\SirThaddeus.Memory.Sqlite.csproj" />
     <ProjectReference Include="..\..\packages\personality-engine\SirThaddeus.PersonalityEngine\SirThaddeus.PersonalityEngine.csproj" />
     <ProjectReference Include="..\..\packages\runtime-host\SirThaddeus.RuntimeHost\SirThaddeus.RuntimeHost.csproj" />
+    <ProjectReference Include="..\..\packages\shared-types\cs\Thaddeus.SharedTypes.csproj" />
   </ItemGroup>
 
   <ItemGroup>

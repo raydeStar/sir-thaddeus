@@ -111,6 +111,11 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(test);
+        if (test.StateSetup.WikiRoots.Count > 0 || test.Observations.Count > 0)
+        {
+            throw new NotSupportedException(
+                "State setup and observations require the v2 hybrid harness target.");
+        }
 
         var totalStopwatch = Stopwatch.StartNew();
 

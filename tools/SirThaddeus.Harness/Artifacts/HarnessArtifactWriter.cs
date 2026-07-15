@@ -36,6 +36,7 @@ public sealed class HarnessArtifactWriter
             RootDirectory = root,
             InputJsonPath = Path.Combine(root, "input.json"),
             StepsJsonlPath = Path.Combine(root, "steps.jsonl"),
+            ObservationsJsonPath = Path.Combine(root, "observations.json"),
             FinalTextPath = Path.Combine(root, "final.txt"),
             ScoreJsonPath = Path.Combine(root, "score.json"),
             DiffMarkdownPath = Path.Combine(root, "diff.md"),
@@ -70,6 +71,8 @@ public sealed class HarnessArtifactWriter
                 name = test.Name,
                 user_message = test.UserMessage,
                 allowed_tools = test.AllowedTools,
+                state_setup = test.StateSetup,
+                observations = test.Observations,
                 min_score = test.MinScore
             },
             model_params = new
@@ -112,6 +115,15 @@ public sealed class HarnessArtifactWriter
 
     public Task WriteFinalAsync(ArtifactPaths paths, string finalResponse, CancellationToken cancellationToken)
         => File.WriteAllTextAsync(paths.FinalTextPath, finalResponse ?? "", cancellationToken);
+
+    public Task WriteObservationsAsync(
+        ArtifactPaths paths,
+        JsonElement observedState,
+        CancellationToken cancellationToken)
+        => File.WriteAllTextAsync(
+            paths.ObservationsJsonPath,
+            JsonSerializer.Serialize(observedState, JsonOptions),
+            cancellationToken);
 
     public Task WriteScoreAsync(ArtifactPaths paths, ScoreCard score, CancellationToken cancellationToken)
         => File.WriteAllTextAsync(paths.ScoreJsonPath, JsonSerializer.Serialize(score, JsonOptions), cancellationToken);
