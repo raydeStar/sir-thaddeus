@@ -24,6 +24,20 @@ maintains a parity composition for harness and terminal execution. Composition
 tests should verify security and ordering invariants rather than optional
 experiments.
 
+## Supported deterministic selection
+
+An explicit, unambiguous request to create a Wiki root may select the advertised
+`wiki_root_create` contract for the first model round. The policy rejects page
+requests, explanatory or hypothetical prompts, negation, deferred intent,
+unavailable tools, and turns with an upstream forced tool.
+
+Selection does not parse arguments, execute a write, change conversation
+messages, or bypass permission policy. The model still supplies the arguments,
+the normal audited MCP boundary executes the call, and subsequent rounds remain
+free to use the ordinary tool loop. Other Wiki mutations continue through
+normal model selection and may use by-name contracts that resolve unique local
+targets inside the tool.
+
 ## Supported diagnostics
 
 `ST_ROUTING_LATENCY_TRACE=1` enables duration-only routing diagnostics. It may

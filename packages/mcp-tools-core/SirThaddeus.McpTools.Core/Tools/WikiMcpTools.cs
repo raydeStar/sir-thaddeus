@@ -9,7 +9,7 @@ using SirThaddeus.Wiki.Storage;
 namespace SirThaddeus.McpServer.Tools;
 
 [McpServerToolType]
-public static class WikiMcpTools
+public static partial class WikiMcpTools
 {
     private const int DefaultPageReadChars = 24_000;
     private const int MaxPageReadChars = 60_000;

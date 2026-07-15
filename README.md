@@ -121,15 +121,28 @@ The runtime binds to `127.0.0.1` on an ephemeral port. A bearer token rotates ea
 <a id="measured-not-guessed"></a>
 ## Measured, Not Guessed
 
-“Agentic” is cheap copy. Sir Thaddeus ships the harness that can prove—or disprove—the claim.
+"Agentic" is cheap copy. Sir Thaddeus ships the harness that can prove—or disprove—the claim.
 
-| Probe | Without the tool | With the tool | What it proved |
+| Probe | Baseline | Candidate or augmented result | Honest interpretation |
 | --- | ---: | ---: | --- |
-| 1.2B model, six math tasks | **0 / 6** | **5 / 6** with `calculator` | The tool loop changes capability. |
-| 20-item compute suite | roughly **0%** | **43%** with `python_eval` | Tools help; model reasoning still sets the ceiling. |
-| MMLU-Pro sampled voting | **37.9%** | **27.9%** | More inference made this model worse, so the experiment was removed. |
+| 1.2B model, six math tasks | **0 / 6** without tools | **5 / 6** with `calculator` | The harness improved the user outcome; it did not change closed-book model capacity. |
+| 20-item compute suite | roughly **0%** without tools | **43%** with `python_eval` | Tools help; model reasoning still sets the ceiling. |
+| MMLU-Pro sampled voting | **37.9%** unchanged | **27.9%** with voting | More inference made this model worse, so the experiment was removed. |
+| 8B Q4, unseen Wiki root-creation validation | **9 / 16** semantic-tool parent | **14 / 16** with deterministic first-tool selection, repeated exactly | A narrow, externally verified Wiki reliability gain—not a general reasoning or MMLU gain. |
 
 The scorer grades actual values, not answer shape. A Docker canary aborts broken sandbox runs instead of blaming the model. Roughly **1,900 lines** of benchmark-specific shortcut solvers were removed so the suite exercises the real model and tool pipeline.
+
+Two scorecards stay separate:
+
+- **Model capacity:** closed-book knowledge, math, science, document reasoning,
+  instruction following, validity, and calibration.
+- **Harness capability:** verified outcomes produced with tools, retrieval,
+  permissions, state, and external postconditions.
+
+The default general-capability portfolio is MMLU-Pro, GSM1k, ARC-Challenge,
+DROP, and IFBench or IFEval, with harder and fresher confirmation lanes used
+where the model is above the floor. See [Benchmarking](docs/BENCHMARKING.md) for
+the run tiers, attribution controls, metrics, and safe customization rules.
 
 ### Fresh optimization pass: what changed
 
@@ -141,6 +154,8 @@ The July 2026 pass tightened the real answer and measurement paths rather than t
 | Valid compute results were easiest to preserve when they arrived as plain integer strings and the request named the tool. | Actual compute-tool records are authoritative; numeric JSON values and scientific notation are accepted too. | Fewer correct tool results are discarded because of harmless formatting differences. |
 | A completed model-intake run could be lost to a later reporting failure, forcing the expensive measurement to run again. | Completed summaries can regenerate scorecards and reports with `-ReuseSummaryPath`. | Measurement is cheaper to recover and easier to audit. |
 | Windows-native output quirks could masquerade as model-load or reporting failures. | Model loading uses the real process exit code, reporting filters incidental stream records, and malformed summary data fails closed. | Infrastructure errors are less likely to be reported as model weakness—or as a misleading scorecard. |
+| Wiki page mutations required the model to carry opaque ids and versions across several calls. | By-name Wiki contracts resolve unique roots, folders, pages, and current versions inside the audited tool boundary; ambiguous targets fail closed. | Small models perform less mechanical bookkeeping while permissions, revisions, and concurrency checks remain intact. |
+| Explicit Wiki-root creation could be lost among many available tools. | A deterministic policy selects `wiki_root_create` only for explicit, unambiguous root requests and only on the first model round. | The model still supplies arguments and the normal permissioned tool loop executes the write. |
 
 ### Fresh model ceiling check
 

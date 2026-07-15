@@ -1,0 +1,132 @@
+# Benchmarking
+
+Sir Thaddeus tracks model capacity and harness capability separately. A tool,
+retrieval, or state-management gain may improve the user outcome without making
+the underlying model more knowledgeable. Reports must name the lane before
+showing a score.
+
+## Scorecards
+
+| Scorecard | Question | Typical controls | Primary evidence |
+| --- | --- | --- | --- |
+| Model capacity | Can this model understand and solve the task without answer-producing tools? | Raw minimal, same-prompt direct, unchanged no-tools harness, candidate | Strict closed-book correctness, validity, calibration, and robustness |
+| Harness capability | Can the same model complete more real work with Sir Thaddeus capabilities? | Unchanged harness, candidate harness, and oracle capability when diagnostic | Independently verified final state or artifact, permissions, calls, latency, and resources |
+
+Do not combine the two into one unlabeled percentage. Report an augmented
+outcome as an augmented outcome; a calculator-assisted correct answer is useful,
+but it is not a closed-book reasoning win.
+
+## General capability portfolio
+
+The core portfolio favors objectively scored tasks that produce useful signal
+for small local models. Availability in the evaluator varies; adding a row is a
+separate evaluator change, not production behavior.
+
+| Capability | Preferred benchmark | Role |
+| --- | --- | --- |
+| Broad knowledge and reasoning | [MMLU-Pro](https://arxiv.org/abs/2406.01574) | Core breadth measure; original MMLU remains a continuity diagnostic |
+| Practical mathematics | [GSM1k](https://arxiv.org/abs/2405.00332) | Fresh GSM-style arithmetic and contamination check |
+| General science | [ARC-Challenge](https://arxiv.org/abs/1803.05457) | Accessible science reasoning across the full model ladder |
+| Document and numerical reasoning | [DROP](https://arxiv.org/abs/1903.00161) | Reasoning over supplied text, references, counts, and arithmetic |
+| Precise instruction following | [IFBench](https://arxiv.org/abs/2507.02833) or IFEval | Verifiable constraint-following and generalization |
+
+Use MATH, MuSR, GPQA Diamond, and the current LiveBench release as deeper or
+fresh confirmation lanes. They can be floor-level for the smallest models, so
+do not make them the only promotion signal. GAIA Level 1 is a useful separate
+assistant-outcome lane when browsing, files, and multimodal tools are in scope.
+
+Coding benchmarks remain available for product work, but they are not part of
+the default general-capability headline.
+
+## Run tiers
+
+### Development
+
+Target a sub-ten-minute, fixed 50-item battery:
+
+- 10 MMLU-Pro;
+- 10 GSM1k;
+- 10 ARC-Challenge;
+- 10 DROP;
+- 10 IFBench or IFEval.
+
+This slice can reject a mechanism or justify an exact repeat. It cannot prove a
+general improvement.
+
+### Validation
+
+Use at least 50 disjoint items per core category. Freeze the suite before the
+candidate runs, report every category separately, and use paired confidence
+intervals or an equivalent paired test. Do not tune against validation failures.
+
+### External confirmation
+
+Use a current LiveBench release, temporal questions, or another independently
+maintained holdout. Run difficult MATH, MuSR, and GPQA lanes only where the raw
+model is above the floor.
+
+## Required measurements
+
+Every comparison should report:
+
+- strict correctness and valid response rate;
+- category macro-average plus each category result;
+- paired wins, losses, and unchanged items;
+- exact-repeat stability;
+- paraphrase, option-order, entity, and number mutations;
+- false-confidence or abstention behavior where scoring supports it;
+- model and tool calls, tokens, p50/p95 latency, and peak memory or VRAM;
+- hidden or stronger-model escalation as a separate line item.
+
+Prefer an improvement whose paired confidence interval excludes zero on
+validation. A narrow product mechanism may use a narrow primary category, but
+the remaining portfolio becomes its regression guardrail.
+
+## Attribution controls
+
+Keep the model, quantization, context, sampling, prompt composer, provider, and
+item set frozen. Compare these arms when applicable:
+
+1. `raw`: minimal evaluator prompt and one model call;
+2. `same_prompt_direct`: the shared production prompt and one no-tools call;
+3. `harness_full`: unchanged production-equivalent orchestration;
+4. candidate: one declared mechanism differs.
+
+For augmented tasks, show closed-book and tool-enabled results in separate
+columns. An oracle route, oracle tool, or gold-evidence arm can identify a model
+ceiling, but it is diagnostic rather than a product score.
+
+## Safe customization
+
+Benchmark datasets, expected answers, suite identifiers, scorer code, and
+promotion thresholds belong in the sibling `local-benchmark-runner` repository,
+never in production assemblies.
+
+To add or customize a benchmark:
+
+1. Declare the capability and scorecard lane.
+2. Freeze development, validation, and confirmation selections before running
+   the candidate.
+3. Record provider, model, prompt, tool, config, and repository hashes.
+4. Use deterministic scoring or independently observed final state where
+   possible.
+5. Run raw, same-prompt direct, unchanged harness, and candidate controls on the
+   same items.
+6. Rerun a promising candidate exactly before consuming validation.
+7. Preserve artifacts and a verdict; keep clearly failed behavior out of
+   production.
+
+See [EXPERIMENTATION.md](EXPERIMENTATION.md) for branch and promotion policy and
+[TESTING.md](TESTING.md) for local commands and artifact locations.
+
+## Interpreting the Wiki result
+
+The semantic Wiki experiment is a harness-capability result. The evaluator
+creates disposable local state, sends a normal request, and compares the final
+Wiki snapshot with evaluator-only expectations. Production never receives the
+expected state.
+
+The retained candidate improves a narrow, real operation: explicit Wiki-root
+creation. It does not improve MMLU, general science, or mathematical reasoning.
+That narrow claim is intentional and should remain narrow in release notes and
+benchmark summaries.

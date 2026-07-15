@@ -946,6 +946,82 @@ public class ToolLoopStepTests
         Assert.Equal([2048], llm.MaxTokenOverrides);
     }
 
+    [Theory]
+    [InlineData("Create a new Wiki Canvas root named Field Notes.")]
+    [InlineData("Please add a Wiki Canvas root called Travel Log.")]
+    [InlineData("Would you please make a Wiki Canvas root called Reading Notes?")]
+    [InlineData("Start a new Wiki Canvas root named Planning.")]
+    [InlineData("Set up a new Wiki Canvas root named Project Notes.")]
+    [InlineData("Establish a Wiki Canvas root called Field Notes.")]
+    [InlineData("Initialize a new Wiki root named Lab Notes.")]
+    [InlineData("Spin up a Wiki Canvas root called Design Notes.")]
+    [InlineData("I need a new Wiki Canvas root named Client Notes. Please create it.")]
+    [InlineData("Prepare a Wiki Canvas root called Meeting Notes.")]
+    [InlineData("Provision a new Wiki root named Operations Notes.")]
+    [InlineData("Build a Wiki Canvas root called Knowledge Notes.")]
+    public async Task Explicit_wiki_root_creation_forces_root_create(string prompt)
+    {
+        var llm = new FakeLlm(LlmReply.Final("Ready."));
+        var step = BuildStep(llm);
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs = [ToolDefinitionFor("wiki_root_create")],
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.Equal("wiki_root_create", llm.ForcedToolNames[0]);
+    }
+
+    [Theory]
+    [InlineData("How do I create a Wiki Canvas root?")]
+    [InlineData("Explain how to set up a Wiki Canvas root.")]
+    [InlineData("Maybe create a Wiki Canvas root later.")]
+    [InlineData("Do not create a Wiki Canvas root named Scratch.")]
+    [InlineData("Create a page named Findings under the Wiki Canvas root Research.")]
+    [InlineData("I need a new Wiki page in the Research root.")]
+    [InlineData("Rename the Draft page in Wiki Canvas root Research.")]
+    public async Task Non_root_creation_request_does_not_force_root_create(string prompt)
+    {
+        var llm = new FakeLlm(LlmReply.Final("Ready."));
+        var step = BuildStep(llm);
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs = [ToolDefinitionFor("wiki_root_create")],
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.Null(llm.ForcedToolNames[0]);
+    }
+
+    [Fact]
+    public async Task Upstream_forced_tool_overrides_wiki_root_selection()
+    {
+        var prompt = "Create a Wiki Canvas root named Field Notes.";
+        var llm = new FakeLlm(LlmReply.Final("Ready."));
+        var step = BuildStep(llm);
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs =
+            [
+                ToolDefinitionFor("wiki_root_create"),
+                ToolDefinitionFor("wiki_roots_list"),
+            ],
+            ForcedTool = "wiki_roots_list",
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.Equal("wiki_roots_list", llm.ForcedToolNames[0]);
+    }
+
     private static TurnContext ComputeContext(string prompt) => NewContext() with
     {
         UserText = prompt,
@@ -987,6 +1063,16 @@ public class ToolLoopStepTests
             new ToolDefinition { Function = new FunctionDefinition { Name = "web_search", Description = "web", Parameters = new { } } },
             new ToolDefinition { Function = new FunctionDefinition { Name = "flaky", Description = "test", Parameters = new { } } },
             new ToolDefinition { Function = new FunctionDefinition { Name = "propose_automation", Description = "virtual", Parameters = new { } } },
+        },
+    };
+
+    private static ToolDefinition ToolDefinitionFor(string name) => new()
+    {
+        Function = new FunctionDefinition
+        {
+            Name = name,
+            Description = "test tool",
+            Parameters = new { },
         },
     };
 

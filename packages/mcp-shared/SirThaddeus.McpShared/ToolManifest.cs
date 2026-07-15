@@ -509,6 +509,16 @@ public static class ToolManifest
         },
         new()
         {
+            Name        = "wiki_page_create_by_name",
+            Aliases     = ["WikiPageCreateByName"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Creates a Markdown page using an exact Wiki root name and optional folder name.",
+            Limits      = "Root and folder names must resolve uniquely. Markdown is persisted as the canonical page body."
+        },
+        new()
+        {
             Name        = "wiki_page_read",
             Aliases     = ["WikiPageRead"],
             Category    = "file",
@@ -529,6 +539,16 @@ public static class ToolManifest
         },
         new()
         {
+            Name        = "wiki_page_update_by_name",
+            Aliases     = ["WikiPageUpdateByName"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Replaces a Wiki page body using an exact root name and page title.",
+            Limits      = "Root and page names must resolve uniquely. Uses current-version concurrency and creates a revision."
+        },
+        new()
+        {
             Name        = "wiki_page_rename",
             Aliases     = ["WikiPageRename"],
             Category    = "file",
@@ -536,6 +556,16 @@ public static class ToolManifest
             Permission  = "required",
             Description = "Renames a Wiki Canvas page using expected-version concurrency.",
             Limits      = "Requires current version from wiki_page_read. Creates a revision."
+        },
+        new()
+        {
+            Name        = "wiki_page_rename_by_name",
+            Aliases     = ["WikiPageRenameByName"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Renames a Wiki page using an exact root name and current page title.",
+            Limits      = "Root and page names must resolve uniquely. Uses current-version concurrency and creates a revision."
         },
         new()
         {
@@ -559,6 +589,16 @@ public static class ToolManifest
         },
         new()
         {
+            Name        = "wiki_page_delete_by_name",
+            Aliases     = ["WikiPageDeleteByName"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Deletes a Wiki page using an exact root name and page title.",
+            Limits      = "Root and page names must resolve uniquely. Destructive."
+        },
+        new()
+        {
             Name        = "wiki_page_patch_selection",
             Aliases     = ["WikiPagePatchSelection"],
             Category    = "file",
@@ -566,6 +606,16 @@ public static class ToolManifest
             Permission  = "required",
             Description = "Replaces exactly one selected text passage in a Wiki Canvas page.",
             Limits      = "Requires current version and exact selected text match. Creates a revision."
+        },
+        new()
+        {
+            Name        = "wiki_page_patch_selection_by_name",
+            Aliases     = ["WikiPagePatchSelectionByName"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Replaces one exact passage in a Wiki page selected by root name and page title.",
+            Limits      = "Root, page, and selected passage must resolve uniquely. Preserves other page content and creates a revision."
         },
         new()
         {
