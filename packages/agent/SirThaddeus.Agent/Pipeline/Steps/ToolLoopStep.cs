@@ -125,6 +125,13 @@ public sealed class ToolLoopStep : ITurnStep
                 "label the previous terms first, then call calculator for each derived term."));
         }
 
+        if (string.IsNullOrWhiteSpace(context.ForcedTool))
+        {
+            forcedToolForNextRound = WikiRootCreateSelectionPolicy.TrySelect(
+                context.UserText,
+                context.ToolDefs);
+        }
+
         for (var round = 0; round < _maxRoundTrips; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
