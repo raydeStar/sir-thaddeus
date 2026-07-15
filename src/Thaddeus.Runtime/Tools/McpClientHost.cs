@@ -3,6 +3,8 @@ using Microsoft.Extensions.Hosting;
 using SirThaddeus.Agent;
 using SirThaddeus.AuditLog;
 using SirThaddeus.RuntimeHost;
+using SirThaddeus.Wiki;
+using SirThaddeus.Wiki.Storage;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.SharedTypes;
 
@@ -29,6 +31,7 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
     private readonly ILogger<McpClientHost> _logger;
     private readonly IAuditLogger _audit;
     private readonly ISettingsStore _settings;
+    private readonly string? _wikiLibraryPath;
     private StdioMcpToolClient? _inner;
     private Task? _startupTask;
     private volatile bool _ready;
@@ -40,11 +43,13 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
     public McpClientHost(
         ILogger<McpClientHost> logger,
         IAuditLogger audit,
-        ISettingsStore settings)
+        ISettingsStore settings,
+        IWikiStore wiki)
     {
         _logger = logger;
         _audit = audit;
         _settings = settings;
+        _wikiLibraryPath = (wiki as LocalWikiStore)?.LibraryDirectory;
         _settings.Changed += OnSettingsChanged;
     }
 
@@ -92,7 +97,7 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
                 return;
             }
 
-            var env = BuildEnv(doc);
+            var env = BuildEnv(doc, _wikiLibraryPath);
             _envFingerprint = FingerprintEnv(env);
 
             var asm = Assembly.GetExecutingAssembly();
@@ -139,7 +144,7 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
         if (Volatile.Read(ref _disposed) != 0)
             return;
 
-        var newEnv = BuildEnv(doc);
+        var newEnv = BuildEnv(doc, _wikiLibraryPath);
         var newFp = FingerprintEnv(newEnv);
         if (string.Equals(newFp, _envFingerprint, StringComparison.Ordinal)) return;
 
@@ -148,17 +153,22 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
     }
 
     /// <summary>
-    /// Builds the env dictionary passed to the MCP server child. Today we
-    /// wire file-access settings (allowed roots + kill switch) plus the
-    /// memory DB path shared by the audit API and memory tools.
+    /// Builds the env dictionary passed to the MCP server child. It wires
+    /// file-access policy plus the memory and wiki stores shared with the
+    /// runtime APIs.
     /// </summary>
-    private static Dictionary<string, string> BuildEnv(SettingsDocument doc)
+    internal static Dictionary<string, string> BuildEnv(
+        SettingsDocument doc,
+        string? wikiLibraryPath = null)
     {
         var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["ST_MEMORY_DB_PATH"] = RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPathFromEnvironment()
         };
         var files = doc.Files;
+        if (!string.IsNullOrWhiteSpace(wikiLibraryPath))
+            env["ST_WIKI_LIBRARY_PATH"] = Path.GetFullPath(wikiLibraryPath);
+
         if (files is not null)
         {
             if (files.AllowedRoots.Count > 0)

@@ -117,6 +117,9 @@ internal sealed class HarnessRuntimeSandbox : IDisposable
         File.WriteAllText(settingsPath, JsonSerializer.Serialize(sandboxSettings, JsonOptions));
 
         var environment = RuntimeMcpEnvironmentBuilder.Build(sandboxSettings);
+        // Wiki MCP tools otherwise fall back to the user's Documents folder.
+        // Harness runs must never read or mutate the real wiki library.
+        environment["ST_WIKI_LIBRARY_PATH"] = Path.Combine(sandboxRoot, "wiki-library");
         environment["ST_SETTINGS_PATH"] = settingsPath;
         environment["ST_AUDIT_PATH"] = auditPath;
         environment["ST_CHAT_HISTORY_PATH"] = Path.Combine(dataDirectory, "chat-history.json");

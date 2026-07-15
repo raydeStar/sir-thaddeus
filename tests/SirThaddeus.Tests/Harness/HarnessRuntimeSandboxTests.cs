@@ -46,6 +46,9 @@ public sealed class HarnessRuntimeSandboxTests
         Assert.Equal(string.Empty, persisted.RuntimeSafety.SafeModeReason);
         Assert.Equal(string.Empty, persisted.RuntimeSafety.SafeModeSinceUtc);
         Assert.Equal(sandbox.SettingsPath, sandbox.Environment["ST_SETTINGS_PATH"]);
+        Assert.Equal(
+            Path.Combine(sandbox.RootDirectory, "wiki-library"),
+            sandbox.Environment["ST_WIKI_LIBRARY_PATH"]);
     }
 
     [Fact]
