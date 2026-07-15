@@ -27,34 +27,37 @@ function Apply-WindowsCompatPatch([string]$SourceRoot) {
         Fail "Expected compatibility target not found: $valkeyDbPath"
     }
 
-    $importNeedle = @"
-import os
-import pwd
-import logging
-"@
-    $importReplacement = @"
-import os
-import logging
+    $content = Get-Content $valkeyDbPath -Raw
+    if ($content -match '(?m)^import pwd\r?$') {
+        $importReplacement = @'
 try:
     import pwd
 except ImportError:
     pwd = None
-"@
-    $exceptionNeedle = @"
-        _pw = pwd.getpwuid(os.getuid())
-        logger.exception("[%s (%s)] can't connect valkey DB ...", _pw.pw_name, _pw.pw_uid)
-"@
-    $exceptionReplacement = @"
+'@
+        $content = [regex]::Replace(
+            $content,
+            '(?m)^import pwd\r?$',
+            $importReplacement)
+    }
+
+    $exceptionReplacement = @'
         if pwd is not None and hasattr(os, 'getuid'):
             _pw = pwd.getpwuid(os.getuid())
             logger.exception("[%s (%s)] can't connect valkey DB ...", _pw.pw_name, _pw.pw_uid)
         else:
             logger.exception("can't connect valkey DB ...")
-"@
+'@
+    $content = [regex]::Replace(
+        $content,
+        '(?m)^        _pw = pwd\.getpwuid\(os\.getuid\(\)\)\r?\n        logger\.exception\("\[%s \(%s\)\] can''t connect valkey DB \.\.\.\", _pw\.pw_name, _pw\.pw_uid\)\r?$',
+        $exceptionReplacement)
 
-    $content = Get-Content $valkeyDbPath -Raw
-    $content = $content.Replace($importNeedle, $importReplacement)
-    $content = $content.Replace($exceptionNeedle, $exceptionReplacement)
+    if ($content -match '(?m)^import pwd\r?$' -or
+        $content -match '(?m)^        _pw = pwd\.getpwuid\(os\.getuid\(\)\)\r?$') {
+        Fail "SearXNG Windows compatibility patch did not apply cleanly."
+    }
+
     Set-Content -Path $valkeyDbPath -Value $content -Encoding UTF8
 }
 
