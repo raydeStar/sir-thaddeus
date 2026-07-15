@@ -22,7 +22,7 @@ internal static class HarnessHostFactory
         return options.HostTarget switch
         {
             HarnessHostTarget.HeadlessV1 => new HeadlessRuntimeHarnessClient(settings, requirements.RequiresManagedSearch),
-            HarnessHostTarget.HybridV2 => new HybridRuntimeHostAdapter(settings),
+            HarnessHostTarget.HybridV2 => new HybridRuntimeHostAdapter(settings, requirements.RequiresManagedSearch),
             _ => throw new InvalidOperationException(
                 $"Unhandled host target '{options.HostTarget}'.")
         };

@@ -11,6 +11,7 @@ using SirThaddeus.Contracts;
 using SirThaddeus.Harness.Models;
 using SirThaddeus.Harness.Tracing;
 using SirThaddeus.LlmClient;
+using SirThaddeus.RuntimeHost;
 using Thaddeus.SharedTypes;
 
 namespace SirThaddeus.Harness.Execution;
@@ -54,6 +55,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
     private static readonly object _buildLock = new();
 
     private readonly AppSettings _baseSettings;
+    private readonly bool _requiresManagedSearch;
+    private readonly SearxngHostLauncher _searxngLauncher = new();
     private readonly List<string> _stdout = [];
     private readonly List<string> _stderr = [];
 
@@ -72,9 +75,10 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
     // chat message; the WS reader publishes into them as events arrive.
     private Channel<JsonDocument>? _events;
 
-    public HybridRuntimeHostAdapter(AppSettings settings)
+    public HybridRuntimeHostAdapter(AppSettings settings, bool requiresManagedSearch = false)
     {
         _baseSettings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _requiresManagedSearch = requiresManagedSearch;
     }
 
     public Task InitializeAsync(CancellationToken cancellationToken)
@@ -214,6 +218,9 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             $"hybrid-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_sandboxRoot);
         _lockFilePath = Path.Combine(_sandboxRoot, "runtime.lock");
+
+        if (_requiresManagedSearch)
+            await EnsureManagedSearchAsync(cancellationToken).ConfigureAwait(false);
 
         // Pre-write a settings file pointing at the user's configured LLM
         // so v2 hits the same LM Studio the v1 harness uses. Otherwise it
@@ -523,6 +530,22 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             ?? new LlmUsageSnapshot();
     }
 
+    private async Task EnsureManagedSearchAsync(CancellationToken cancellationToken)
+    {
+        var settings = _baseSettings.WebSearch with
+        {
+            Mode = "auto",
+            SearxngAutoStart = true
+        };
+        var result = await _searxngLauncher.EnsureRunningAsync(settings, cancellationToken)
+            .ConfigureAwait(false);
+        if (result.Status is not (SearxngLaunchStatus.Started or SearxngLaunchStatus.AlreadyRunning))
+        {
+            throw new InvalidOperationException(
+                $"Hybrid harness requires managed search, but SearxNG did not start: {result.Message}");
+        }
+    }
+
     private async Task<IReadOnlyList<ToolCallRecord>> GetHarnessToolEvidenceAsync(
         string messageId,
         CancellationToken cancellationToken)
@@ -761,6 +784,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
     public ValueTask DisposeAsync()
     {
         DisposeProcessAndConnections();
+        _searxngLauncher.Dispose();
         try
         {
             if (_sandboxRoot is not null && Directory.Exists(_sandboxRoot))
