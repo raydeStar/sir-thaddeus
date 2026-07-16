@@ -106,7 +106,13 @@ public static class ChatApi
                 Text: userText,
                 CreatedAt: DateTimeOffset.UtcNow);
             if (latencyTrace is not null)
+            {
                 latencyTrace.UserMessageId = message.Id;
+                turnLogger.LogInformation(
+                    "EXPERIMENT_ACTIVATION turn_id={TurnId} event=local_wiki_evidence_packet decision={Decision}",
+                    message.Id,
+                    prompt.CompactEvidenceActivated ? "activated" : "inactive");
+            }
 
             try
             {
@@ -321,6 +327,7 @@ public sealed record ThreadListResponse(IReadOnlyList<ThreadSummary> Threads);
 [JsonSerializable(typeof(WikiChatContextRequest))]
 [JsonSerializable(typeof(WikiChatContextPrompt))]
 [JsonSerializable(typeof(WikiChatContextAttachment))]
+[JsonSerializable(typeof(WikiChatEvidenceSource))]
 [JsonSerializable(typeof(AppendMessageResponse))]
 [JsonSerializable(typeof(RetryAssistantResponse))]
 public partial class ChatJsonContext : JsonSerializerContext

@@ -35,6 +35,7 @@ public sealed class WikiChatContextServiceTests : IDisposable
 
         Assert.Equal("Summarize this", prompt.Prompt);
         Assert.Null(prompt.Attachment);
+        Assert.False(prompt.CompactEvidenceActivated);
     }
 
     [Fact]
@@ -54,6 +55,7 @@ public sealed class WikiChatContextServiceTests : IDisposable
         Assert.Contains("The launch risk is telemetry drift.", prompt.Prompt);
         Assert.Contains("User message:", prompt.Prompt);
         Assert.Contains("What risk should I watch?", prompt.Prompt);
+        Assert.False(prompt.CompactEvidenceActivated);
     }
 
     [Fact]
@@ -65,7 +67,7 @@ public sealed class WikiChatContextServiceTests : IDisposable
         await _wiki.CreatePageAsync(secondRoot.Id, null, "Roadmap", "# Roadmap\n\nRevenue plan.", CancellationToken.None);
 
         var prompt = await _service.BuildAsync(
-            "Find contradictions",
+            "What is Kazalt's secret?",
             new WikiChatContextRequest("root", RootId: firstRoot.Id),
             CancellationToken.None);
 
@@ -74,6 +76,10 @@ public sealed class WikiChatContextServiceTests : IDisposable
         Assert.Equal(firstRoot.Id, prompt.Attachment.Id);
         Assert.Contains("Royal secret.", prompt.Prompt);
         Assert.DoesNotContain("Revenue plan.", prompt.Prompt);
+        Assert.True(prompt.CompactEvidenceActivated);
+        Assert.Single(prompt.EvidenceSources!);
+        Assert.Equal("Kazalt", prompt.EvidenceSources![0].Title);
+        Assert.DoesNotContain(firstRoot.Id, prompt.Prompt, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -85,7 +91,7 @@ public sealed class WikiChatContextServiceTests : IDisposable
         await _wiki.CreatePageAsync(secondRoot.Id, null, "Roadmap", "# Roadmap\n\nRevenue plan.", CancellationToken.None);
 
         var prompt = await _service.BuildAsync(
-            "Find contradictions",
+            "Compare Kazalt with the Roadmap revenue plan.",
             new WikiChatContextRequest("all"),
             CancellationToken.None);
 
@@ -97,6 +103,8 @@ public sealed class WikiChatContextServiceTests : IDisposable
         Assert.Contains("Royal secret.", prompt.Prompt);
         Assert.Contains("Root: Work", prompt.Prompt);
         Assert.Contains("Revenue plan.", prompt.Prompt);
+        Assert.True(prompt.CompactEvidenceActivated);
+        Assert.Equal(2, prompt.EvidenceSources!.Count);
     }
 
     [Fact]
@@ -111,7 +119,7 @@ public sealed class WikiChatContextServiceTests : IDisposable
         await _wiki.CreatePageAsync(root.Id, locations.Id, "Leviathan Bay", "# Leviathan Bay\n\nStorm harbor.", CancellationToken.None);
 
         var prompt = await _service.BuildAsync(
-            "Who is involved?",
+            "Compare Kazalt and Remora.",
             new WikiChatContextRequest("folder", RootId: root.Id, FolderId: characters.Id),
             CancellationToken.None);
 
@@ -120,6 +128,24 @@ public sealed class WikiChatContextServiceTests : IDisposable
         Assert.Contains("Royal secret.", prompt.Prompt);
         Assert.Contains("Hidden antagonist.", prompt.Prompt);
         Assert.DoesNotContain("Storm harbor.", prompt.Prompt);
+        Assert.True(prompt.CompactEvidenceActivated);
+    }
+
+    [Fact]
+    public async Task BuildAsync_returns_empty_compilation_when_scope_has_no_query_match()
+    {
+        var root = await _wiki.CreateRootAsync("Novel", null, CancellationToken.None);
+        await _wiki.CreatePageAsync(root.Id, null, "Roadmap", "Revenue plan.", CancellationToken.None);
+
+        var prompt = await _service.BuildAsync(
+            "What is the Zephyr access phrase?",
+            new WikiChatContextRequest("root", RootId: root.Id),
+            CancellationToken.None);
+
+        Assert.True(prompt.CompactEvidenceActivated);
+        Assert.Empty(prompt.EvidenceSources!);
+        Assert.Contains("No relevant passage matched", prompt.Prompt);
+        Assert.DoesNotContain("Revenue plan.", prompt.Prompt);
     }
 
     [Fact]

@@ -197,4 +197,42 @@ public sealed class WikiPageRetrieverServiceTests : IDisposable
         Assert.Contains("dragon", match.Snippet, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("chapel", match.Snippet, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task Scope_retrieval_ranks_query_matches_and_respects_page_limit()
+    {
+        var root = await _wiki.CreateRootAsync("Notes", null, CancellationToken.None);
+        var distractor = await _wiki.CreatePageAsync(
+            root.Id, null, "Archive", "Routine coordination notes.", CancellationToken.None);
+        var status = await _wiki.CreatePageAsync(
+            root.Id, null, "Launch Status", "Current launch status: GREEN", CancellationToken.None);
+        var owner = await _wiki.CreatePageAsync(
+            root.Id, null, "Launch Owner", "Current launch owner: Mira", CancellationToken.None);
+
+        var results = _retriever.RetrieveScope(
+            [distractor, status, owner],
+            "What is the current launch status?",
+            charBudget: 1_000,
+            maxPages: 1);
+
+        Assert.Single(results);
+        Assert.Equal("Launch Status", results[0].Page.Title);
+        Assert.Contains("GREEN", results[0].Snippet);
+    }
+
+    [Fact]
+    public async Task Scope_retrieval_returns_empty_when_no_terms_match()
+    {
+        var root = await _wiki.CreateRootAsync("Notes", null, CancellationToken.None);
+        var page = await _wiki.CreatePageAsync(
+            root.Id, null, "Roadmap", "Routine coordination notes.", CancellationToken.None);
+
+        var results = _retriever.RetrieveScope(
+            [page],
+            "Zephyr access phrase",
+            charBudget: 1_000,
+            maxPages: 4);
+
+        Assert.Empty(results);
+    }
 }

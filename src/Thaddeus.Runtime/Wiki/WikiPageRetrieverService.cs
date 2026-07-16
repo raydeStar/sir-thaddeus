@@ -70,15 +70,58 @@ public sealed class WikiPageRetrieverService
             scored.Add(new ScoredCandidate(document, score));
         }
 
+        return SelectResults(scored, weightedTerms.Keys, charBudget, int.MaxValue);
+    }
+
+    /// <summary>
+    /// Ranks an already-scoped set of Wiki documents against the user's query
+    /// and returns bounded extractive passages. This is deterministic and does
+    /// not issue another model or embedding request.
+    /// </summary>
+    public IReadOnlyList<RetrievedSiblingPage> RetrieveScope(
+        IEnumerable<WikiPageDocument> documents,
+        string query,
+        int charBudget,
+        int maxPages)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        if (charBudget <= 0 || maxPages <= 0) return Array.Empty<RetrievedSiblingPage>();
+
+        var terms = ExtractQueryTerms(query)
+            .ToDictionary(term => term, _ => 1d, StringComparer.OrdinalIgnoreCase);
+        if (terms.Count == 0) return Array.Empty<RetrievedSiblingPage>();
+
+        var scored = documents
+            .Select(document => new ScoredCandidate(document, Score(document, terms)))
+            .Where(candidate => candidate.Score.Total > 0)
+            .ToList();
+        return SelectResults(scored, terms.Keys, charBudget, maxPages);
+    }
+
+    private static IReadOnlyList<RetrievedSiblingPage> SelectResults(
+        List<ScoredCandidate> scored,
+        IReadOnlyCollection<string> queryTerms,
+        int charBudget,
+        int maxPages)
+    {
         if (scored.Count == 0) return Array.Empty<RetrievedSiblingPage>();
-        scored.Sort(static (a, b) => b.Score.Total.CompareTo(a.Score.Total));
+        scored.Sort(static (a, b) =>
+        {
+            var byScore = b.Score.Total.CompareTo(a.Score.Total);
+            return byScore != 0
+                ? byScore
+                : StringComparer.OrdinalIgnoreCase.Compare(a.Document.Page.RelativePath, b.Document.Page.RelativePath);
+        });
 
         var results = new List<RetrievedSiblingPage>();
         var remaining = charBudget;
         foreach (var item in scored)
         {
-            if (remaining < MinSiblingSnippetChars) break;
-            var snippet = BuildSnippet(item.Document.Markdown, weightedTerms.Keys, Math.Min(SnippetWindowChars, remaining));
+            if (remaining < MinSiblingSnippetChars || results.Count >= maxPages) break;
+            var snippet = BuildSnippet(
+                item.Document.Markdown,
+                queryTerms,
+                Math.Min(SnippetWindowChars, remaining));
             if (snippet.Length == 0) continue;
             results.Add(new RetrievedSiblingPage(item.Document.Page, snippet, item.Score.Total));
             remaining -= snippet.Length;
