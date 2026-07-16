@@ -266,12 +266,23 @@ expected final state to the model.
       }
     ]
   },
+  "wiki_context": {
+    "mode": "root",
+    "root_name": "Research"
+  },
   "observations": [
     { "type": "wiki", "root_names": ["Research"] },
     { "type": "files", "paths": ["notes/brief.txt"] }
   ]
 }
 ```
+
+`wiki_context` is a harness-only way to exercise the same explicit Wiki
+attachment surface as the desktop UI. The v2 adapter resolves evaluator-owned
+`root_name` and optional `page_title` values to disposable runtime identifiers
+after state setup, and fails closed on missing or ambiguous names. Supported
+modes are `none`, `all`, `root`, and `page`. It does not perform implicit
+retrieval or expose expected outcomes to the assistant.
 
 Run these fixtures with `--target v2`. Setup and observation scope are recorded
 in `input.json` for reproducibility. Expected state and scorer predicates stay

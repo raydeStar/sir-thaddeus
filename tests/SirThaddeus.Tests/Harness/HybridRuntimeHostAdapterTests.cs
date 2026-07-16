@@ -57,6 +57,11 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
                   }
                 ]
               },
+              "wiki_context": {
+                "mode": "page",
+                "root_name": "Research",
+                "page_title": "Plan"
+              },
               "observations": [
                 { "type": "wiki", "root_names": ["Research"] },
                 { "type": "files", "paths": ["notes/input.txt"] }
@@ -70,9 +75,26 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         Assert.Equal("Research", test.StateSetup.WikiRoots.Single().Name);
         Assert.Equal("notes/input.txt", test.StateSetup.Files.Single().Path);
         Assert.Equal("Plan", test.StateSetup.WikiRoots.Single().Pages.Single().Title);
+        Assert.Equal("page", test.WikiContext!.Mode);
+        Assert.Equal("Research", test.WikiContext.RootName);
+        Assert.Equal("Plan", test.WikiContext.PageTitle);
         Assert.Equal("wiki", test.Observations[0].Type);
         Assert.Equal("Research", test.Observations[0].RootNames.Single());
         Assert.Equal("notes/input.txt", test.Observations[1].Paths.Single());
+    }
+
+    [Fact]
+    public void ResolveUniqueNamedId_IsCaseInsensitiveAndFailsClosed()
+    {
+        using var document = JsonDocument.Parse("""
+            [{"id":"root-1","name":"Research"},{"id":"root-2","name":"Other"}]
+            """);
+
+        Assert.Equal(
+            "root-1",
+            HybridRuntimeHostAdapter.ResolveUniqueNamedId(document.RootElement, "research", "Wiki root"));
+        Assert.Throws<InvalidOperationException>(() =>
+            HybridRuntimeHostAdapter.ResolveUniqueNamedId(document.RootElement, "Missing", "Wiki root"));
     }
 
     [Fact]
