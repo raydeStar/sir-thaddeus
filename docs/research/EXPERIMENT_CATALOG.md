@@ -44,6 +44,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Tool-integrated contract verification v1 | **Rejected as misattributed** | Repeated `5/10` was not causal; a skipped-memory provenance record prevented all ten intended activations. |
 | Contract verification output cap v2 | **Rejected** | Saved six aggregate tokens, made no executable calls, and did not improve p95. |
 | Contract verification user-role change | **Rejected; family paused** | Changing the verifier follow-up role produced no executable tool calls. |
+| Tool-semantic outcome baseline v1 | **Diagnostic accepted; no candidate** | Full menu scored `7/16` versus `3/16` oracle-pruned, `1/16` no-tools, and `3/16` raw. Full completed required tool paths on `8/10` positives and made zero forbidden calls. Oracle pruning had zero wins and four losses, so no routing, relevance, or pruning candidate was authorized. |
 
 ## Retrieval and search campaign
 
@@ -110,6 +111,9 @@ Use these repository-relative locations in the sibling
 - Tool syntax and contract headroom:
   `experiments/verdicts/2026-07-16-tool-call-syntax-headroom-v1.md` and
   `2026-07-16-explicit-format-contract-headroom-v1.md`.
+- Tool-semantic attribution:
+  `experiments/manifests/tool-semantic-outcome-baseline-v1.yaml` and
+  `experiments/verdicts/2026-07-16-tool-semantic-outcome-baseline-v1.md`.
 - Tool-integrated verification sequence:
   `experiments/verdicts/2026-07-16-tool-integrated-draft-verification-v1.md`
   through `2026-07-16-contract-verification-round-trace-v1.md`.

@@ -179,6 +179,14 @@ answer-blind tool-semantic outcome baseline before choosing another product
 mechanism; a read-before-write mutation is deferred because prior separate
 model rounds were too expensive.
 
+The answer-blind tool-semantic baseline is also complete. Full-menu Thaddeus
+scored `7/16` versus `3/16` with oracle-pruned tools, with zero oracle wins and
+four losses. It completed the required tool path on `8/10` positives and made
+no forbidden call on six no-tool controls. This does not authorize another
+tool router, relevance classifier, pruning rule, or global argument repair.
+Capability-specific postconditions remain gated on a future oracle-proven
+cluster.
+
 ### Phase 4 - Open a separate learning-based capacity lane
 
 Objective: test the most plausible route to a material closed-book gain after
@@ -236,10 +244,9 @@ model success.
 
 | Priority | Candidate | Primary scorecard | Why now |
 | ---: | --- | --- | --- |
-| 1 | Tool-semantic outcome baseline | Harness capability | Local Wiki evidence compilation is promoted and Wiki rename routing is closed; the unresolved risks are tool choice, arguments, no-tool decisions, and state |
-| 2 | One capability-specific external postcondition | Harness capability | Independent verification is stronger than same-model critique, but only after oracle headroom |
-| 3 | QLoRA or rationale-distillation pilot | Frozen-model capacity | Prompt-only capacity candidates failed; learning is a materially different mechanism |
-| 4 | Helper-call activation and latency cohort | Product quality | Needed before changing Footman, memory gating, validation, or streaming |
+| 1 | Helper-call activation and latency cohort | Product quality | The tool-semantic baseline authorized no product mechanism; representative call and latency attribution is now the cheapest useful measurement |
+| 2 | QLoRA or rationale-distillation pilot | Frozen-model capacity | Prompt-only capacity candidates failed; learning is a materially different mechanism |
+| Deferred | One capability-specific external postcondition | Harness capability | Independent verification is stronger than same-model critique, but the current tool-semantic slice found no qualifying oracle headroom |
 | Deferred | Multi-model/MoE routing | Escalation | Does not improve a fixed model and currently lacks labeled complementarity data |
 
 ## Definition of success
