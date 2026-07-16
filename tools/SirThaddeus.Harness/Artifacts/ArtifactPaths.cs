@@ -6,6 +6,7 @@ public sealed record ArtifactPaths
     public required string InputJsonPath { get; init; }
     public required string StepsJsonlPath { get; init; }
     public string ObservationsJsonPath { get; init; } = "";
+    public string DiagnosticsJsonPath { get; init; } = "";
     public required string FinalTextPath { get; init; }
     public required string ScoreJsonPath { get; init; }
     public required string DiffMarkdownPath { get; init; }

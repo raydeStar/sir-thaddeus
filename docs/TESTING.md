@@ -243,14 +243,18 @@ be attributed instead of inferred from one wall-clock number.
 
 ### Final-state observations
 
-The v2 harness target can arrange disposable Wiki Canvas state before a turn
-and write a normalized post-turn snapshot to `observations.json`. This is for
-strict outcome scoring in the separate evaluator repository; it does not score
-assistant prose and it does not send expected final state to the model.
+The v2 harness target can arrange disposable Wiki Canvas state and local files
+before a turn, then write a normalized post-turn snapshot to
+`observations.json`. This is for strict outcome scoring in the separate
+evaluator repository; it does not score assistant prose and it does not send
+expected final state to the model.
 
 ```json
 {
   "state_setup": {
+    "files": [
+      { "path": "notes/brief.txt", "content": "local fixture" }
+    ],
     "wiki_roots": [
       {
         "name": "Research",
@@ -259,7 +263,8 @@ assistant prose and it does not send expected final state to the model.
     ]
   },
   "observations": [
-    { "type": "wiki", "root_names": ["Research"] }
+    { "type": "wiki", "root_names": ["Research"] },
+    { "type": "files", "paths": ["notes/brief.txt"] }
   ]
 }
 ```
@@ -269,14 +274,35 @@ in `input.json` for reproducibility. Expected state and scorer predicates stay
 outside the product repository. The harness tool allowlist is authoritative for
 these runs, so the Footman cannot remove a fixture-pinned tool.
 
+File paths must be relative and remain under the harness-created `files` root.
+Rooted paths and traversal are rejected. Only explicitly requested paths are
+captured, and file permissions expose only that disposable root to the runtime.
+
+### Causal evaluation diagnostics
+
+Every v2 harness iteration writes a sanitized `diagnostics.json`. It carries
+only an allowlist of stage names, outcomes, booleans, counts, and durations from
+the completed turn. It never copies prompts, responses, memory, tool arguments,
+tool results, model identifiers, suite identifiers, or expected answers.
+
+The artifact separates runtime warmup, reset, test work, total host time,
+production-pipeline time, provider time, prompt construction, completion
+validation, first visible content, and model-call counts when each signal is
+observable. `fullCompositionObserved` is true only when the routing trace and
+pipeline-step events prove the v2 production composition ran. The separate
+evaluator uses that proof and an explicit candidate activation event to reject
+misrouted or incompletely attributed experiment rows before correctness is
+scored.
+
 ### Routing latency diagnostics
 
 Routing diagnostics are opt-in and do not change normal execution:
 
 - `ST_ROUTING_LATENCY_TRACE=1` records monotonic pipeline, provider, memory,
   HTTP, and UI timing without logging prompt or memory contents.
-- `ST_HARNESS_PRESERVE_SANDBOX=1` retains an isolated harness runtime so its
-  local logs and audit records can be inspected after a run.
+- The v2 harness copies sanitized per-turn diagnostics into the normal artifact
+  directory before its isolated runtime is removed. Raw runtime logs remain in
+  the disposable sandbox and are not benchmark artifacts.
 
 Use `dev/run-routing-latency-desktop-campaign.ps1` for repeated desktop-path
 cohorts and `dev/analyze-routing-latency-campaign.ps1` to summarize the result.

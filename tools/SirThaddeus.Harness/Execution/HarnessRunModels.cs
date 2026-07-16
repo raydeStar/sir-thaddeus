@@ -14,6 +14,7 @@ public sealed record SingleRunResult
     public required IReadOnlyList<TraceStep> Steps { get; init; }
     public required string? ModelName { get; init; }
     internal HarnessTiming Timing { get; init; } = HarnessTiming.Empty;
+    internal HarnessRuntimeDiagnostics? Diagnostics { get; init; }
 }
 
 public sealed record RecordedToolTurn
