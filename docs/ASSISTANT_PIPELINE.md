@@ -49,8 +49,8 @@ runtime logs before deleting the sandbox. The artifact is restricted to stage
 names, outcomes, booleans, counts, and durations. Prompts, responses, memory,
 tool payloads, suite identifiers, and expected answers are excluded.
 
-`ST_HARNESS_PRESERVE_SANDBOX=1` remains a v1 test-support option for local log
-and audit inspection. It is not a production route.
+`ST_HARNESS_PRESERVE_SANDBOX=1` is a test-support option for retaining v1 or v2
+local logs and audit records during diagnosis. It is not a production route.
 
 These diagnostics are intentionally opt-in because they increase logging or
 retain temporary test state. They are not dormant product features.

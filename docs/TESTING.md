@@ -303,6 +303,8 @@ Routing diagnostics are opt-in and do not change normal execution:
 - The v2 harness copies sanitized per-turn diagnostics into the normal artifact
   directory before its isolated runtime is removed. Raw runtime logs remain in
   the disposable sandbox and are not benchmark artifacts.
+- `ST_HARNESS_PRESERVE_SANDBOX=1` retains that isolated sandbox only when raw
+  logs are temporarily needed for harness diagnosis.
 
 Use `dev/run-routing-latency-desktop-campaign.ps1` for repeated desktop-path
 cohorts and `dev/analyze-routing-latency-campaign.ps1` to summarize the result.

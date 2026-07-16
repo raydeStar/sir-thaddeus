@@ -854,7 +854,9 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         _searxngLauncher.Dispose();
         try
         {
-            if (_sandboxRoot is not null && Directory.Exists(_sandboxRoot))
+            if (!ShouldPreserveSandbox() &&
+                _sandboxRoot is not null &&
+                Directory.Exists(_sandboxRoot))
                 Directory.Delete(_sandboxRoot, recursive: true);
         }
         catch
@@ -862,6 +864,15 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             // Best-effort.
         }
         return ValueTask.CompletedTask;
+    }
+
+    private static bool ShouldPreserveSandbox()
+    {
+        var value = Environment.GetEnvironmentVariable("ST_HARNESS_PRESERVE_SANDBOX");
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record ObservedWikiState(IReadOnlyList<ObservedWikiRoot> Roots);
