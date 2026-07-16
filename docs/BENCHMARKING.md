@@ -138,7 +138,11 @@ creates disposable local state, sends a normal request, and compares the final
 Wiki snapshot with evaluator-only expectations. Production never receives the
 expected state.
 
-The promoted production behavior improves a narrow, real operation: explicit Wiki-root
-creation. It does not improve MMLU, general science, or mathematical reasoning.
-That narrow claim is intentional and should remain narrow in release notes and
-benchmark summaries.
+The promoted production behaviors improve two narrow, real operations:
+explicit Wiki-root creation and question-focused compilation of an explicitly
+attached multi-page Wiki scope. On the frozen 1.2B validation slice, compact
+Wiki evidence scored 5/8 overall and 4/6 attached versus 2/8 and 1/6 for the
+unchanged full-scope prompt, while using the same 18 provider calls and less
+prompt and latency budget. It does not improve MMLU, general science, or
+mathematical reasoning. That narrow claim is intentional and should remain
+narrow in release notes and benchmark summaries.

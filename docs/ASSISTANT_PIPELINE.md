@@ -38,6 +38,20 @@ free to use the ordinary tool loop. Other Wiki mutations continue through
 normal model selection and may use by-name contracts that resolve unique local
 targets inside the tool.
 
+## Attached local Wiki evidence
+
+When the user explicitly attaches an entire Wiki library, root, or folder, the
+runtime ranks pages against the current request with deterministic lexical
+overlap and supplies at most four extractive passages within a 4,000-character
+model-visible budget. The full attachment identity and selected source metadata
+remain available outside the prompt for the UI and audit path. A single-page
+attachment keeps its existing page-context behavior.
+
+This compilation issues no embedding or model call, does not search across the
+selected Wiki scope, and stays inactive when no Wiki context is attached. It is
+a prompt-load and evidence-selection seam, not implicit retrieval or a general
+conversation router.
+
 ## Supported diagnostics
 
 `ST_ROUTING_LATENCY_TRACE=1` enables duration-only routing diagnostics. It may

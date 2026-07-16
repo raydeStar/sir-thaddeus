@@ -136,6 +136,7 @@ The runtime binds to `127.0.0.1` on an ephemeral port. A bearer token rotates ea
 | 1.2B model, fixed 20-item MMLU-Pro development slice | **10 / 20** raw, twice | **13 / 20** unchanged harness, twice | A repeatable development signal for this model and slice, not promotion evidence or a universal harness gain. |
 | 8B model, 50-item general-capability battery | **37 / 50** raw | **36 / 50** unchanged harness | No general uplift on this battery; broad claims remain unproven. |
 | MMLU-Pro sampled voting | **37.9%** unchanged | **27.9%** with voting | More inference made this model worse, so the experiment was removed. |
+| 1.2B Q4, disjoint local-Wiki evidence validation | **2 / 8** unchanged full-scope prompt; **1 / 6** attached | **5 / 8** query-focused packet; **4 / 6** attached | Explicit local evidence became more usable while provider calls stayed flat; this is harness capability, not closed-book knowledge. |
 | 8B Q4, unseen Wiki root-creation validation | **9 / 16** semantic-tool parent | **14 / 16** with deterministic first-tool selection, repeated exactly | A narrow, externally verified Wiki reliability gain—not a general reasoning or MMLU gain. |
 
 The scorer grades actual values, not answer shape. A Docker canary aborts broken sandbox runs instead of blaming the model. Roughly **1,900 lines** of benchmark-specific shortcut solvers were removed so the suite exercises the real model and tool pipeline.
@@ -169,6 +170,7 @@ The July 2026 pass tightened the real answer and measurement paths rather than t
 | Windows-native output quirks could masquerade as model-load or reporting failures. | Model loading uses the real process exit code, reporting filters incidental stream records, and malformed summary data fails closed. | Infrastructure errors are less likely to be reported as model weakness—or as a misleading scorecard. |
 | Wiki page mutations required the model to carry opaque ids and versions across several calls. | By-name Wiki contracts resolve unique roots, folders, pages, and current versions inside the audited tool boundary; ambiguous targets fail closed. | Small models perform less mechanical bookkeeping while permissions, revisions, and concurrency checks remain intact. |
 | Explicit Wiki-root creation could be lost among many available tools. | A deterministic policy selects `wiki_root_create` only for explicit, unambiguous root requests and only on the first model round. | The model still supplies arguments and the normal permissioned tool loop executes the write. |
+| Attaching a multi-page Wiki scope concatenated pages until a large prompt budget was exhausted, so late or contradictory facts could be missed. | Root, folder, and all-Wiki attachments now rank pages against the question and compile up to four bounded extractive passages; source metadata stays outside the model packet. | Small models receive less irrelevant text without adding a classifier, embedding request, or extra model call. |
 
 ### Model ceiling check, not an optimization
 
