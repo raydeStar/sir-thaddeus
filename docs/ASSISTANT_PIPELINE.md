@@ -44,8 +44,13 @@ targets inside the tool.
 record stage names, identifiers, and timings, but must not record prompts or
 memory contents and must not change response behavior.
 
-`ST_HARNESS_PRESERVE_SANDBOX=1` retains an isolated harness runtime for local
-log and audit inspection. It is a test-support option, not a production route.
+The v2 harness derives a sanitized per-turn `diagnostics.json` from its isolated
+runtime logs before deleting the sandbox. The artifact is restricted to stage
+names, outcomes, booleans, counts, and durations. Prompts, responses, memory,
+tool payloads, suite identifiers, and expected answers are excluded.
+
+`ST_HARNESS_PRESERVE_SANDBOX=1` is a test-support option for retaining v1 or v2
+local logs and audit records during diagnosis. It is not a production route.
 
 These diagnostics are intentionally opt-in because they increase logging or
 retain temporary test state. They are not dormant product features.

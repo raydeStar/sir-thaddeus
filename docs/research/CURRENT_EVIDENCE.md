@@ -2,7 +2,7 @@
 
 **Evidence cutoff:** July 16, 2026
 
-**Production baseline:** `8fc24ea`
+**Production baseline:** `496b8f4` before the Phase 1 causal-diagnostics branch
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -34,6 +34,16 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - Exact duplicate pure-compute calls can be memoized conservatively within a
   turn, and repeated harness campaigns can build once rather than rebuilding
   every invocation.
+- Phase 1 causal evaluation infrastructure now exports a sanitized v2
+  `diagnostics.json`, proves full production composition, separates stage and
+  provider timing, and requires explicit candidate activation expectations
+  before correctness can be interpreted. The one-item live proof observed the
+  full composition and 34 allowlisted events. This is measurement
+  infrastructure, not evidence that assistant capability improved.
+- The v2 harness can arrange and observe evaluator-owned files under a
+  traversal-safe disposable root, alongside existing Wiki final-state checks.
+  The frozen local outcome battery covers tool aliases, irrelevant-tool
+  negatives, local evidence, Wiki/file state, reasoning, and response contracts.
 
 ### Narrow harness gains
 

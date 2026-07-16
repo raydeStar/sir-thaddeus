@@ -136,6 +136,16 @@ $testArgs = @(
     '--results-directory', $TestArtifacts
 )
 
+# Several test projects spawn the desktop runtime as a child process. Running
+# those projects concurrently on a constrained hosted runner can starve startup
+# or make shutdown assertions race even though every project has its own lock
+# directory. Serialize test projects in CI; individual test collections retain
+# their normal xUnit behavior inside each project.
+if ($isCi) {
+    $testArgs += '-m:1'
+    Write-Host "  CI override   : serializing test projects (runtime process isolation)"
+}
+
 # Exclude live integration tests in CI — they hit external APIs (NagerDate,
 # GitHub status, RSS feeds) that are flaky on hosted runners.
 if ($isCi -and -not $Filter) {

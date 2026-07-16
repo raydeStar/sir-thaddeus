@@ -85,6 +85,13 @@ internal sealed class SingleTestRunner
                 observedState,
                 cancellationToken);
         }
+        if (headlessResult.Diagnostics is { } diagnostics)
+        {
+            await _artifactWriter.WriteDiagnosticsAsync(
+                artifacts,
+                diagnostics,
+                cancellationToken);
+        }
         await _artifactWriter.WriteFinalAsync(artifacts, response.Text, cancellationToken);
         await _artifactWriter.WriteScoreAsync(artifacts, score, cancellationToken);
         await _artifactWriter.WriteDiffAsync(
@@ -103,7 +110,8 @@ internal sealed class SingleTestRunner
             ArtifactPaths = artifacts,
             Steps = steps,
             ModelName = modelName,
-            Timing = headlessResult.Timing
+            Timing = headlessResult.Timing,
+            Diagnostics = headlessResult.Diagnostics
         };
     }
 
@@ -150,6 +158,7 @@ internal sealed record HostExecutionResult
     public required IReadOnlyList<TraceStep> Steps { get; init; }
     public required IReadOnlyList<RecordedToolTurn> ToolTurns { get; init; }
     public JsonElement? ObservedState { get; init; }
+    public HarnessRuntimeDiagnostics? Diagnostics { get; init; }
     public HarnessTiming Timing { get; init; } = HarnessTiming.Empty;
 }
 

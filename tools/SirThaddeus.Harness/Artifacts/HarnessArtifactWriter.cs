@@ -15,6 +15,10 @@ public sealed class HarnessArtifactWriter
     {
         WriteIndented = true
     };
+    private static readonly JsonSerializerOptions DiagnosticsJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true
+    };
 
     public ArtifactPaths CreatePaths(
         string artifactsRoot,
@@ -37,6 +41,7 @@ public sealed class HarnessArtifactWriter
             InputJsonPath = Path.Combine(root, "input.json"),
             StepsJsonlPath = Path.Combine(root, "steps.jsonl"),
             ObservationsJsonPath = Path.Combine(root, "observations.json"),
+            DiagnosticsJsonPath = Path.Combine(root, "diagnostics.json"),
             FinalTextPath = Path.Combine(root, "final.txt"),
             ScoreJsonPath = Path.Combine(root, "score.json"),
             DiffMarkdownPath = Path.Combine(root, "diff.md"),
@@ -123,6 +128,15 @@ public sealed class HarnessArtifactWriter
         => File.WriteAllTextAsync(
             paths.ObservationsJsonPath,
             JsonSerializer.Serialize(observedState, JsonOptions),
+            cancellationToken);
+
+    public Task WriteDiagnosticsAsync(
+        ArtifactPaths paths,
+        HarnessRuntimeDiagnostics diagnostics,
+        CancellationToken cancellationToken)
+        => File.WriteAllTextAsync(
+            paths.DiagnosticsJsonPath,
+            JsonSerializer.Serialize(diagnostics, DiagnosticsJsonOptions),
             cancellationToken);
 
     public Task WriteScoreAsync(ArtifactPaths paths, ScoreCard score, CancellationToken cancellationToken)

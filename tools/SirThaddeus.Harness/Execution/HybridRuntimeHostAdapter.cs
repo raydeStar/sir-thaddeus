@@ -8,6 +8,7 @@ using System.Threading.Channels;
 using SirThaddeus.Agent;
 using SirThaddeus.Config;
 using SirThaddeus.Contracts;
+using SirThaddeus.Harness.Artifacts;
 using SirThaddeus.Harness.Models;
 using SirThaddeus.Harness.Tracing;
 using SirThaddeus.LlmClient;
@@ -158,6 +159,15 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         totalStopwatch.Stop();
         var observedState = await CaptureObservedStateAsync(test.Observations, cancellationToken)
             .ConfigureAwait(false);
+        var timing = new HarnessTiming(
+            RuntimeWarmupSeconds: warmupSeconds,
+            ResetSeconds: resetSeconds,
+            TestWorkSeconds: workSeconds,
+            TotalSeconds: totalStopwatch.Elapsed.TotalSeconds);
+        var diagnostics = HarnessRuntimeDiagnosticsReader.Read(
+            _sandboxRoot ?? throw new InvalidOperationException("Harness sandbox is unavailable."),
+            messageId,
+            timing);
 
         return new HostExecutionResult
         {
@@ -165,11 +175,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             Steps = finalSteps,
             ToolTurns = toolTurns,
             ObservedState = observedState,
-            Timing = new HarnessTiming(
-                RuntimeWarmupSeconds: warmupSeconds,
-                ResetSeconds: resetSeconds,
-                TestWorkSeconds: workSeconds,
-                TotalSeconds: totalStopwatch.Elapsed.TotalSeconds)
+            Diagnostics = diagnostics,
+            Timing = timing
         };
     }
 
@@ -286,6 +293,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             baseUrl = baseUrl.TrimEnd('/') + "/v1";
 
         var defaults = SettingsDocument.Defaults();
+        var filesRoot = Path.Combine(sandboxRoot, "files");
+        Directory.CreateDirectory(filesRoot);
         var doc = defaults with
         {
             Llm = defaults.Llm with
@@ -306,6 +315,12 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
                 ReusePrimaryForGatekeeperOnSharedEndpoint = llm.ReusePrimaryModelForGatekeeperOnSharedEndpoint,
                 EnableStartupWarmup = false,
                 EnableKeepWarm = false,
+            },
+            Files = (defaults.Files ?? throw new InvalidOperationException(
+                "Default file settings are unavailable.")) with
+            {
+                AllowedRoots = [filesRoot],
+                DisableAllFileAccess = false
             }
         };
 
@@ -490,6 +505,14 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         HarnessStateSetup setup,
         CancellationToken cancellationToken)
     {
+        var filesRoot = ResolveFilesRoot();
+        foreach (var file in setup.Files)
+        {
+            var path = ResolveHarnessFilePath(filesRoot, file.Path);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllTextAsync(path, file.Content, cancellationToken).ConfigureAwait(false);
+        }
+
         if (setup.WikiRoots.Count == 0)
             return;
 
@@ -569,59 +592,103 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             .SelectMany(request => request.RootNames)
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .ToHashSet(StringComparer.Ordinal);
-        if (rootNames.Count == 0)
+        var filePaths = requests
+            .Where(request => string.Equals(request.Type, "files", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(request => request.Paths)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+        if (rootNames.Count == 0 && filePaths.Length == 0)
             return null;
 
-        Debug.Assert(_http is not null);
-        using var rootsResponse = await _http!.GetAsync("api/wiki/roots", cancellationToken)
-            .ConfigureAwait(false);
-        rootsResponse.EnsureSuccessStatusCode();
-        using var rootsDocument = JsonDocument.Parse(
-            await rootsResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
-
         var snapshots = new List<ObservedWikiRoot>();
-        foreach (var root in rootsDocument.RootElement.GetProperty("roots").EnumerateArray())
+        if (rootNames.Count > 0)
         {
-            var name = root.GetProperty("name").GetString() ?? string.Empty;
-            if (!rootNames.Contains(name))
-                continue;
+            Debug.Assert(_http is not null);
+            using var rootsResponse = await _http!.GetAsync("api/wiki/roots", cancellationToken)
+                .ConfigureAwait(false);
+            rootsResponse.EnsureSuccessStatusCode();
+            using var rootsDocument = JsonDocument.Parse(
+                await rootsResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
 
-            var rootId = root.GetProperty("id").GetString()
-                ?? throw new InvalidOperationException("Observed wiki root did not include an id.");
-            using var treeResponse = await _http.GetAsync(
-                $"api/wiki/roots/{Uri.EscapeDataString(rootId)}/tree",
-                cancellationToken).ConfigureAwait(false);
-            treeResponse.EnsureSuccessStatusCode();
-            using var treeDocument = JsonDocument.Parse(
-                await treeResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
-
-            var pages = new List<ObservedWikiPage>();
-            foreach (var page in treeDocument.RootElement.GetProperty("pages").EnumerateArray())
+            foreach (var root in rootsDocument.RootElement.GetProperty("roots").EnumerateArray())
             {
-                var pageId = page.GetProperty("id").GetString()
-                    ?? throw new InvalidOperationException("Observed wiki page did not include an id.");
-                using var pageResponse = await _http.GetAsync(
-                    $"api/wiki/pages/{Uri.EscapeDataString(pageId)}",
-                    cancellationToken).ConfigureAwait(false);
-                pageResponse.EnsureSuccessStatusCode();
-                using var pageDocument = JsonDocument.Parse(
-                    await pageResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
-                pages.Add(new ObservedWikiPage(
-                    pageDocument.RootElement.GetProperty("page").GetProperty("title").GetString()
-                        ?? string.Empty,
-                    pageDocument.RootElement.GetProperty("markdown").GetString() ?? string.Empty));
-            }
+                var name = root.GetProperty("name").GetString() ?? string.Empty;
+                if (!rootNames.Contains(name))
+                    continue;
 
-            snapshots.Add(new ObservedWikiRoot(
-                name,
-                pages.OrderBy(page => page.Title, StringComparer.Ordinal).ToArray()));
+                var rootId = root.GetProperty("id").GetString()
+                    ?? throw new InvalidOperationException("Observed wiki root did not include an id.");
+                using var treeResponse = await _http.GetAsync(
+                    $"api/wiki/roots/{Uri.EscapeDataString(rootId)}/tree",
+                    cancellationToken).ConfigureAwait(false);
+                treeResponse.EnsureSuccessStatusCode();
+                using var treeDocument = JsonDocument.Parse(
+                    await treeResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+
+                var pages = new List<ObservedWikiPage>();
+                foreach (var page in treeDocument.RootElement.GetProperty("pages").EnumerateArray())
+                {
+                    var pageId = page.GetProperty("id").GetString()
+                        ?? throw new InvalidOperationException("Observed wiki page did not include an id.");
+                    using var pageResponse = await _http.GetAsync(
+                        $"api/wiki/pages/{Uri.EscapeDataString(pageId)}",
+                        cancellationToken).ConfigureAwait(false);
+                    pageResponse.EnsureSuccessStatusCode();
+                    using var pageDocument = JsonDocument.Parse(
+                        await pageResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                    pages.Add(new ObservedWikiPage(
+                        pageDocument.RootElement.GetProperty("page").GetProperty("title").GetString()
+                            ?? string.Empty,
+                        pageDocument.RootElement.GetProperty("markdown").GetString() ?? string.Empty));
+                }
+
+                snapshots.Add(new ObservedWikiRoot(
+                    name,
+                    pages.OrderBy(page => page.Title, StringComparer.Ordinal).ToArray()));
+            }
         }
 
-        return JsonSerializer.SerializeToElement(
-            new ObservedState(
-                new ObservedWikiState(
-                    snapshots.OrderBy(root => root.Name, StringComparer.Ordinal).ToArray())),
-            JsonOptions);
+        var state = new Dictionary<string, object>(StringComparer.Ordinal);
+        if (rootNames.Count > 0)
+        {
+            state["wiki"] = new ObservedWikiState(
+                snapshots.OrderBy(root => root.Name, StringComparer.Ordinal).ToArray());
+        }
+        if (filePaths.Length > 0)
+        {
+            var filesRoot = ResolveFilesRoot();
+            state["files"] = new ObservedFileState(filePaths.Select(relativePath =>
+            {
+                var fullPath = ResolveHarnessFilePath(filesRoot, relativePath);
+                return new ObservedFile(
+                    relativePath.Replace('\\', '/'),
+                    File.Exists(fullPath),
+                    File.Exists(fullPath) ? File.ReadAllText(fullPath) : null);
+            }).ToArray());
+        }
+
+        return JsonSerializer.SerializeToElement(state, JsonOptions);
+    }
+
+    private string ResolveFilesRoot()
+    {
+        if (string.IsNullOrWhiteSpace(_sandboxRoot))
+            throw new InvalidOperationException("Harness sandbox is unavailable.");
+        return Path.Combine(_sandboxRoot, "files");
+    }
+
+    internal static string ResolveHarnessFilePath(string root, string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath) || Path.IsPathRooted(relativePath))
+            throw new InvalidOperationException("Harness file paths must be non-empty and relative.");
+
+        var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var fullPath = Path.GetFullPath(relativePath, fullRoot);
+        if (!fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Harness file path escapes the isolated files root.");
+        return fullPath;
     }
 
     private async Task<(string FinalText, bool Success, string? Error, string MessageId)>
@@ -787,7 +854,9 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         _searxngLauncher.Dispose();
         try
         {
-            if (_sandboxRoot is not null && Directory.Exists(_sandboxRoot))
+            if (!ShouldPreserveSandbox() &&
+                _sandboxRoot is not null &&
+                Directory.Exists(_sandboxRoot))
                 Directory.Delete(_sandboxRoot, recursive: true);
         }
         catch
@@ -797,9 +866,19 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         return ValueTask.CompletedTask;
     }
 
-    private sealed record ObservedState(ObservedWikiState Wiki);
+    private static bool ShouldPreserveSandbox()
+    {
+        var value = Environment.GetEnvironmentVariable("ST_HARNESS_PRESERVE_SANDBOX");
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed record ObservedWikiState(IReadOnlyList<ObservedWikiRoot> Roots);
     private sealed record ObservedWikiRoot(string Name, IReadOnlyList<ObservedWikiPage> Pages);
     private sealed record ObservedWikiPage(string Title, string Markdown);
+    private sealed record ObservedFileState(IReadOnlyList<ObservedFile> Entries);
+    private sealed record ObservedFile(string Path, bool Exists, string? Content);
     private sealed record HybridLockFile(int Port, string Token);
 }

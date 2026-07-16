@@ -82,6 +82,21 @@ public sealed record HarnessStateSetup
     [JsonPropertyName("wiki_roots")]
     [YamlMember(Alias = "wiki_roots")]
     public List<HarnessWikiRootSetup> WikiRoots { get; init; } = [];
+
+    [JsonPropertyName("files")]
+    [YamlMember(Alias = "files")]
+    public List<HarnessFileSetup> Files { get; init; } = [];
+}
+
+public sealed record HarnessFileSetup
+{
+    [JsonPropertyName("path")]
+    [YamlMember(Alias = "path")]
+    public string Path { get; init; } = "";
+
+    [JsonPropertyName("content")]
+    [YamlMember(Alias = "content")]
+    public string Content { get; init; } = "";
 }
 
 public sealed record HarnessWikiRootSetup
@@ -115,6 +130,10 @@ public sealed record HarnessObservationRequest
     [JsonPropertyName("root_names")]
     [YamlMember(Alias = "root_names")]
     public List<string> RootNames { get; init; } = [];
+
+    [JsonPropertyName("paths")]
+    [YamlMember(Alias = "paths")]
+    public List<string> Paths { get; init; } = [];
 }
 
 public sealed record HarnessAssertions

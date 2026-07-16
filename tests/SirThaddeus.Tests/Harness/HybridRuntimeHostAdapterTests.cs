@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SirThaddeus.Config;
 using SirThaddeus.Harness.Execution;
+using SirThaddeus.Harness.Artifacts;
 using SirThaddeus.Harness.Models;
 
 namespace SirThaddeus.Tests.Harness;
@@ -48,6 +49,7 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
               "id": "wiki-state",
               "user_message": "Update the page.",
               "state_setup": {
+                "files": [{ "path": "notes/input.txt", "content": "local evidence" }],
                 "wiki_roots": [
                   {
                     "name": "Research",
@@ -56,7 +58,8 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
                 ]
               },
               "observations": [
-                { "type": "wiki", "root_names": ["Research"] }
+                { "type": "wiki", "root_names": ["Research"] },
+                { "type": "files", "paths": ["notes/input.txt"] }
               ]
             }
             """;
@@ -65,9 +68,85 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
 
         Assert.NotNull(test);
         Assert.Equal("Research", test.StateSetup.WikiRoots.Single().Name);
+        Assert.Equal("notes/input.txt", test.StateSetup.Files.Single().Path);
         Assert.Equal("Plan", test.StateSetup.WikiRoots.Single().Pages.Single().Title);
-        Assert.Equal("wiki", test.Observations.Single().Type);
-        Assert.Equal("Research", test.Observations.Single().RootNames.Single());
+        Assert.Equal("wiki", test.Observations[0].Type);
+        Assert.Equal("Research", test.Observations[0].RootNames.Single());
+        Assert.Equal("notes/input.txt", test.Observations[1].Paths.Single());
+    }
+
+    [Fact]
+    public void ResolveHarnessFilePath_RejectsTraversalAndRootedPaths()
+    {
+        Directory.CreateDirectory(_root);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            HybridRuntimeHostAdapter.ResolveHarnessFilePath(_root, "../escape.txt"));
+        Assert.Throws<InvalidOperationException>(() =>
+            HybridRuntimeHostAdapter.ResolveHarnessFilePath(_root, Path.Combine(_root, "absolute.txt")));
+        Assert.StartsWith(
+            Path.GetFullPath(_root),
+            HybridRuntimeHostAdapter.ResolveHarnessFilePath(_root, "notes/input.txt"),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DiagnosticsReader_ExportsOnlyAllowlistedFieldsAndAggregatesTiming()
+    {
+        var logDirectory = Path.Combine(_root, "logs");
+        Directory.CreateDirectory(logDirectory);
+        File.WriteAllLines(Path.Combine(logDirectory, "thaddeus-runtime-test.log"),
+        [
+            "routing.latency turnId=turn-1 stage=pipeline_start elapsedMs=10 durationMs=1 prompt=SECRET",
+            "PIPELINE_STEP_TIMING turn_id=turn-1 step=ToolLoop outcome=ok elapsed_ms=20 tool_args=SECRET",
+            "PROMPT_ASSEMBLY_TIMING turn_id=turn-1 messages=4 tools=2 forced_tool=false elapsed_ms=3 response=SECRET",
+            "llm.request_completed turnId=turn-1 task=primary durationMs=50 model=SECRET",
+            "PIPELINE_STEP_TIMING turn_id=turn-1 step=CompletionValidation outcome=ok elapsed_ms=4",
+            "PIPELINE_TIMING turn_id=turn-1 outcome=ok elapsed_ms=80",
+            "routing.latency turnId=turn-1 stage=first_ui_delta elapsedMs=45 durationMs=2",
+            "routing.latency turnId=turn-1 stage=pipeline_complete elapsedMs=90 durationMs=1",
+            "EXPERIMENT_ACTIVATION turn_id=turn-1 event=generalized_candidate decision=activated suite_id=SECRET",
+            "PIPELINE_TIMING turn_id=another-turn outcome=ok elapsed_ms=999"
+        ]);
+        using var liveWriter = new FileStream(
+            Path.Combine(logDirectory, "thaddeus-runtime-test.log"),
+            FileMode.Open,
+            FileAccess.Write,
+            FileShare.ReadWrite | FileShare.Delete);
+
+        var diagnostics = HarnessRuntimeDiagnosticsReader.Read(
+            _root,
+            "turn-1",
+            new HarnessTiming(1, 2, 3, 4));
+        var json = JsonSerializer.Serialize(diagnostics);
+
+        Assert.True(diagnostics.FullCompositionObserved);
+        Assert.Equal(50, diagnostics.TimingsMs.ProviderTotal);
+        Assert.Equal(45, diagnostics.TimingsMs.FirstVisibleContent);
+        Assert.Equal(1, diagnostics.CallCounts.ProviderRequests);
+        Assert.Contains(diagnostics.Events, item =>
+            item.Name == "experiment.activation" && item.Stage == "generalized_candidate");
+        Assert.DoesNotContain("SECRET", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ArtifactWriter_WritesCamelCaseDiagnosticsContract()
+    {
+        var writer = new HarnessArtifactWriter();
+        var paths = writer.CreatePaths(_root, "run", "suite", "case", 1);
+        var diagnostics = new HarnessRuntimeDiagnostics
+        {
+            TurnId = "turn-1",
+            FullCompositionObserved = true,
+            TimingsMs = new HarnessDiagnosticTimings { EndToEnd = 5 },
+            CallCounts = new HarnessDiagnosticCallCounts { ProviderRequests = 1 }
+        };
+
+        await writer.WriteDiagnosticsAsync(paths, diagnostics, CancellationToken.None);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(paths.DiagnosticsJsonPath));
+        Assert.True(document.RootElement.GetProperty("fullCompositionObserved").GetBoolean());
+        Assert.Equal(5, document.RootElement.GetProperty("timingsMs").GetProperty("endToEnd").GetDouble());
     }
 
     public void Dispose()
