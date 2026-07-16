@@ -2,7 +2,7 @@
 
 **Evidence cutoff:** July 16, 2026
 
-**Production baseline:** `496b8f4` before the Phase 1 causal-diagnostics branch
+**Production baseline:** `b50d8e1` after the Phase 2 Wiki evidence promotion
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -134,6 +134,24 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - Broad or high-confidence write selection, generic side-effect repair, and
   adjacent prefetch variants did not survive repeatability, accuracy, or
   resource gates.
+
+### Wiki page rename routing and label tolerance
+
+- Deterministic rename selection established that the small model can use a
+  by-name mutation contract, but exact root-label mismatches remained a common
+  failure.
+- Rename-only decorated-root resolution improved fresh authorized outcomes
+  from `1/8` to `6/8`, with five paired wins, zero losses, fewer calls, and
+  lower positive p95. This is real capability headroom, not a promotable result.
+- The pre-execution authorization guard activated on only `3/8` fresh
+  non-actions. When combined with decorated-label resolution, a deferred
+  request and a capability question performed unauthorized writes. Exact
+  non-action state fell from `8/8` under the guarded exact-only control to
+  `6/8` under the combined candidate.
+- The combined candidate also missed the frozen resolver-safety and no-action
+  latency gates. The full Wiki rename mechanism family is closed: do not add
+  another lexical classifier, label qualifier, or prompt patch without a
+  materially different authorization design and new oracle evidence.
 
 ## What remains uncertain
 

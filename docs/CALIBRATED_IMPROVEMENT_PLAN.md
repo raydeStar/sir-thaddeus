@@ -167,10 +167,17 @@ latency, and false-success rate. Do not start with a generic repair framework.
 Candidate order:
 
 1. one local document/Wiki retrieval outcome;
-2. one unique-target Wiki mutation not already solved;
-3. one read-before-write file or state operation;
-4. one tool-semantic slice covering wrong-tool, wrong-argument, and no-tool
+2. one tool-semantic slice covering wrong-tool, wrong-argument, and no-tool
    decisions.
+
+Result: the local Wiki evidence packet was promoted. The subsequent unique-
+target Wiki rename sequence found strong authorized-operation headroom, but the
+combined authorization guard and decorated-label resolver caused two
+unauthorized writes on eight fresh non-actions and failed its safety and
+resource gates. That mechanism family is closed. The next Phase 3 step is an
+answer-blind tool-semantic outcome baseline before choosing another product
+mechanism; a read-before-write mutation is deferred because prior separate
+model rounds were too expensive.
 
 ### Phase 4 - Open a separate learning-based capacity lane
 
@@ -229,11 +236,10 @@ model success.
 
 | Priority | Candidate | Primary scorecard | Why now |
 | ---: | --- | --- | --- |
-| 1 | Local document/Wiki evidence compilation | Harness capability | Gold evidence showed headroom; avoids unreliable public search; fits existing Wiki and retrieval seams |
-| 2 | Tool-semantic outcome baseline | Harness capability | Syntax is already valid; the unresolved risks are tool choice, arguments, no-tool decisions, and state |
-| 3 | One capability-specific external postcondition | Harness capability | Independent verification is stronger than same-model critique, but only after oracle headroom |
-| 4 | QLoRA or rationale-distillation pilot | Frozen-model capacity | Prompt-only capacity candidates failed; learning is a materially different mechanism |
-| 5 | Helper-call activation and latency cohort | Product quality | Needed before changing Footman, memory gating, validation, or streaming |
+| 1 | Tool-semantic outcome baseline | Harness capability | Local Wiki evidence compilation is promoted and Wiki rename routing is closed; the unresolved risks are tool choice, arguments, no-tool decisions, and state |
+| 2 | One capability-specific external postcondition | Harness capability | Independent verification is stronger than same-model critique, but only after oracle headroom |
+| 3 | QLoRA or rationale-distillation pilot | Frozen-model capacity | Prompt-only capacity candidates failed; learning is a materially different mechanism |
+| 4 | Helper-call activation and latency cohort | Product quality | Needed before changing Footman, memory gating, validation, or streaming |
 | Deferred | Multi-model/MoE routing | Escalation | Does not improve a fixed model and currently lacks labeled complementarity data |
 
 ## Definition of success
