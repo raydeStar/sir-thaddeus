@@ -18,6 +18,7 @@ internal static class RoutingLatencyTrace
         public long StartedTimestamp { get; init; }
         public string? UserMessageId { get; set; }
         public string? AssistantMessageId { get; set; }
+        public bool LocalWikiEvidencePacketActivated { get; set; }
     }
 
     public static bool IsEnabled => IsTruthy(Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE"));

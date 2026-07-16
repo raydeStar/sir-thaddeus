@@ -111,7 +111,7 @@ from consuming another campaign.
 Exit gate: a candidate cannot receive a correctness verdict without activation,
 valid controls, clean worktrees, and complete timing/call attribution.
 
-### Phase 2 - Test local evidence compilation
+### Phase 2 - Local evidence compilation validated
 
 Objective: determine whether actual local retrieval can approach the proven
 gold-evidence ceiling without overwhelming the small model.
@@ -136,6 +136,14 @@ answers, and remains inside the predeclared latency/token budget.
 Stop rule: if the model still fails when given compact gold evidence, do not add
 another retriever or router. Classify the remaining miss as model utilization
 or capacity.
+
+Result: the frozen 1.2B compact-gold control recovered all 6/6 attached facts.
+The deterministic query-focused Wiki packet then reproduced 5/8 overall and
+4/6 attached on development versus 1/8 and 0/6 unchanged. On disjoint semantic
+mutations it scored 5/8 and 4/6 attached versus 2/8 and 1/6 unchanged, with no
+retrieval-off loss or added provider calls. The candidate also reduced p95
+latency and model-visible input. This validates a narrow explicit-Wiki harness
+capability; it is not a model-capacity or MMLU gain.
 
 ### Phase 3 - Improve one verifiable operation at a time
 
