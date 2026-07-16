@@ -74,6 +74,11 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Narrow root selector v6-v8 | **Retained then rejected for promotion** | Root-only headroom existed, but the language grammar was too narrow for promotion. |
 | Expanded root language v9-v12 | **Promoted** | Material repeated and unseen gain with product and resource gates; this is the campaign's strongest narrow capability result. |
 | Semantic write-selection validation v5 | **Inconclusive retained research** | Development repeated, but semantic-mutation validation weakened. Not promoted. |
+| Wiki rename selection v1-v2 | **Rejected after downstream safety test** | Deterministic selection exposed real rename capability but did not solve root-label mismatch or authorization. The temporary control branches were removed after the combined campaign verdict. |
+| Decorated root-label resolver v3 | **Rejected on reliability** | Authorized outcomes improved materially, but permissive label resolution also made non-action rename attempts succeed. |
+| Rename tool pruning v4 | **Rejected on resources** | Classification worked, but pruning caused a hard p95 regression. |
+| Pre-MCP rename execution guard v5 | **Inconclusive, then retired** | The guard blocked attempted writes but showed no final-state uplift while the exact-only tool already failed closed. It was retained only to test guarded label tolerance. |
+| Guarded decorated root-label resolver v6 | **Rejected; mechanism family closed** | Authorized state improved `1/8` to `6/8` with five wins and zero losses, but two of eight non-actions became unauthorized writes, safety scored `5/6`, and no-action p95 was `1.586x` v5. All temporary Wiki rename branches were removed. |
 
 ## Retired architecture ideas
 
@@ -111,6 +116,9 @@ Use these repository-relative locations in the sibling
 - Stateful Wiki sequence: the dated `everyday-state-*` manifests and verdicts
   under `experiments/`, ending with
   `2026-07-15-everyday-state-semantic-wiki-root-language-product-regressions-v12.md`.
+- Wiki page rename sequence: `experiments/manifests/wiki-page-rename-selection-v1.yaml`
+  through `wiki-guarded-root-label-resolution-v6.yaml`, ending with
+  `experiments/verdicts/2026-07-16-wiki-guarded-root-label-resolution-v6.md`.
 
 ## Update rule
 
