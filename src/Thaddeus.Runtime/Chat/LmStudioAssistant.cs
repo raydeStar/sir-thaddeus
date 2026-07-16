@@ -239,6 +239,13 @@ public sealed partial class LmStudioAssistant : IAssistant
             .ToLowerInvariant();
         var latencyTrace = RoutingLatencyTrace.Current;
         RoutingLatencyTrace.BindAssistantMessage(latencyTrace, messageId);
+        if (latencyTrace is not null)
+        {
+            _logger.LogInformation(
+                "EXPERIMENT_ACTIVATION turn_id={TurnId} event=local_wiki_evidence_packet decision={Decision}",
+                messageId,
+                latencyTrace.LocalWikiEvidencePacketActivated ? "activated" : "inactive");
+        }
         await _publisher.PublishStartAsync(threadId, messageId, ct).ConfigureAwait(false);
         RoutingLatencyTrace.Mark(_logger, latencyTrace, "assistant_turn_start_event");
 

@@ -108,10 +108,7 @@ public static class ChatApi
             if (latencyTrace is not null)
             {
                 latencyTrace.UserMessageId = message.Id;
-                turnLogger.LogInformation(
-                    "EXPERIMENT_ACTIVATION turn_id={TurnId} event=local_wiki_evidence_packet decision={Decision}",
-                    message.Id,
-                    prompt.CompactEvidenceActivated ? "activated" : "inactive");
+                latencyTrace.LocalWikiEvidencePacketActivated = prompt.CompactEvidenceActivated;
             }
 
             try
