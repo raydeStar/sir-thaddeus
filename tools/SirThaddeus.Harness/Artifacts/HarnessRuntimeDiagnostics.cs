@@ -129,7 +129,19 @@ internal static partial class HarnessRuntimeDiagnosticsReader
 
     private static IEnumerable<string> ReadCompleteLines(string path)
     {
-        try { return File.ReadLines(path).ToArray(); }
+        try
+        {
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            var lines = new List<string>();
+            while (reader.ReadLine() is { } line)
+                lines.Add(line);
+            return lines;
+        }
         catch (IOException) { return []; }
         catch (UnauthorizedAccessException) { return []; }
     }

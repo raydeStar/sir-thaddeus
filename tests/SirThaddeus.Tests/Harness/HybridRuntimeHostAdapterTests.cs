@@ -108,6 +108,11 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
             "EXPERIMENT_ACTIVATION turn_id=turn-1 event=generalized_candidate decision=activated suite_id=SECRET",
             "PIPELINE_TIMING turn_id=another-turn outcome=ok elapsed_ms=999"
         ]);
+        using var liveWriter = new FileStream(
+            Path.Combine(logDirectory, "thaddeus-runtime-test.log"),
+            FileMode.Open,
+            FileAccess.Write,
+            FileShare.ReadWrite | FileShare.Delete);
 
         var diagnostics = HarnessRuntimeDiagnosticsReader.Read(
             _root,
