@@ -81,6 +81,12 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - LFM 1.2B and Qwen 2B each produced `8/8` parsed, schema-valid forced tool
   calls through LM Studio. There is no current headroom for a content-recovery
   parser; the test remains useful for model intake.
+- On the fresh 16-item local tool-semantic baseline, unchanged full-menu
+  Thaddeus scored `7/16` versus `3/16` with oracle-pruned tools, `1/16`
+  no-tools, and `3/16` raw. Full-menu execution completed the required tool
+  path on `8/10` positive items and made zero forbidden calls on six no-tool
+  items. Tool pruning had zero paired wins and four losses, so another router
+  or relevance classifier is not justified.
 - Managed SearXNG restored answer-bearing search evidence and reduced the
   degraded evaluator path's calls and latency. That was environment parity,
   not a product capability promotion.
@@ -160,8 +166,10 @@ calls and latency while tying or losing to unchanged Thaddeus.
   without flooding context or depending on unreliable public search.
 - Whether a capability-specific deterministic postcondition can trigger only on
   observed failure and recover state without another universal model judge.
-- Whether tool-semantic errors remain after syntax is known to be valid: wrong
-  tool, wrong arguments, missed no-tool decisions, and multi-turn state.
+- Whether a capability-specific argument or postcondition mechanism can fix a
+  fresh, oracle-proven failure cluster. The first tool-semantic baseline found
+  argument and result-contract misses, but no cluster had the required oracle
+  advantage for product work.
 - Whether QLoRA or rationale distillation can improve a frozen base
   architecture on fresh capacity holdouts without teaching benchmark artifacts.
 - How often memory classification, Footman, guardrails, completion validation,
