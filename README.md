@@ -42,6 +42,12 @@ Use a model on your machine and leave network tools off to keep the core experie
 | --- | --- | --- | --- |
 | LM Studio, Ollama, or any compatible `/v1` endpoint. | Threads, memory, wiki, routines, and settings on your disk. | Capability groups set to **Off**, **Ask**, or **Always**, plus per-tool overrides. | Sources, outcomes, permission decisions, diagnostics, and per-turn traces. |
 
+## What We Are Proving
+
+Sir Thaddeus tests a specific claim: **a fixed small model can complete more useful everyday work when it is given well-designed deterministic capabilities, evidence, state, permissions, and verification.** Replacing it with a larger or newer model may be a sound deployment choice, but it is not evidence that the harness improved the original model.
+
+Optimization work therefore changes one generalized mechanism at a time, compares it with the same raw model and unchanged product, and keeps only repeatable gains. The active priorities, gates, and stop rules live in the [calibrated improvement plan](docs/CALIBRATED_IMPROVEMENT_PLAN.md); the durable record of what worked, failed, or remains uncertain lives in the [research findings](docs/research/README.md).
+
 <a id="control-is-the-feature"></a>
 ## Control Is the Feature
 
@@ -127,24 +133,31 @@ The runtime binds to `127.0.0.1` on an ephemeral port. A bearer token rotates ea
 | --- | ---: | ---: | --- |
 | 1.2B model, six math tasks | **0 / 6** without tools | **5 / 6** with `calculator` | The harness improved the user outcome; it did not change closed-book model capacity. |
 | 20-item compute suite | roughly **0%** without tools | **43%** with `python_eval` | Tools help; model reasoning still sets the ceiling. |
+| 1.2B model, fixed 20-item MMLU-Pro development slice | **10 / 20** raw, twice | **13 / 20** unchanged harness, twice | A repeatable development signal for this model and slice, not promotion evidence or a universal harness gain. |
+| 8B model, 50-item general-capability battery | **37 / 50** raw | **36 / 50** unchanged harness | No general uplift on this battery; broad claims remain unproven. |
 | MMLU-Pro sampled voting | **37.9%** unchanged | **27.9%** with voting | More inference made this model worse, so the experiment was removed. |
 | 8B Q4, unseen Wiki root-creation validation | **9 / 16** semantic-tool parent | **14 / 16** with deterministic first-tool selection, repeated exactly | A narrow, externally verified Wiki reliability gain—not a general reasoning or MMLU gain. |
 
 The scorer grades actual values, not answer shape. A Docker canary aborts broken sandbox runs instead of blaming the model. Roughly **1,900 lines** of benchmark-specific shortcut solvers were removed so the suite exercises the real model and tool pipeline.
 
-Two scorecards stay separate:
+Three scorecards stay separate:
 
 - **Model capacity:** closed-book knowledge, math, science, document reasoning,
   instruction following, validity, and calibration.
 - **Harness capability:** verified outcomes produced with tools, retrieval,
   permissions, state, and external postconditions.
+- **Product quality:** latency, safety, personality, continuity, validity,
+  permissions, resource use, and user-visible regressions.
 
 The default general-capability portfolio is MMLU-Pro, GSM1k, ARC-Challenge,
 DROP, and IFBench or IFEval, with harder and fresher confirmation lanes used
 where the model is above the floor. See [Benchmarking](docs/BENCHMARKING.md) for
-the run tiers, attribution controls, metrics, and safe customization rules.
+the run tiers, attribution controls, metrics, and safe customization rules. See
+the [calibrated improvement plan](docs/CALIBRATED_IMPROVEMENT_PLAN.md) for the
+current sequence of work and the [research findings](docs/research/README.md)
+for the evidence behind it.
 
-### Fresh optimization pass: what changed
+### What survived evaluation
 
 The July 2026 pass tightened the real answer and measurement paths rather than teaching Sir Thaddeus the suite. No probe IDs, expected answers, suite thresholds, or answer keys were added to production code.
 
@@ -157,7 +170,7 @@ The July 2026 pass tightened the real answer and measurement paths rather than t
 | Wiki page mutations required the model to carry opaque ids and versions across several calls. | By-name Wiki contracts resolve unique roots, folders, pages, and current versions inside the audited tool boundary; ambiguous targets fail closed. | Small models perform less mechanical bookkeeping while permissions, revisions, and concurrency checks remain intact. |
 | Explicit Wiki-root creation could be lost among many available tools. | A deterministic policy selects `wiki_root_create` only for explicit, unambiguous root requests and only on the first model round. | The model still supplies arguments and the normal permissioned tool loop executes the write. |
 
-### Fresh model ceiling check
+### Model ceiling check, not an optimization
 
 One baseline run per model on the same closed-book, 20-item `python-probe` suite, with no judge:
 
@@ -166,7 +179,7 @@ One baseline run per model on the same closed-book, 20-item `python-probe` suite
 | `liquid/lfm2.5-1.2b` | **8 / 20 · 40%** | Remarkable for its size, but wrong program construction still dominates the misses. |
 | `lfm2.5-8b-a1b` | **17 / 20 · 85%** | The larger model converts the same tool boundary into substantially more correct work. |
 
-That **+45 percentage-point** gap is a model comparison, not a claimed code-score uplift. A single run is a spot check, not a leaderboard. Its value is diagnostic: after routing, scoring, and result handling were audited, model selection remained the strongest immediate quality lever.
+That **+45 percentage-point** gap is a model comparison, not a claimed code-score uplift. A single run is a spot check, not a leaderboard. Its value is diagnostic: model semantics remain a ceiling even when the same capability boundary is available. Model intake may inform deployment, transfer checks, or escalation research, but swapping models cannot satisfy a fixed-model harness-improvement gate.
 
 Run [`dev/model-intake.ps1`](dev/model-intake.ps1) to produce a repeated production-baseline scorecard for a new model. See [docs/TESTING.md](docs/TESTING.md) for methodology and [`tools/SirThaddeus.Harness/Suites/`](tools/SirThaddeus.Harness/Suites/) for the probes.
 
