@@ -116,7 +116,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         var workStopwatch = Stopwatch.StartNew();
         var usageBefore = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
         var (finalText, success, error, messageId) =
-            await RunChatAsync(test.UserMessage, cancellationToken).ConfigureAwait(false);
+            await RunChatAsync(test.UserMessage, test.WikiContext, cancellationToken).ConfigureAwait(false);
         var fullToolEvidence = await GetHarnessToolEvidenceAsync(messageId, cancellationToken)
             .ConfigureAwait(false);
         var usageAfter = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
@@ -692,7 +692,10 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
     }
 
     private async Task<(string FinalText, bool Success, string? Error, string MessageId)>
-        RunChatAsync(string userMessage, CancellationToken cancellationToken)
+        RunChatAsync(
+            string userMessage,
+            HarnessWikiContextSetup? wikiContextSetup,
+            CancellationToken cancellationToken)
     {
         Debug.Assert(_http is not null);
 
@@ -714,9 +717,10 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         var threadId = threadDoc.RootElement.GetProperty("id").GetString()
             ?? throw new InvalidOperationException("thread.id missing in response");
 
+        var wikiContext = await ResolveWikiContextAsync(wikiContextSetup, cancellationToken).ConfigureAwait(false);
         using var msgResp = await _http.PostAsJsonAsync(
             $"api/threads/{threadId}/messages",
-            new { text = userMessage },
+            new { text = userMessage, wikiContext },
             JsonOptions,
             cancellationToken).ConfigureAwait(false);
         msgResp.EnsureSuccessStatusCode();
@@ -760,6 +764,77 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         return (finalText, false, "WebSocket closed before turn completed", string.Empty);
     }
 
+    private async Task<ResolvedWikiContext?> ResolveWikiContextAsync(
+        HarnessWikiContextSetup? setup,
+        CancellationToken cancellationToken)
+    {
+        if (setup is null || string.IsNullOrWhiteSpace(setup.Mode) ||
+            setup.Mode.Equals("none", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var mode = setup.Mode.Trim().ToLowerInvariant();
+        if (mode == "all")
+            return new ResolvedWikiContext("all");
+        if (mode is not ("root" or "page"))
+            throw new InvalidOperationException($"Harness Wiki context mode '{setup.Mode}' is not supported.");
+        if (string.IsNullOrWhiteSpace(setup.RootName))
+            throw new InvalidOperationException($"Harness Wiki context mode '{mode}' requires root_name.");
+
+        Debug.Assert(_http is not null);
+        using var rootsResponse = await _http!.GetAsync("api/wiki/roots", cancellationToken).ConfigureAwait(false);
+        rootsResponse.EnsureSuccessStatusCode();
+        using var rootsDocument = JsonDocument.Parse(
+            await rootsResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        var rootId = ResolveUniqueNamedId(
+            rootsDocument.RootElement.GetProperty("roots"),
+            setup.RootName,
+            "Wiki root");
+
+        if (mode == "root")
+            return new ResolvedWikiContext("root", RootId: rootId);
+        if (string.IsNullOrWhiteSpace(setup.PageTitle))
+            throw new InvalidOperationException("Harness Wiki context mode 'page' requires page_title.");
+
+        using var treeResponse = await _http.GetAsync(
+            $"api/wiki/roots/{Uri.EscapeDataString(rootId)}/tree",
+            cancellationToken).ConfigureAwait(false);
+        treeResponse.EnsureSuccessStatusCode();
+        using var treeDocument = JsonDocument.Parse(
+            await treeResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        var pageId = ResolveUniqueNamedId(
+            treeDocument.RootElement.GetProperty("pages"),
+            setup.PageTitle,
+            "Wiki page",
+            nameProperty: "title");
+        return new ResolvedWikiContext("page", PageId: pageId, RootId: rootId);
+    }
+
+    internal static string ResolveUniqueNamedId(
+        JsonElement values,
+        string requestedName,
+        string kind,
+        string nameProperty = "name")
+    {
+        var matches = values.EnumerateArray()
+            .Where(value => value.TryGetProperty(nameProperty, out var name) &&
+                string.Equals(name.GetString(), requestedName.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Select(value => value.TryGetProperty("id", out var id) ? id.GetString() : null)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToArray();
+        return matches.Length switch
+        {
+            1 => matches[0]!,
+            0 => throw new InvalidOperationException($"{kind} '{requestedName}' was not found in the isolated harness state."),
+            _ => throw new InvalidOperationException($"{kind} '{requestedName}' is ambiguous in the isolated harness state."),
+        };
+    }
+
+    private sealed record ResolvedWikiContext(
+        string Mode,
+        string? PageId = null,
+        string? RootId = null,
+        string? FolderId = null);
+
     private string ResolveAuditFilePath()
     {
         if (string.IsNullOrWhiteSpace(_sandboxRoot))
@@ -788,7 +863,10 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
                 .ConfigureAwait(false);
             resetResp.EnsureSuccessStatusCode();
 
-            await RunChatAsync("Reply with only the word ok.", cancellationToken)
+            await RunChatAsync(
+                "Reply with only the word ok.",
+                wikiContextSetup: null,
+                cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
         catch
