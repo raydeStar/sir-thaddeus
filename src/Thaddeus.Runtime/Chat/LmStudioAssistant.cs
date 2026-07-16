@@ -252,7 +252,7 @@ public sealed partial class LmStudioAssistant : IAssistant
                 preferredUnits: PreferredUnits,
                 offlineMode: OfflineMode)),
         };
-        llmMessages.AddRange(BuildHistory(thread));
+        llmMessages.AddRange(BuildHistory(thread, userText));
 
         // Fetch available tools from the MCP server and shape them for the
         // OpenAI function-calling API. Empty list means "no tools" — the
@@ -424,9 +424,14 @@ public sealed partial class LmStudioAssistant : IAssistant
             .ToArray();
     }
 
-    private IEnumerable<LlmChatMessage> BuildHistory(ChatThread? thread)
+    private IEnumerable<LlmChatMessage> BuildHistory(ChatThread? thread, string currentUserText)
     {
-        if (thread is null) yield break;
+        if (thread is null || thread.Messages.Count == 0)
+        {
+            yield return LlmChatMessage.User(currentUserText);
+            yield break;
+        }
+
         var msgs = thread.Messages;
         var start = Math.Max(0, msgs.Count - HistoryTurns);
         for (var i = start; i < msgs.Count; i++)
@@ -435,7 +440,13 @@ public sealed partial class LmStudioAssistant : IAssistant
             switch (m.Role)
             {
                 case ChatRole.User:
-                    yield return LlmChatMessage.User(m.Text ?? string.Empty);
+                    // The API persists the user-visible request before invoking the
+                    // assistant, but may pass a richer model-facing prompt for the
+                    // same turn (for example, attached local Wiki evidence). Keep
+                    // the stored conversation clean while making that authoritative
+                    // prompt the final user message sent to the model.
+                    yield return LlmChatMessage.User(
+                        i == msgs.Count - 1 ? currentUserText : m.Text ?? string.Empty);
                     break;
                 case ChatRole.Assistant:
                     yield return LlmChatMessage.Assistant(m.Text ?? string.Empty);
@@ -445,6 +456,9 @@ public sealed partial class LmStudioAssistant : IAssistant
                     break;
             }
         }
+
+        if (msgs[^1].Role != ChatRole.User)
+            yield return LlmChatMessage.User(currentUserText);
     }
 
     private static IEnumerable<string> Chunkify(string text)

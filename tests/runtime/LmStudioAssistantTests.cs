@@ -130,6 +130,28 @@ public class LmStudioAssistantTests : IDisposable
     }
 
     [Fact]
+    public async Task RespondAsync_sends_model_facing_prompt_without_persisting_it()
+    {
+        var (store, assistant, _, fake) = NewSut();
+        var thread = await store.CreateAsync("t", CancellationToken.None);
+        await store.AppendMessageAsync(thread.Id,
+            new ChatMessage("u1", ChatRole.User, "What is the launch state?", DateTimeOffset.UtcNow),
+            CancellationToken.None);
+
+        const string modelFacingPrompt =
+            "[LOCAL WIKI EVIDENCE]\nLaunch state: GREEN\n[USER REQUEST]\nWhat is the launch state?";
+
+        await assistant.RespondAsync(thread.Id, modelFacingPrompt, CancellationToken.None);
+
+        var sent = fake.Calls.Single();
+        Assert.Equal(modelFacingPrompt, sent.Last(message => message.Role == "user").Content);
+
+        var refreshed = await store.GetAsync(thread.Id, CancellationToken.None);
+        Assert.Equal("What is the launch state?", refreshed!.Messages[0].Text);
+        Assert.DoesNotContain(refreshed.Messages, message => message.Text.Contains("LOCAL WIKI EVIDENCE"));
+    }
+
+    [Fact]
     public async Task RespondAsync_returns_error_text_when_llm_throws()
     {
         var (store, assistant, captured, _) = NewSut(throwOnCall: new InvalidOperationException("boom"));
