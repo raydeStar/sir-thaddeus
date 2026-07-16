@@ -22,6 +22,11 @@ Do not substitute one score for the other. State the primary metric before an
 experiment begins. Preserve raw-model language quality while improving product
 capability.
 
+Track **product quality** as a third, independent scorecard: latency, safety,
+personality, continuity, validity, permissions, false success, and resource use.
+Changing to a larger or newer model may be a useful deployment comparison, but
+it is not evidence that the harness improved the fixed model under test.
+
 ## Required orientation
 
 Before changing assistant behavior, read:
@@ -30,6 +35,9 @@ Before changing assistant behavior, read:
    experiments.
 2. `docs/EXPERIMENTATION.md` for benchmark and promotion policy.
 3. `docs/TESTING.md` for the narrowest trustworthy verification command.
+
+For optimization work, also read `docs/CALIBRATED_IMPROVEMENT_PLAN.md` and the
+current evidence in `docs/research/` before selecting a candidate.
 
 Use `THADDEUS_ROUTING_LATENCY_SCOPE.md` as historical evidence, not as the
 current architecture contract. Verify drift-prone claims against current code,

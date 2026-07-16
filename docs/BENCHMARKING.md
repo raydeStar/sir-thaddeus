@@ -1,9 +1,9 @@
 # Benchmarking
 
-Sir Thaddeus tracks model capacity and harness capability separately. A tool,
-retrieval, or state-management gain may improve the user outcome without making
-the underlying model more knowledgeable. Reports must name the lane before
-showing a score.
+Sir Thaddeus tracks model capacity, harness capability, and product quality
+separately. A tool, retrieval, or state-management gain may improve the user
+outcome without making the underlying model more knowledgeable. Reports must
+name the primary lane and its guardrails before showing a score.
 
 ## Scorecards
 
@@ -11,10 +11,19 @@ showing a score.
 | --- | --- | --- | --- |
 | Model capacity | Can this model understand and solve the task without answer-producing tools? | Raw minimal, same-prompt direct, unchanged no-tools harness, candidate | Strict closed-book correctness, validity, calibration, and robustness |
 | Harness capability | Can the same model complete more real work with Sir Thaddeus capabilities? | Unchanged harness, candidate harness, and oracle capability when diagnostic | Independently verified final state or artifact, permissions, calls, latency, and resources |
+| Product quality | Does the change preserve or improve the experience around those outcomes? | Unchanged product, candidate product, focused safety and continuity regressions | Time to first token, p95 latency, personality, continuity, safety, permissions, false success, and resource use |
 
-Do not combine the two into one unlabeled percentage. Report an augmented
+Do not combine the three into one unlabeled percentage. Report an augmented
 outcome as an augmented outcome; a calculator-assisted correct answer is useful,
 but it is not a closed-book reasoning win.
+
+## Fixed-model attribution rule
+
+For a harness-improvement experiment, freeze the exact model artifact,
+quantization, provider, context, sampling, prompt composer, and item set across
+the unchanged and candidate arms. A newer, larger, or different model may be
+used as a ceiling, transfer, or explicitly labeled escalation control, but its
+gain cannot satisfy the fixed-model promotion gate.
 
 ## General capability portfolio
 
@@ -117,7 +126,10 @@ To add or customize a benchmark:
    production.
 
 See [EXPERIMENTATION.md](EXPERIMENTATION.md) for branch and promotion policy and
-[TESTING.md](TESTING.md) for local commands and artifact locations.
+[TESTING.md](TESTING.md) for local commands and artifact locations. The
+[calibrated improvement plan](CALIBRATED_IMPROVEMENT_PLAN.md) defines the active
+sequence of work; the [research findings](research/README.md) preserve current
+and historical verdicts.
 
 ## Interpreting the Wiki result
 
@@ -126,7 +138,7 @@ creates disposable local state, sends a normal request, and compares the final
 Wiki snapshot with evaluator-only expectations. Production never receives the
 expected state.
 
-The retained candidate improves a narrow, real operation: explicit Wiki-root
+The promoted production behavior improves a narrow, real operation: explicit Wiki-root
 creation. It does not improve MMLU, general science, or mathematical reasoning.
 That narrow claim is intentional and should remain narrow in release notes and
 benchmark summaries.

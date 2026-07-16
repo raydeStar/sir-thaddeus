@@ -6,7 +6,7 @@ to make improvement cumulative without leaving failed machinery in production.
 
 ## Research questions
 
-Track two scorecards separately.
+Track three scorecards separately.
 
 ### Model-capacity scorecard
 
@@ -23,8 +23,15 @@ Use outcome-scored tasks to measure whether tools, retrieval, state, memory,
 permissions, and external verification let the same model complete more work.
 Tool syntax or response format alone is not task completion.
 
-Declare which scorecard is primary. A capability improvement may be valuable
-without raising MMLU, but it must not silently damage model-capacity controls.
+### Product-quality scorecard
+
+Use time to first token, p50/p95 end-to-end latency, model and tool calls,
+resource use, safety, permissions, personality, continuity, validity, and false
+success to measure what the user experiences around the task outcome.
+
+Declare which scorecard is primary and make the other two guardrails. A
+capability improvement may be valuable without raising MMLU, but it must not
+silently damage model-capacity or product-quality controls.
 
 ## Core loop
 
@@ -65,6 +72,8 @@ Before changing behavior, record:
 - raw and unchanged-harness controls;
 - primary and guardrail metrics;
 - maximum run time and model-call budget;
+- an activation signal proving the candidate mechanism ran on intended items
+  and stayed off on negative controls;
 - promotion, rejection, and rollback rules;
 - holdout status and whether it has ever been inspected.
 
@@ -86,11 +95,16 @@ The same-prompt direct control is required before attributing a raw/harness gap
 to routing or orchestration. When useful, add oracle-route, oracle-tool,
 gold-evidence, or stronger-model upper bounds, labeled separately.
 
+For fixed-model improvement claims, changing the model is not a candidate
+mechanism. A different model may measure a semantic ceiling, transferability,
+or an explicit escalation path, but it must remain a separate labeled control.
+
 ## Decision rules
 
 Predeclare numeric gates appropriate to the slice. As a default:
 
 - require a meaningful net gain over both controls;
+- require activation telemetry or trace evidence before interpreting the score;
 - do not increase invalid outputs or critical safety failures;
 - require an exact repeat before consuming a holdout;
 - require a disjoint validation result in the same direction;
@@ -162,12 +176,25 @@ Treat `docs/ASSISTANT_PIPELINE.md` as the current production contract and
 Current conclusions include:
 
 - deterministic tools can create large gains on externally verifiable work;
+- a repeatable `10/20` raw versus `13/20` unchanged-harness development result
+  exists for the 1.2B model, but the broader 8B battery did not show a general
+  uplift, so no universal MMLU claim is established;
+- three isolated MMLU candidates failed their gates and that campaign is paused
+  pending a materially different mechanism;
 - sampled self-consistency and majority voting did not establish an uplift;
 - global retry and completion-validation removal reduced quality;
 - raw-versus-harness comparisons with different system prompts do not isolate
   routing effects;
 - generalized response-contract, search-retry, memory-evidence, and error-
   sanitization fixes were retained;
+- tool-syntax probes showed no meaningful parser headroom on the tested models;
+- gold-evidence controls showed retrieval headroom, while broad live-search
+  augmentation remained unreliable or failed to improve synthesis;
+- explicit Wiki-root selection produced a repeated narrow validation gain and
+  was promoted without being described as a reasoning gain;
+- a recent tool-integration candidate was rejected after traces showed the
+  intended mechanism did not activate, establishing activation evidence as a
+  prerequisite to score interpretation;
 - failed experiments were removed rather than stored behind dormant flags.
 
 These conclusions can be revisited only with a materially different mechanism,
@@ -175,14 +202,24 @@ predeclared controls, and fresh evidence.
 
 ## Recommended experiment order
 
-1. Direct-language attribution using raw, same-prompt, and full-harness arms.
-2. Typed context compaction without loss of continuity or personality.
-3. Grammar-constrained tool output where the configured provider supports it.
-4. Capability-specific external postconditions and one failure-triggered repair.
-5. Read-before-write state inspection for one mutable capability.
-6. Selective retrieval with known-answer and unknown-answer controls.
-7. Sparse specialist-model routing after enough labeled outcomes exist.
-8. Adapters or fine-tuning only for a stable, generalized failure cluster.
+1. Make evaluator composition, candidate activation, and final-state scoring
+   explicit enough that a score can be attributed to one mechanism.
+2. Test local Wiki or document evidence compilation on tasks where the needed
+   source is already available and the oracle-evidence arm proves headroom.
+3. Establish an outcome-scored tool-semantics baseline that measures argument
+   choice, execution, and final state rather than JSON syntax alone.
+4. Add one capability-specific external postcondition and one failure-triggered
+   repair only after an oracle control shows that repair can help.
+5. Explore an adapter or fine-tuning lane only for a stable, generalized
+   model-capacity failure cluster with disjoint validation.
+6. Measure helper-stage activation, time to first token, and duplicated model
+   calls before changing the production path for latency.
+7. Consider sparse specialist-model routing only after at least 300 labeled
+   outcomes reveal reproducible complementary failures.
 
 Do not reintroduce blind voting, always-on retrieval, universal planning, or
 learned routing without evidence that addresses their known failure modes.
+
+See the [calibrated improvement plan](CALIBRATED_IMPROVEMENT_PLAN.md) for phased
+execution and the [research findings](research/README.md) for the living evidence
+ledger behind this order.
