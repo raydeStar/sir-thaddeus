@@ -101,6 +101,10 @@ Any valid `dotnet test --filter` expression works here.
 
 Filtered runs skip the screen-observe harness so the fast loop stays fast.
 
+On CI, `dev/test.ps1` serializes test projects because multiple suites spawn
+desktop runtime child processes. Tests within each project keep their normal
+xUnit behavior; only cross-project process contention is removed.
+
 ## Run all tests (slower, Release build)
 
 ```powershell
