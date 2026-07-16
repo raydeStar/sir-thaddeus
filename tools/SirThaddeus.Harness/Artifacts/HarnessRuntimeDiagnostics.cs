@@ -156,8 +156,9 @@ internal static partial class HarnessRuntimeDiagnosticsReader
             _ => "stage"
         };
         var stage = Value(line, stageKey);
-        var duration = Number(line, "durationMs") ?? Number(line, "elapsedMs") ??
-                       Number(line, "elapsed_ms");
+        var duration = Number(line, "durationMs");
+        if (duration is null && name != "routing.latency")
+            duration = Number(line, "elapsedMs") ?? Number(line, "elapsed_ms");
         return new HarnessDiagnosticEvent
         {
             Name = name == "EXPERIMENT_ACTIVATION" ? "experiment.activation" : name,
