@@ -81,6 +81,16 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Pre-MCP rename execution guard v5 | **Inconclusive, then retired** | The guard blocked attempted writes but showed no final-state uplift while the exact-only tool already failed closed. It was retained only to test guarded label tolerance. |
 | Guarded decorated root-label resolver v6 | **Rejected; mechanism family closed** | Authorized state improved `1/8` to `6/8` with five wins and zero losses, but two of eight non-actions became unauthorized writes, safety scored `5/6`, and no-action p95 was `1.586x` v5. All temporary Wiki rename branches were removed. |
 
+## Product latency and reliability campaign
+
+| Experiment | Disposition | Result and lesson |
+| --- | --- | --- |
+| Helper-call activation and latency cohort v1 | **Diagnostic accepted; no router candidate** | Across 30 repeated turns, Footman used zero LLM calls and optional helpers were 10% of ordinary-conversation end-to-end time. Prompt construction was negligible. The actionable finding was a repeated 16K-runtime versus 8K-provider context overflow, not routing overhead. |
+| Explicit memory tool budget v1 | **Inconclusive retained research** | Removed the repeated overflow, exposed 9 instead of 60 tools, and produced one paired win with zero losses. Fresh validation reached `5/6` intended and `0/8` false activations, so the unmerged conservative branch is not promoted. |
+| Explicit memory precedence v2 | **Rejected; precedence family closed** | Early results repeated the win, but fresh validation routed four of ten browse, file, research, or system actions to memory. Simple precedence is unsafe for overlapping intent. |
+| Missing attachment clarification v1 | **Rejected** | Repeated a large zero-call latency gain, then falsely replaced a reminder and an email-drafting request on fresh validation. |
+| Missing attachment request clause v2 | **Rejected; regex family closed** | Clause anchoring repeated positive p95 of 74 ms first-visible and 883 ms end-to-end versus 1,235 ms and 2,481 ms unchanged, but fresh validation reached only `5/7` intended with `2/12` false activations. Use structured attachment state or an explicit action if revisited. |
+
 ## Retired architecture ideas
 
 | Mechanism | Disposition | Reason |
@@ -123,6 +133,12 @@ Use these repository-relative locations in the sibling
 - Wiki page rename sequence: `experiments/manifests/wiki-page-rename-selection-v1.yaml`
   through `wiki-guarded-root-label-resolution-v6.yaml`, ending with
   `experiments/verdicts/2026-07-16-wiki-guarded-root-label-resolution-v6.md`.
+- Latency and reliability sequence:
+  `experiments/verdicts/2026-07-16-helper-call-latency-cohort-v1.md`,
+  `2026-07-16-explicit-memory-tool-budget-v1.md`,
+  `2026-07-16-explicit-memory-precedence-v2.md`,
+  `2026-07-16-missing-attachment-clarification-v1.md`, and
+  `2026-07-16-missing-attachment-request-clause-v2.md`.
 
 ## Update rule
 

@@ -2,7 +2,8 @@
 
 **Evidence cutoff:** July 16, 2026
 
-**Production baseline:** `b50d8e1` after the Phase 2 Wiki evidence promotion
+**Production baseline:** `22e0e34`; the latest assistant-behavior promotion is
+the Phase 2 Wiki evidence packet
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -90,6 +91,15 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - Managed SearXNG restored answer-bearing search evidence and reduced the
   degraded evaluator path's calls and latency. That was environment parity,
   not a product capability promotion.
+- A repeated 30-turn helper-latency cohort found no LLM Footman calls and only
+  10% optional-helper share of ordinary-conversation end-to-end time. Prompt
+  construction was negligible. This is evidence against a broad latency
+  router refactor, not evidence that latency is already ideal.
+- A conservative explicit-memory tool budget removed a repeated context
+  overflow and produced one paired win with zero losses. It remains unmerged
+  research because fresh semantic validation activated only `5/6` intended
+  recalls. A precedence follow-up was rejected after routing four of ten fresh
+  action controls to memory.
 
 ## What is not working
 
@@ -159,6 +169,20 @@ calls and latency while tying or losing to unchanged Thaddeus.
   another lexical classifier, label qualifier, or prompt patch without a
   materially different authorization design and new oracle evidence.
 
+### Language-inferred latency fast paths
+
+- A bag-of-words missing-attachment clarification repeatedly removed 19 model
+  calls across five intended turns and reduced p95 end-to-end latency from
+  roughly 2.1 seconds to 0.8 seconds. Fresh validation falsely replaced a
+  reminder and an email-drafting request, so it was rejected.
+- Requiring a top-level request clause fixed those two failures and repeated
+  positive p95 of 0.9 seconds versus 2.5 seconds unchanged. Fresh validation
+  still missed two of seven legitimate variants and falsely intercepted two
+  of twelve negatives, including pasted content and an `s3://` location.
+- The attachment-regex family is closed. Its speed signal does not outweigh
+  incorrect intent interception. A future path needs structured runtime/UI
+  attachment state or an explicit user action.
+
 ## What remains uncertain
 
 - Whether compact local Wiki/document retrieval can approach the demonstrated
@@ -172,8 +196,10 @@ calls and latency while tying or losing to unchanged Thaddeus.
   advantage for product work.
 - Whether QLoRA or rationale distillation can improve a frozen base
   architecture on fresh capacity holdouts without teaching benchmark artifacts.
-- How often memory classification, Footman, guardrails, completion validation,
-  and repair invoke helper LLM calls in representative daily conversation.
+- Whether runtime prompt budgeting can safely align with the provider's actual
+  loaded context without weakening compaction, memory, safety, or continuity.
+- Whether no-change completion-repair attempts can be identified without
+  storing response text and then removed at a capability-specific seam.
 - Whether native streaming can improve perceived latency without exposing a
   draft that later validation must replace.
 

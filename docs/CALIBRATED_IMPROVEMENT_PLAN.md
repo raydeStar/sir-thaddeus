@@ -230,6 +230,24 @@ actually dominate representative turns.
 Do not trade a demonstrated benchmark or product-quality gain for an arbitrary
 latency threshold. Report the quality/latency frontier.
 
+Result: the repeated 30-turn helper cohort did not justify a conversational
+router refactor. Footman used zero LLM calls, optional helpers were 10% of
+ordinary-conversation end-to-end time, and prompt construction was negligible.
+The cohort instead exposed a repeated reliability defect: the runtime budgeted
+for 16,384 tokens while LM Studio was loaded at 8,192, causing an explicit
+memory turn to overflow. A conservative memory-tool route removed the overflow
+and produced one paired win, but remained inconclusive on fresh paraphrases;
+giving memory precedence then caused four false activations on ten fresh
+actions and was rejected.
+
+Two deterministic missing-attachment clarifiers also showed a genuine speed
+signal, reducing repeated positive p95 end-to-end latency from roughly 2.5
+seconds to 0.9 seconds with zero model calls. Both were rejected on fresh
+semantic mutations. Lexical routing could not reliably distinguish the user's
+requested action, supplied content, location schemes, and artifact variants.
+That mechanism family is closed. Revisit it only with structured attachment
+state or an explicit user action, not a larger phrase catalog.
+
 ### Phase 6 - Revisit specialist or multi-model routing only with data
 
 Objective: decide whether explicit escalation is worth its complexity and VRAM.
@@ -244,7 +262,7 @@ model success.
 
 | Priority | Candidate | Primary scorecard | Why now |
 | ---: | --- | --- | --- |
-| 1 | Helper-call activation and latency cohort | Product quality | The tool-semantic baseline authorized no product mechanism; representative call and latency attribution is now the cheapest useful measurement |
+| 1 | Provider-context budget alignment | Product quality | The helper cohort reproduced a real 16K-runtime versus 8K-provider overflow; provider state is a safer deterministic seam than inferred intent |
 | 2 | QLoRA or rationale-distillation pilot | Frozen-model capacity | Prompt-only capacity candidates failed; learning is a materially different mechanism |
 | Deferred | One capability-specific external postcondition | Harness capability | Independent verification is stronger than same-model critique, but the current tool-semantic slice found no qualifying oracle headroom |
 | Deferred | Multi-model/MoE routing | Escalation | Does not improve a fixed model and currently lacks labeled complementarity data |
