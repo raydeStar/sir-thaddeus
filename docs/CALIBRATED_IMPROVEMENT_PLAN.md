@@ -268,10 +268,18 @@ model success.
 
 | Priority | Candidate | Primary scorecard | Why now |
 | ---: | --- | --- | --- |
-| 1 | Provider-context budget alignment | Product quality | The helper cohort reproduced a real 16K-runtime versus 8K-provider overflow; provider state is a safer deterministic seam than inferred intent |
-| 2 | QLoRA or rationale-distillation pilot | Frozen-model capacity | Prompt-only capacity candidates failed; learning is a materially different mechanism |
-| Deferred | One capability-specific external postcondition | Harness capability | Independent verification is stronger than same-model critique, but the current tool-semantic slice found no qualifying oracle headroom |
+| 1 | Current-master postcondition headroom refresh | Harness capability diagnostic | The promoted answer-only evidence projection changed the residual failure map; measure the remaining cluster before designing another verifier |
+| 2 | QLoRA or rationale-distillation pilot | Adapted-model capacity | Prompt-only capacity candidates failed; learning is a materially different mechanism and must remain a separate claim |
+| 3 | Distinct corrective local retrieval with abstention | Harness capability | Gold evidence headroom is strong, but the candidate must avoid the promoted Wiki packet and unreliable public search |
+| 4 | Native provider-context contract v2 | Product quality | V1 removed the 8K/16K overflow but added a permission prompt and narrowly missed the latency gate; rerun only as a separately predeclared current-baseline candidate |
+| Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
+| Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
+| Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |
 | Deferred | Multi-model/MoE routing | Escalation | Does not improve a fixed model and currently lacks labeled complementarity data |
+
+The reconciled method audit, complete experiment contracts, and current
+blockers are maintained in
+[research/INFERENCE_METHOD_GAP_MAP.md](research/INFERENCE_METHOD_GAP_MAP.md).
 
 ## Definition of success
 

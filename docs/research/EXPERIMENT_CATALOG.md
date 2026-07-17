@@ -14,6 +14,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Hybrid managed-search parity | Evaluation infrastructure | **Accepted** through product PR `#209` | Start managed search only for harness suites that declare web capability. This corrected an invalid environment; it is not a search-quality claim. |
 | Harness-only search evidence capture | Evaluation infrastructure | **Accepted** | Capturing exact model-visible evidence in isolated artifacts can distinguish retrieval, utilization, and repeated-search failures without leaking evidence into normal logs. |
 | Tool-call syntax intake | Evaluation infrastructure | **Retained** | Both tested small models produced `8/8` parsed valid forced calls. Keep the diagnostic for new model intake; do not add a recovery parser without observed headroom. |
+| Structured-output headroom intake | Evaluation infrastructure | **Retained; no product candidate** | After excluding a schema-echo-confounded v1, the natural-contract v2 produced `10/10` schema-valid and `9/10` semantically exact records in both unconstrained and constrained arms. Constraints added zero correct outcomes. |
 | General capability development battery | Evaluation infrastructure | **Retained** | The 50-item MMLU-Pro, GSM1k, ARC-Challenge, DROP, and IFEval battery is useful for rapid rejection and attribution, not promotion proof. |
 | Causal candidate diagnostics and local outcome battery | Evaluation infrastructure | **Accepted through product PR `#211`** | A candidate row now fails closed unless v2 full composition, complete timing/call attribution, and the predeclared active/inactive event are observed. The live one-item proof captured 34 sanitized events. No assistant behavior or capability claim changed. Evaluator manifest: `experiments/manifests/causal-evaluation-infrastructure-v1.yaml`. |
 | Conservative pure-compute memoization | Product latency | **Promoted historically** | Cache only exact successful calculator and nonempty Python results within one turn; do not cache mutable, failed, or external calls. |
@@ -46,6 +47,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Contract verification output cap v2 | **Rejected** | Saved six aggregate tokens, made no executable calls, and did not improve p95. |
 | Contract verification user-role change | **Rejected; family paused** | Changing the verifier follow-up role produced no executable tool calls. |
 | Tool-semantic outcome baseline v1 | **Diagnostic accepted; no candidate** | Full menu scored `7/16` versus `3/16` oracle-pruned, `1/16` no-tools, and `3/16` raw. Full completed required tool paths on `8/10` positives and made zero forbidden calls. Oracle pruning had zero wins and four losses, so no routing, relevance, or pruning candidate was authorized. |
+| Provider-constrained structured output v2 | **Deferred for no headroom** | Unconstrained and constrained were both `10/10` structurally valid and `9/10` semantically exact. The identical semantic miss was not schema-repairable; no product code or validation run was justified. |
 
 ## Retrieval and search campaign
 
@@ -91,6 +93,8 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Explicit memory precedence v2 | **Rejected; precedence family closed** | Early results repeated the win, but fresh validation routed four of ten browse, file, research, or system actions to memory. Simple precedence is unsafe for overlapping intent. |
 | Missing attachment clarification v1 | **Rejected** | Repeated a large zero-call latency gain, then falsely replaced a reminder and an email-drafting request on fresh validation. |
 | Missing attachment request clause v2 | **Rejected; regex family closed** | Clause anchoring repeated positive p95 of 74 ms first-visible and 883 ms end-to-end versus 1,235 ms and 2,481 ms unchanged, but fresh validation reached only `5/7` intended with `2/12` false activations. Use structured attachment state or an explicit action if revisited. |
+| Native model-load contract v1 | **Inconclusive retained research** | Reproduced the requested 16,384-token provider state and removed overflow, but added one irrelevant permission prompt and repeated at `1.258x` baseline p95, narrowly missing the `1.25x` gate. |
+| Prepermission no-op validation v1 | **Rejected** | Static validation activated, then the model chose worse fallback tools; correctness fell `2/3` to `1/3`, a permission prompt appeared, calls increased, and p95 rose. |
 
 ## Retired architecture ideas
 

@@ -46,7 +46,7 @@ Use a model on your machine and leave network tools off to keep the core experie
 
 Sir Thaddeus tests a specific claim: **a fixed small model can complete more useful everyday work when it is given well-designed deterministic capabilities, evidence, state, permissions, and verification.** Replacing it with a larger or newer model may be a sound deployment choice, but it is not evidence that the harness improved the original model.
 
-Optimization work therefore changes one generalized mechanism at a time, compares it with the same raw model and unchanged product, and keeps only repeatable gains. The active priorities, gates, and stop rules live in the [calibrated improvement plan](docs/CALIBRATED_IMPROVEMENT_PLAN.md); the durable record of what worked, failed, or remains uncertain lives in the [research findings](docs/research/README.md).
+Optimization work therefore changes one generalized mechanism at a time, compares it with the same raw model and unchanged product, and keeps only repeatable gains. The active priorities, gates, and stop rules live in the [calibrated improvement plan](docs/CALIBRATED_IMPROVEMENT_PLAN.md); the [inference-method gap map](docs/research/INFERENCE_METHOD_GAP_MAP.md) ranks research ideas against measured Thaddeus failures; and the durable record of what worked, failed, or remains uncertain lives in the [research findings](docs/research/README.md).
 
 <a id="control-is-the-feature"></a>
 ## Control Is the Feature

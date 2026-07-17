@@ -2,7 +2,7 @@
 
 **Evidence cutoff:** July 17, 2026
 
-**Production baseline:** `6727078`; answer-only successful-tool-evidence
+**Production baseline:** `f2d067a`; answer-only successful-tool-evidence
 projection was promoted through product PR `#219`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
@@ -90,6 +90,13 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - LFM 1.2B and Qwen 2B each produced `8/8` parsed, schema-valid forced tool
   calls through LM Studio. There is no current headroom for a content-recovery
   parser; the test remains useful for model intake.
+- Provider-native JSON-Schema decoding is feasible through the supported LM
+  Studio endpoint, but the clean natural-contract comparison found no product
+  headroom: unconstrained and constrained LFM 1.2B arms were both `10/10`
+  schema-valid and `9/10` semantically exact. The shared miss was a wrong but
+  schema-valid extracted string. Keep the evaluator diagnostic; do not add
+  `response_format` to production until a real contract shows at least three
+  reproducible structural failures.
 - On the fresh 16-item local tool-semantic baseline, unchanged full-menu
   Thaddeus scored `7/16` versus `3/16` with oracle-pruned tools, `1/16`
   no-tools, and `3/16` raw. Full-menu execution completed the required tool
@@ -108,6 +115,11 @@ calls and latency while tying or losing to unchanged Thaddeus.
   research because fresh semantic validation activated only `5/6` intended
   recalls. A precedence follow-up was rejected after routing four of ten fresh
   action controls to memory.
+- A native model-load contract reliably created a 16,384-token LM Studio
+  instance and removed the 8K/16K overflow, but it introduced an irrelevant
+  permission prompt and repeated at `1.258x` p95 versus the `1.25x` gate. A
+  separate prepermission no-op candidate made correctness, prompts, calls, and
+  latency worse. Both remain unmerged evidence; reliability is not promoted.
 
 ## What is not working
 
@@ -210,6 +222,9 @@ calls and latency while tying or losing to unchanged Thaddeus.
   storing response text and then removed at a capability-specific seam.
 - Whether native streaming can improve perceived latency without exposing a
   draft that later validation must replace.
+
+The current method-by-method disposition and next experiment contracts are in
+[INFERENCE_METHOD_GAP_MAP.md](INFERENCE_METHOD_GAP_MAP.md).
 
 ## Reusable stop rules
 

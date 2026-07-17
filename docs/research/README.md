@@ -11,9 +11,12 @@ that has already failed.
    is not working, and what remains uncertain.
 2. [EXPERIMENT_CATALOG.md](EXPERIMENT_CATALOG.md) lists the material mechanisms
    tried so far and their disposition.
-3. [../CALIBRATED_IMPROVEMENT_PLAN.md](../CALIBRATED_IMPROVEMENT_PLAN.md)
+3. [INFERENCE_METHOD_GAP_MAP.md](INFERENCE_METHOD_GAP_MAP.md) reconciles the
+   research literature with current implementation seams, evidence, and the
+   ranked experiment basket.
+4. [../CALIBRATED_IMPROVEMENT_PLAN.md](../CALIBRATED_IMPROVEMENT_PLAN.md)
    defines the current forward plan and stop rules.
-4. [../EXPERIMENTATION.md](../EXPERIMENTATION.md) defines the experiment
+5. [../EXPERIMENTATION.md](../EXPERIMENTATION.md) defines the experiment
    protocol; [../BENCHMARKING.md](../BENCHMARKING.md) defines the scorecards.
 
 ## Source of truth
