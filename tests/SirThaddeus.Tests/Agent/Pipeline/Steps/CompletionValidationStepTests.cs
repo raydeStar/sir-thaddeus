@@ -84,6 +84,68 @@ public class CompletionValidationStepTests
         Assert.Equal(0, llm.CallCount);
     }
 
+    [Fact]
+    public async Task Projects_successful_tool_evidence_and_skips_llm_validation()
+    {
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var llm = new CountingLlm();
+        var events = new List<(string Action, string Message)>();
+        var step = new CompletionValidationStep(
+            new CompletionValidator(llm),
+            null,
+            (action, message) => events.Add((action, message)));
+        var ctx = WithDraft(
+            "Use file_read. Reply with only the codename value.",
+            "The codename is CIRRUS-284.") with
+        {
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "file_read",
+                    Arguments = "{}",
+                    Result = "{\"textContent\":\"Codename: CIRRUS-284\"}",
+                    Success = true
+                }
+            ]
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("CIRRUS-284", cont.Next.AssistantDraft);
+        Assert.Equal(0, llm.CallCount);
+        Assert.Contains(events, item =>
+            item.Action == "EXPERIMENT_ACTIVATION" &&
+            item.Message.Contains("outcome=activated", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Inactive_projection_retains_normal_validator_path()
+    {
+        var llm = new CountingLlm();
+        var step = new CompletionValidationStep(new CompletionValidator(llm), null);
+        var ctx = WithDraft("Explain the result.", "The codename is CIRRUS-284.") with
+        {
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "file_read",
+                    Arguments = "{}",
+                    Result = "{\"textContent\":\"Codename: CIRRUS-284\"}",
+                    Success = true
+                }
+            ]
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(ctx.AssistantDraft, cont.Next.AssistantDraft);
+        Assert.Equal(1, llm.CallCount);
+    }
+
     // Happy-path (validation + repair round-trip) requires a real
     // CompletionValidator / RepairLoop with a fake ILlmClient. Those
     // types are `sealed` and call `llm.ChatAsync` directly, so full

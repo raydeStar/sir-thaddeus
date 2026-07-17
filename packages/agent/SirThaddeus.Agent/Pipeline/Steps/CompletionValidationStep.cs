@@ -51,6 +51,14 @@ public sealed class CompletionValidationStep : ITurnStep
         if (string.IsNullOrWhiteSpace(context.AssistantDraft))
             return new StepResult.Continue(context);
 
+        var projection = EvidenceBackedAnswerOnlyProjection.Project(
+            context.UserText,
+            context.AssistantDraft,
+            context.ToolCallsMade);
+        LogExperimentActivation(context, projection);
+        if (projection.Applied)
+            return new StepResult.Continue(context with { AssistantDraft = projection.Text });
+
         if (ToolBackedResponseQualityGuards.TryBuildCurrentTimeInLocationFallback(
                 context.UserText ?? string.Empty,
                 context.ToolCallsMade) is { Length: > 0 } currentTimeDraft)
@@ -170,6 +178,20 @@ public sealed class CompletionValidationStep : ITurnStep
             "COMPLETION_REPAIR_TIMING",
             $"thread_id={context.ThreadId} turn_id={context.MessageId} outcome={outcome} " +
             $"changed={changed} elapsed_ms={elapsedMs:0.###}");
+    }
+
+    private void LogExperimentActivation(
+        TurnContext context,
+        EvidenceProjectionResult projection)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "stage=answer_only_tool_evidence_projection " +
+            $"outcome={(projection.Applied ? "activated" : "inactive")} reason={projection.Reason}");
     }
 
     private static bool IsLatencyTracingEnabled()

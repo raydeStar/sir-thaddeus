@@ -308,6 +308,16 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
     var guardrails = new ReasoningGuardrailsPipeline(llm, audit);
     var completionValidator = new CompletionValidator(llm);
     var repairLoop = new RepairLoop(llm, completionValidator);
+    Action<string, string> pipelineLog = (action, message) => audit.Append(new AuditEvent
+    {
+        Actor = "agent",
+        Action = action,
+        Result = "ok",
+        Details = new Dictionary<string, object>
+        {
+            ["message"] = message
+        }
+    });
 
     var pipeline = new ChatPipeline(
         new ITurnStep[]
@@ -389,7 +399,7 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         // or incomplete drafts after sanitize and runs one focused
         // repair pass. Fail-open — validator/repair exceptions don't
         // abort the turn.
-        new CompletionValidationStep(completionValidator, repairLoop),
+        new CompletionValidationStep(completionValidator, repairLoop, pipelineLog),
 
         // Search fallback: runs after sanitizer so the refusal check
         // sees the final draft. Builds the full request including
@@ -438,16 +448,7 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
 
             new ResponseComposerStep(),
         },
-        logEvent: (action, message) => audit.Append(new AuditEvent
-        {
-            Actor = "agent",
-            Action = action,
-            Result = "ok",
-            Details = new Dictionary<string, object>
-            {
-                ["message"] = message
-            }
-        }));
+        logEvent: pipelineLog);
 
     // The CLI's system prompt gets a location block prepended — matches
     // the UI runtime's BuildLocationBlock so the LLM sees "your home is
