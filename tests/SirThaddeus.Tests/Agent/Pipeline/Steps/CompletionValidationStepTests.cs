@@ -117,7 +117,8 @@ public class CompletionValidationStepTests
         Assert.Equal(0, llm.CallCount);
         Assert.Contains(events, item =>
             item.Action == "EXPERIMENT_ACTIVATION" &&
-            item.Message.Contains("outcome=activated", StringComparison.Ordinal));
+            item.Message.Contains("event=answer_only_tool_evidence_projection", StringComparison.Ordinal) &&
+            item.Message.Contains("decision=activated", StringComparison.Ordinal));
     }
 
     [Fact]

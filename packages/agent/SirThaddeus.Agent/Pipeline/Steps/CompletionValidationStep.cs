@@ -190,8 +190,8 @@ public sealed class CompletionValidationStep : ITurnStep
         _log(
             "EXPERIMENT_ACTIVATION",
             $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
-            "stage=answer_only_tool_evidence_projection " +
-            $"outcome={(projection.Applied ? "activated" : "inactive")} reason={projection.Reason}");
+            "event=answer_only_tool_evidence_projection " +
+            $"decision={(projection.Applied ? "activated" : "inactive")} reason={projection.Reason}");
     }
 
     private static bool IsLatencyTracingEnabled()
