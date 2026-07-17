@@ -1,9 +1,10 @@
 # Current Evidence
 
-**Evidence cutoff:** July 16, 2026
+**Evidence cutoff:** July 17, 2026
 
-**Production baseline:** `22e0e34`; the latest assistant-behavior promotion is
-the Phase 2 Wiki evidence packet
+**Production baseline:** `6727078`; answer-only successful-tool-evidence
+projection candidate `7926437` is authorized for promotion pending protected PR
+checks
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -59,6 +60,14 @@ calls and latency while tying or losing to unchanged Thaddeus.
   of better closed-book reasoning.
 - Completion validation and bounded retry remain net-positive globally.
   Experiments that removed them broadly reduced quality.
+- A narrow answer-only successful-tool-evidence projection improved a disjoint
+  16-item local file/Wiki validation slice from `8/16` unchanged to `12/16`,
+  with four paired wins, zero losses, `16/16` validity, and zero activations on
+  eight negative contracts. Development and exact repeat were both `10/12`
+  versus `5/12`. The projection uses no new model or tool call and returns
+  before completion validation only when one unique verbatim scalar is proved
+  by both the draft and successful tool evidence. This is harness capability,
+  not closed-book model improvement.
 - Gold or supplied document evidence produced a large DROP headroom signal:
   the tested model scored `5-6/10` with the passage and `0/10` without it. This
   justifies testing evidence retrieval and packaging, not assuming the current

@@ -14,7 +14,10 @@ Desktop and headless chat use the same ordered responsibilities:
 3. Narrow tool exposure through the footman and freshness policies.
 4. Run the primary model/tool loop through the audited MCP permission boundary.
 5. Sanitize the draft while preserving explicit safe response contracts.
-6. Validate completion and perform at most the configured bounded repair.
+6. For explicit answer-only contracts, project one uniquely shared verbatim
+   scalar from the sanitized draft and successful tool evidence when provable;
+   otherwise validate completion and perform at most the configured bounded
+   repair.
 7. Apply search fallback only when search is available and applicable.
 8. Persist automatic memory asynchronously and compose the final response.
 
@@ -51,6 +54,21 @@ This compilation issues no embedding or model call, does not search across the
 selected Wiki scope, and stays inactive when no Wiki context is attached. It is
 a prompt-load and evidence-selection seam, not implicit retrieval or a general
 conversation router.
+
+## Evidence-backed answer-only projection
+
+After tool execution and sanitization, an explicit answer-only request may be
+reduced to one verbatim scalar only when the same unique span already occurs in
+both the model draft and a successful tool result. The projection never
+generates, infers, summarizes, or ranks an answer. It fails closed for failed or
+missing tools, explanations, plural contracts, ambiguous shared spans, and
+multi-value full-content requests.
+
+When the proof succeeds, the projected response is already an independently
+grounded postcondition, so the pipeline skips the later LLM completion-validator
+call for that turn. When it does not succeed, the existing completion validation
+and bounded repair path is unchanged. This is a narrow response-contract seam,
+not a router, retriever, benchmark path, or global validation removal.
 
 ## Supported diagnostics
 
