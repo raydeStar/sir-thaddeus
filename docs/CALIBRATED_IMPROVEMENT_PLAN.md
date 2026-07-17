@@ -64,15 +64,21 @@ removed completely after rejection.
 4. Prove the mechanism activated before interpreting its accuracy score.
 5. Use raw minimal, same-prompt direct, unchanged harness, and candidate arms
    when attribution requires them.
-6. Reject cheaply on a development slice of roughly ten minutes or less.
-7. Require the exact frozen candidate to repeat before using a disjoint
+6. Reject cheaply with deterministic checks and a balanced ten-item triage
+   before the full development slice; treat ten minutes as a ceiling per hot
+   invocation, not a target.
+7. Record planned case evaluations and require explicit acknowledgement before
+   large, repeated, multi-model, validation, or confirmation campaigns.
+8. Reuse a compatible frozen control pack only when all hashes match and a
+   small unchanged-harness sentinel shows no drift.
+9. Require the exact frozen candidate to repeat before using a disjoint
    validation set.
-8. Use oracle-route, oracle-tool, gold-evidence, and gold-state controls to
+10. Use oracle-route, oracle-tool, gold-evidence, and gold-state controls to
    locate the ceiling before adding routing machinery.
-9. Preserve benchmark integrity: no expected answers, suite identifiers,
+11. Preserve benchmark integrity: no expected answers, suite identifiers,
    scorer logic, benchmark-specific branches, or hidden strong-model calls in
    production.
-10. Record promoted, rejected, inconclusive, and infrastructure results in
+12. Record promoted, rejected, inconclusive, and infrastructure results in
     [research/](research/README.md).
 
 ## Phased program

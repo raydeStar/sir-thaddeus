@@ -49,6 +49,20 @@ the default general-capability headline.
 
 ## Run tiers
 
+### Triage
+
+Use a deterministic, balanced ten-item subset of declared development data:
+
+- 2 MMLU-Pro;
+- 2 GSM1k;
+- 2 ARC-Challenge;
+- 2 DROP;
+- 2 IFBench or IFEval.
+
+Triage exists to reject weak or inactive mechanisms while coding. It cannot
+authorize validation, support a public score, or become a holdout merely
+because only ten items were executed.
+
 ### Development
 
 Target a sub-ten-minute, fixed 50-item battery:
@@ -67,12 +81,27 @@ general improvement.
 Use at least 50 disjoint items per core category. Freeze the suite before the
 candidate runs, report every category separately, and use paired confidence
 intervals or an equivalent paired test. Do not tune against validation failures.
+Size the validation run for the smallest effect worth shipping; 50 per category
+is a floor, not proof that a smaller observed difference is measurable.
 
 ### External confirmation
 
 Use a current LiveBench release, temporal questions, or another independently
 maintained holdout. Run difficult MATH, MuSR, and GPQA lanes only where the raw
 model is above the floor.
+
+### Reference conformance
+
+The generated-answer evaluator is the correct instrument for paired Thaddeus
+attribution because every arm receives the same user-facing contract. It is not
+automatically comparable with public leaderboard scores that use a different
+chat template, prompt, answer extraction, or log-likelihood procedure.
+
+For each frozen model intake and after evaluator scoring changes, run a pinned
+official or widely used reference implementation on a small raw-model sample.
+Compare item-level outcomes and investigate parser or prompt divergence before
+publishing capacity results. Report the generated-answer score and reference
+score as separate metrics; neither may silently replace the other.
 
 ## Required measurements
 
@@ -122,7 +151,9 @@ To add or customize a benchmark:
 5. Run raw, same-prompt direct, unchanged harness, and candidate controls on the
    same items.
 6. Rerun a promising candidate exactly before consuming validation.
-7. Preserve artifacts and a verdict; keep clearly failed behavior out of
+7. Reuse a frozen control pack only when all compatibility hashes match and a
+   small unchanged-harness sentinel shows no drift.
+8. Preserve artifacts and a verdict; keep clearly failed behavior out of
    production.
 
 See [EXPERIMENTATION.md](EXPERIMENTATION.md) for branch and promotion policy and

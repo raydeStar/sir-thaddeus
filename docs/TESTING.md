@@ -58,6 +58,21 @@ Short version for AI-assisted work:
 - Do not modify harness scoring or suite expectations to make failures disappear.
 - Harness scoring uses rubric profiles with a 0..1 `overallScore` and 0..4 metric scores. Legacy fixture `min_score` values such as `7` are normalized to `0.7`.
 
+For evaluator-driven model experiments, inspect the campaign before spending
+GPU time and start with a balanced reject-only slice:
+
+```powershell
+benchrun eval run --config <config> --suite <suite> --provider <provider> `
+  --label <label> --mode harness_full --max-items 10 --dry-run
+
+benchrun eval run --config <config> --suite <suite> --provider <provider> `
+  --label <label> --mode harness_full --max-items 10
+```
+
+The evaluator blocks plans above its default case-evaluation budget unless a
+large campaign is explicitly acknowledged. Do not use that override until the
+candidate has passed the cheaper gates.
+
 ## One-time setup
 
 ```powershell

@@ -40,6 +40,9 @@ frozen baseline
       |
 one predeclared candidate
       |
+deterministic checks + balanced reject-only triage
+      |-- clearly loses or does not activate --> reject without a hot campaign
+      |
 paired development run (about 10 minutes or less)
       |-- clearly loses --> reject, preserve evidence, delete code
       |
@@ -60,6 +63,41 @@ Small development slices are rejection and iteration tools. They do not
 establish statistical truth. Reaching exact repeat is sufficient to retain a
 promising research branch for review, but it is not sufficient to merge it.
 
+## Evaluation economics
+
+Optimize for information gained per model minute, not for the number of rows
+executed. Ten minutes is the maximum normal hot invocation, not a duration that
+every experiment should consume.
+
+Use this evidence ladder:
+
+1. Static analysis, focused unit tests, deterministic stage tests, scorer
+   checks, and candidate-activation checks.
+2. A balanced ten-item triage slice: two items from each core category when the
+   five-category capacity portfolio is relevant. Triage is reject-only.
+3. The frozen 50-item development battery only when triage remains credible.
+4. The exact candidate repeat only after the development gate passes.
+5. Disjoint validation and product regressions only after the repeat succeeds.
+6. Confirmation, cross-model transfer, and repeated reliability campaigns only
+   after the candidate has earned them.
+
+Record the planned item, arm, provider, repeat, and total case-evaluation counts
+before the first model call. Large or multi-model campaigns require an explicit
+manifest acknowledgement and should normally be scheduled rather than launched
+inside the coding loop.
+
+A frozen control pack may be reused when the suite fingerprint, exact model
+artifact and quantization, provider/runtime metadata, prompt/config/tool hashes,
+and both repository SHAs match. Before reusing it, run a small unchanged-harness
+sentinel and refresh the controls if the sentinel drifts. Control reuse saves
+compute; it does not permit comparison across changed baselines.
+
+Exact repetition measures runtime stability. Disjoint validation measures
+generalization. A larger item count and paired interval measure whether the
+effect is distinguishable from sampling noise. Do not substitute one for the
+others, and do not run any of them after an earlier gate has already rejected
+the mechanism.
+
 ## Predeclaration
 
 Before changing behavior, record:
@@ -72,6 +110,8 @@ Before changing behavior, record:
 - raw and unchanged-harness controls;
 - primary and guardrail metrics;
 - maximum run time and model-call budget;
+- planned case-evaluation count, triage limit, and whether a large campaign is
+  explicitly authorized;
 - an activation signal proving the candidate mechanism ran on intended items
   and stayed off on negative controls;
 - promotion, rejection, and rollback rules;
