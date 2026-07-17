@@ -3,8 +3,7 @@
 **Evidence cutoff:** July 17, 2026
 
 **Production baseline:** `6727078`; answer-only successful-tool-evidence
-projection candidate `7926437` is authorized for promotion pending protected PR
-checks
+projection was promoted through product PR `#219`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
