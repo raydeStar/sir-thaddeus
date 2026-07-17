@@ -67,12 +67,18 @@ prompt, routing, model-comparison, latency, VRAM, or benchmark work.
   Thaddeus control under the same model and sampling configuration.
 - Use a development slice of roughly ten minutes or less for rejection and
   iteration. A small development win is not promotion evidence.
+- Treat ten minutes as a ceiling, not a target. Use deterministic checks and a
+  balanced reject-only triage slice before the full development battery, and
+  record the planned case-evaluation count before making model calls.
 - Reject a clearly losing candidate immediately. If it wins or reaches the
   exact-repeat gate with a credible directional improvement, retain it long
   enough to rerun the exact candidate.
 - Use a disjoint frozen validation set only after the exact repeat succeeds.
 - Run broad product regressions only after the candidate survives the focused
   gates.
+- Require explicit large-campaign acknowledgement before multi-model, repeated,
+  validation, or confirmation sweeps. Reuse compatible frozen controls only
+  when hashes match and a small unchanged-harness sentinel shows no drift.
 - Record correctness, validity, paired wins/losses, model calls, tokens,
   latency, peak memory/VRAM, and escalation or tool-use rates when applicable.
 - Delete clearly non-working implementation branches, but preserve their
