@@ -1,6 +1,6 @@
 # Experiment Catalog
 
-This is a compact index of material Sir Thaddeus experiments through July 16,
+This is a compact index of material Sir Thaddeus experiments through July 17,
 2026. It records reusable conclusions, not hidden benchmark content. Exact
 manifests, commands, artifact hashes, and verdicts live in the sibling private
 `local-benchmark-runner` repository under `experiments/`.
@@ -18,6 +18,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Causal candidate diagnostics and local outcome battery | Evaluation infrastructure | **Accepted through product PR `#211`** | A candidate row now fails closed unless v2 full composition, complete timing/call attribution, and the predeclared active/inactive event are observed. The live one-item proof captured 34 sanitized events. No assistant behavior or capability claim changed. Evaluator manifest: `experiments/manifests/causal-evaluation-infrastructure-v1.yaml`. |
 | Conservative pure-compute memoization | Product latency | **Promoted historically** | Cache only exact successful calculator and nonempty Python results within one turn; do not cache mutable, failed, or external calls. |
 | Completion validation and bounded retry | Product quality | **Keep supported path** | Global removal reduced quality. Replace only at a capability seam with equal-quality controlled evidence. |
+| Answer-only successful-tool-evidence projection | Harness capability | **Promoted through product PR `#219`** | Project one unique verbatim scalar only when it exists in both the sanitized draft and successful local tool evidence. Development repeated at `10/12` versus `5/12`; disjoint validation was `12/16` versus `8/16`, four wins, zero losses, full validity, and zero negative activations. Applied cases skip one completion-validator call. |
 
 ## Model-capacity campaign
 
@@ -118,6 +119,9 @@ Use these repository-relative locations in the sibling
   `compact-search-evidence-envelope-v1.yaml`, and
   `deterministic-short-answer-validation-v1.yaml` on its retained research
   branch.
+- Local answer-only evidence projection:
+  `experiments/manifests/answer-only-tool-evidence-projection-v1.yaml` and
+  `experiments/verdicts/2026-07-17-answer-only-tool-evidence-projection-v1.md`.
 - Tool syntax and contract headroom:
   `experiments/verdicts/2026-07-16-tool-call-syntax-headroom-v1.md` and
   `2026-07-16-explicit-format-contract-headroom-v1.md`.
