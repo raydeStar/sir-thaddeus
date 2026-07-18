@@ -100,6 +100,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Missing attachment request clause v2 | **Rejected; regex family closed** | Clause anchoring repeated positive p95 of 74 ms first-visible and 883 ms end-to-end versus 1,235 ms and 2,481 ms unchanged, but fresh validation reached only `5/7` intended with `2/12` false activations. Use structured attachment state or an explicit action if revisited. |
 | Native model-load contract v1 | **Inconclusive retained research** | Reproduced the requested 16,384-token provider state and removed overflow, but added one irrelevant permission prompt and repeated at `1.258x` baseline p95, narrowly missing the `1.25x` gate. |
 | Prepermission no-op validation v1 | **Rejected** | Static validation activated, then the model chose worse fallback tools; correctness fell `2/3` to `1/3`, a permission prompt appeared, calls increased, and p95 rose. |
+| Native model-load current-baseline eligibility v2 | **Rejected before product implementation** | Two identical current-master runs at a verified 16,384-token context each completed `3/3`, passed `2/3` contracts, and reproduced one irrelevant `memory_store_facts` permission prompt. The lifecycle branch was not rebased; provider restoration was exact. |
 
 ## Retired architecture ideas
 
@@ -161,7 +162,9 @@ Use these repository-relative locations in the sibling
   `2026-07-16-explicit-memory-tool-budget-v1.md`,
   `2026-07-16-explicit-memory-precedence-v2.md`,
   `2026-07-16-missing-attachment-clarification-v1.md`, and
-  `2026-07-16-missing-attachment-request-clause-v2.md`.
+  `2026-07-16-missing-attachment-request-clause-v2.md`, plus
+  `2026-07-17-native-model-load-contract-v1.md` and
+  `2026-07-17-native-model-load-current-baseline-eligibility-v2.md`.
 
 ## Update rule
 
