@@ -299,7 +299,10 @@ calls and latency while tying or losing to unchanged Thaddeus.
   aggressive evidence compression fell to `9/30`. Reopening requires a
   materially different data-scale, coverage, or learning hypothesis plus a new
   predeclared campaign counter—not a third formatting variant, relaxed scorer,
-  or silent extension of the consumed development slice.
+  or silent extension of the consumed development slice. The
+  [learning-capacity recalibration](LEARNING_CAPACITY_RECALIBRATION.md) records
+  the aggregate rank/margin evidence and freezes the evaluator, ceiling, scale,
+  and stop gates for the next decision.
 - Whether runtime prompt budgeting can safely align with the provider's actual
   loaded context without weakening compaction, memory, safety, or continuity.
 - Whether no-change completion-repair attempts can be identified without
