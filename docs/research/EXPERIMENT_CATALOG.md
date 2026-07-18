@@ -32,6 +32,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Capability-scoped choice prompt | **Rejected; campaign paused** | Improved unchanged by one item to `6/20` but remained below `7/20` raw and reduced validity. Third consecutive valid rejection. |
 | Arithmetic Plan-and-Solve scaffold | **Rejected** | Compact one-pass planning did not improve LFM 1.2B strict correctness. |
 | Sampled self-consistency and tool-aware voting | **Rejected historically** | Added model calls and latency and did not beat unchanged controls. |
+| Native-checkpoint QLoRA training-path smoke v1 | **Rejected; plumbing retained in evaluator** | In 89.25 seconds, loss fell `6.8134 -> 2.2826` and a 884,736-parameter adapter saved/reloaded consistently, but held-in exact reproduction stayed `0/4` versus a frozen `3/4` gate. This is infrastructure evidence only, not a benchmark or capacity gain. |
 | Historical raw-versus-harness 140-item result | **Consumed attribution evidence** | Different system prompts prevent routing attribution; it is not holdout or promotion evidence. |
 
 ## Tool and verification campaign

@@ -225,6 +225,13 @@ regressions.
 Exit gate: repeatable fresh capacity gain over the raw base and unchanged
 harness, with the adaptation cost and scope stated explicitly.
 
+Result: the first contamination-audited native-checkpoint QLoRA smoke completed
+the training/save/reload path in 89.25 seconds, but held-in exact reproduction
+remained `0/4` against a frozen `3/4` gate despite falling loss. The smoke and
+adapter are rejected; no real training campaign or holdout consumption is
+authorized from it. Evaluator plumbing may remain. Reopening requires a new,
+materially different data or rationale-distillation hypothesis.
+
 ### Phase 5 - Reduce latency without removing quality controls globally
 
 Objective: improve conversational feel after measuring which helper stages
@@ -277,9 +284,9 @@ model success.
 | Priority | Candidate | Primary scorecard | Why now |
 | ---: | --- | --- | --- |
 | 1 | Current-master postcondition headroom refresh | Harness capability diagnostic | The promoted answer-only evidence projection changed the residual failure map; measure the remaining cluster before designing another verifier |
-| 2 | QLoRA or rationale-distillation pilot | Adapted-model capacity | Prompt-only capacity candidates failed; learning is a materially different mechanism and must remain a separate claim |
-| 3 | Distinct corrective local retrieval with abstention | Harness capability | Gold evidence headroom is strong, but the candidate must avoid the promoted Wiki packet and unreliable public search |
-| 4 | Native provider-context contract v2 | Product quality | V1 removed the 8K/16K overflow but added a permission prompt and narrowly missed the latency gate; rerun only as a separately predeclared current-baseline candidate |
+| Paused | QLoRA or rationale-distillation pilot | Adapted-model capacity | The first QLoRA smoke missed its held-in learning gate. Reopen only with a materially different predeclared training-data or rationale-distillation hypothesis. |
+| 2 | Distinct corrective local retrieval with abstention | Harness capability | Gold evidence headroom is strong, but the candidate must avoid the promoted Wiki packet and unreliable public search. First freeze a distinct failure cluster and stable local corpus. |
+| 3 | Native provider-context contract v2 | Product quality | V1 removed the 8K/16K overflow but added a permission prompt and narrowly missed the latency gate; rerun only as a separately predeclared current-baseline candidate. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |

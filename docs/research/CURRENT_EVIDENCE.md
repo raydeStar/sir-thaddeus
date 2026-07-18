@@ -2,7 +2,7 @@
 
 **Evidence cutoff:** July 18, 2026
 
-**Production baseline:** `a94ce44`; answer-only successful-tool-evidence
+**Production baseline:** `b72ebb2`; answer-only successful-tool-evidence
 projection was promoted through product PR `#219`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
@@ -87,6 +87,12 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - The 50-item general-capability battery is a useful fast portfolio. On the 8B
   diagnostic run, raw scored `37/50` and unchanged harness `36/50`, so it did
   not support a general routing or prompt-expansion candidate.
+- A contamination-audited native-checkpoint QLoRA smoke completed in 89.25
+  seconds on the RTX 4090. Loss fell from `6.8134` to `2.2826`, 884,736 LoRA
+  parameters trained, and the saved adapter reloaded consistently. It remained
+  `0/4` exact on its four held-in nonce mappings, below the frozen `3/4` gate,
+  so the smoke is rejected. This proves the local training/save/reload plumbing
+  is usable; it is not model-capacity or benchmark evidence.
 - LFM 1.2B and Qwen 2B each produced `8/8` parsed, schema-valid forced tool
   calls through LM Studio. There is no current headroom for a content-recovery
   parser; the test remains useful for model intake.
@@ -141,6 +147,15 @@ calls and latency while tying or losing to unchanged Thaddeus.
   inference cost and did not beat unchanged controls.
 - Blind regeneration, universal planning, and same-model self-critique have no
   demonstrated default-path value.
+
+### First QLoRA training-path smoke
+
+- The frozen held-in smoke did not establish even the deliberately narrow
+  memorization signal required before a real adaptation campaign. Falling loss,
+  code-shaped outputs, and a reloadable adapter do not replace exact outcomes.
+- The rejected adapter is not deployed. More steps, different targets, new
+  data, or altered LoRA settings would be a new experiment; do not tune this
+  smoke repeatedly until it passes.
 
 ### Forced tool use
 
@@ -224,8 +239,11 @@ calls and latency while tying or losing to unchanged Thaddeus.
   correctable artifacts, but three product candidates never activated. A new
   attempt requires a materially different observable seam, not another grammar
   revision.
-- Whether QLoRA or rationale distillation can improve a frozen base
-  architecture on fresh capacity holdouts without teaching benchmark artifacts.
+- Whether a separately designed rationale-distillation or QLoRA candidate can
+  improve fresh capacity holdouts remains unknown, but the first QLoRA
+  training-path smoke missed its own held-in learning gate. Reopening the lane
+  requires a materially different, predeclared data/mechanism hypothesis—not
+  a relaxed scorer or silent extension of the rejected run.
 - Whether runtime prompt budgeting can safely align with the provider's actual
   loaded context without weakening compaction, memory, safety, or continuity.
 - Whether no-change completion-repair attempts can be identified without
