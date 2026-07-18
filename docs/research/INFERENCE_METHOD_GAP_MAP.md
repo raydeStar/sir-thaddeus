@@ -1,8 +1,8 @@
 # Inference Method Gap Map
 
-**Reconciled:** July 17, 2026  
-**Production baseline:** `f2d067a`  
-**Evaluator baseline:** `5885501` plus structured-output evidence PR `#57`
+**Reconciled:** July 18, 2026
+**Production baseline:** `a94ce44`
+**Evaluator baseline:** `bce818c` through evidence correction PR `#63`
 
 This map ranks research mechanisms against Sir Thaddeus evidence. It does not
 replace the experiment ledger or promotion policy. Model capacity, fixed-model
@@ -19,10 +19,12 @@ smallest capability-specific seam.
 
 No untested fixed-model product candidate currently satisfies all five entry
 conditions: a repeated unresolved cluster, observable activation, oracle
-headroom, an independently checkable score, and acceptable scope. The smallest
-next measurement is a current-master refresh of the local tool-semantic outcome
-slice after the promoted answer-only evidence projection. It must establish a
-new cluster before another postcondition is designed.
+headroom, an independently checkable score, and acceptable scope. The
+current-master refresh found a three-case literal-response cluster and an
+offline oracle corrected it, but product candidates v1-v3 all recorded zero
+activations and tied unchanged. That family is closed. Do not create another
+postcondition until a materially different observable seam establishes causal
+activation before scoring.
 
 ## Reconciled gap analysis
 
@@ -58,7 +60,7 @@ not evidence that a generalized verifier abstraction would earn its cost.
 
 ## Ranked experiment basket
 
-### 1. Current-master postcondition headroom refresh
+### 1. Current-master postcondition headroom refresh - completed
 
 - Reason for rank: it is the cheapest way to determine whether the promoted
   answer-only projection left a repeated argument, sequence, or state cluster.
@@ -72,7 +74,9 @@ not evidence that a generalized verifier abstraction would earn its cost.
 - Budget: one 10-16 item invocation under ten minutes.
 - Gate: at least three oracle paired wins, zero safety/permission losses, and a
   single generalized failure class.
-- Stop: fewer than three oracle wins or failures split across unrelated causes.
+- Result: current master scored `9/16`; an answer-blind oracle reached `12/16`
+  twice, but product candidates v1-v3 stayed `9/16` with zero activations.
+- Stop: the mechanism family is closed; validation remains unconsumed.
 - Rollback: evaluator evidence only; write no product branch until the gate.
 
 ### 2. Learning-lane dataset and QLoRA pilot
@@ -134,14 +138,14 @@ not evidence that a generalized verifier abstraction would earn its cost.
 
 ## Selected next action
 
-No product implementation is authorized. The highest-information action is the
-rank-1 current-master postcondition headroom refresh. It is a diagnostic, not a
-candidate: the previous tool-semantic slice had three argument/sequence misses
-but no oracle advantage, and the promoted answer-only projection may have
-removed its two result-contract misses. The measurable blocker is therefore
-**unknown current residual cluster size**. One frozen refresh resolves that
-blocker; if it does not produce three oracle wins in one class, move to the
-learning lane instead of inventing another verifier.
+No product implementation is authorized from the literal-response result. The
+next capability experiment is the rank-2 learning lane: prepare a contamination-
+audited, generalized QLoRA or rationale-distillation pilot for the frozen base
+model, with base/adapted and raw/harness arms kept separate. Before an expensive
+training run, use a tiny overfit-only smoke to prove the training path works;
+do not count that smoke as capability evidence. Corrective local retrieval
+remains the next harness-only option when a stable local corpus and a distinct
+evidence-sufficiency failure cluster are available.
 
 ## Research basis
 

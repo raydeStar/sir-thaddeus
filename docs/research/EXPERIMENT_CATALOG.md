@@ -1,6 +1,6 @@
 # Experiment Catalog
 
-This is a compact index of material Sir Thaddeus experiments through July 17,
+This is a compact index of material Sir Thaddeus experiments through July 18,
 2026. It records reusable conclusions, not hidden benchmark content. Exact
 manifests, commands, artifact hashes, and verdicts live in the sibling private
 `local-benchmark-runner` repository under `experiments/`.
@@ -48,6 +48,9 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Contract verification user-role change | **Rejected; family paused** | Changing the verifier follow-up role produced no executable tool calls. |
 | Tool-semantic outcome baseline v1 | **Diagnostic accepted; no candidate** | Full menu scored `7/16` versus `3/16` oracle-pruned, `1/16` no-tools, and `3/16` raw. Full completed required tool paths on `8/10` positives and made zero forbidden calls. Oracle pruning had zero wins and four losses, so no routing, relevance, or pruning candidate was authorized. |
 | Provider-constrained structured output v2 | **Deferred for no headroom** | Unconstrained and constrained were both `10/10` structurally valid and `9/10` semantically exact. The identical semantic miss was not schema-repairable; no product code or validation run was justified. |
+| Current-master tool-semantic refresh | **Diagnostic accepted** | After the promoted answer-only evidence projection, unchanged Thaddeus scored `9/16` with full validity versus `3/16` raw and `1/16` same-prompt direct. This is a local harness-outcome signal, not a general or MMLU uplift. |
+| Literal-response contract oracle | **Headroom established offline** | An answer-blind public-prompt projection raised the immutable `9/16` artifact to `12/16` twice with three wins, no losses, and three activations. Oracle headroom authorized a narrow product attempt but was not itself promotable. |
+| Literal-response contract candidates v1-v3 | **Rejected; family closed** | All three product candidates tied unchanged at `9/16` with zero activations. V3 recorded 44 calls, 67,408 tokens, full validity, and zero paired wins/losses; repeat and disjoint validation were not run. The implementation branches were deleted. |
 
 ## Retrieval and search campaign
 
@@ -132,6 +135,11 @@ Use these repository-relative locations in the sibling
 - Tool-semantic attribution:
   `experiments/manifests/tool-semantic-outcome-baseline-v1.yaml` and
   `experiments/verdicts/2026-07-16-tool-semantic-outcome-baseline-v1.md`.
+- Current-master tool-semantic and literal-response follow-up:
+  `experiments/verdicts/2026-07-17-current-master-tool-semantic-refresh-v1.md`,
+  `2026-07-17-literal-response-contract-oracle-v1.md`, and
+  `2026-07-18-literal-response-contract-candidate-v1.md` through
+  `2026-07-18-literal-response-contract-candidate-v3.md`.
 - Tool-integrated verification sequence:
   `experiments/verdicts/2026-07-16-tool-integrated-draft-verification-v1.md`
   through `2026-07-16-contract-verification-round-trace-v1.md`.

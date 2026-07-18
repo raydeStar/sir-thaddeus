@@ -193,6 +193,14 @@ tool router, relevance classifier, pruning rule, or global argument repair.
 Capability-specific postconditions remain gated on a future oracle-proven
 cluster.
 
+A July 18 current-master refresh raised unchanged full-menu Thaddeus to `9/16`
+after the promoted answer-only evidence projection. An answer-blind
+literal-response oracle reached `12/16` twice with three wins and zero losses,
+but product candidates v1-v3 all stayed `9/16` with zero activations. No repeat
+or disjoint validation was run, all implementation branches were deleted, and
+the literal-response mechanism family is closed. Phase 3 now requires a new
+observable failure seam rather than another lexical contract candidate.
+
 ### Phase 4 - Open a separate learning-based capacity lane
 
 Objective: test the most plausible route to a material closed-book gain after
