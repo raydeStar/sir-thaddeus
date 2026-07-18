@@ -201,6 +201,17 @@ or disjoint validation was run, all implementation branches were deleted, and
 the literal-response mechanism family is closed. Phase 3 now requires a new
 observable failure seam rather than another lexical contract candidate.
 
+The next distinct local-read campaign established genuine but unsafe recovery
+headroom. On a fresh route-agnostic 12-case suite, one-shot audited recovery
+improved strict outcomes from `3/12` to `7/12`, including four verified
+positive wins and zero paired losses. Candidate p95 improved from 4,611 ms to
+4,287 ms. It nevertheless activated on an exact-missing-file negative and
+reduced validity from `12/12` to `11/12`, violating the frozen fail-closed gate.
+No exact repeat ran, the product branch was deleted, and the local-read recovery
+implementation family is closed. A future attempt requires a materially
+different resource-existence signal and a new suite, not another lexical
+detector tuned to the consumed case.
+
 ### Phase 4 - Open a separate learning-based capacity lane
 
 Objective: test the most plausible route to a material closed-book gain after
@@ -283,10 +294,10 @@ model success.
 
 | Priority | Candidate | Primary scorecard | Why now |
 | ---: | --- | --- | --- |
-| 1 | Current-master postcondition headroom refresh | Harness capability diagnostic | The promoted answer-only evidence projection changed the residual failure map; measure the remaining cluster before designing another verifier |
+| Completed | Current-master postcondition and local-read recovery refresh | Harness capability diagnostic | Audited recovery produced four verified fresh gains but failed the exact-missing-resource boundary at 11/12 validity; the implementation was removed |
 | Paused | QLoRA or rationale-distillation pilot | Adapted-model capacity | The first QLoRA smoke missed its held-in learning gate. Reopen only with a materially different predeclared training-data or rationale-distillation hypothesis. |
-| 2 | Distinct corrective local retrieval with abstention | Harness capability | Gold evidence headroom is strong, but the candidate must avoid the promoted Wiki packet and unreliable public search. First freeze a distinct failure cluster and stable local corpus. |
-| 3 | Native provider-context contract v2 | Product quality | V1 removed the 8K/16K overflow but added a permission prompt and narrowly missed the latency gate; rerun only as a separately predeclared current-baseline candidate. |
+| Closed | Distinct corrective local retrieval with abstention | Harness capability | Fresh route-agnostic validation found four wins but one forbidden exact-missing-file activation; three implementations are rejected and the family is closed pending a materially different existence signal |
+| 1 | Native provider-context contract v2 | Product quality | V1 removed the 8K/16K overflow but added a permission prompt and narrowly missed the latency gate; rerun only as a separately predeclared current-baseline candidate. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |

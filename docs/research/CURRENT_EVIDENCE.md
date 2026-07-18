@@ -118,6 +118,12 @@ calls and latency while tying or losing to unchanged Thaddeus.
   failed before repeat. The disjoint validation set remains unconsumed and the
   mechanism family is closed; oracle headroom alone did not prove a reachable
   product seam.
+- A separate gold-evidence control then authorized one-shot local-read recovery.
+  V3 reached a fresh route-agnostic result of `7/12` versus `3/12` unchanged,
+  with four verified positive wins, zero paired losses, lower p95 latency
+  (4,287 ms versus 4,611 ms), and lower peak VRAM. It also activated on the
+  exact-missing-file negative, so validity fell to `11/12`. The frozen gate
+  rejected it before exact repeat; all product implementations were deleted.
 - Managed SearXNG restored answer-bearing search evidence and reduced the
   degraded evaluator path's calls and latency. That was environment parity,
   not a product capability promotion.
@@ -194,6 +200,11 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - Broad or high-confidence write selection, generic side-effect repair, and
   adjacent prefetch variants did not survive repeatability, accuracy, or
   resource gates.
+- One-shot audited local-read recovery converted four fresh file/Wiki failures
+  into verified outcomes without a latency penalty, but could not distinguish
+  a recoverable bad argument from a genuinely missing exact resource. Its one
+  negative activation failed the 12/12 validity boundary. Do not tune another
+  lexical recovery detector against that consumed suite.
 
 ### Wiki page rename routing and label tolerance
 
@@ -231,7 +242,9 @@ calls and latency while tying or losing to unchanged Thaddeus.
 
 - Whether compact local Wiki/document retrieval can approach the demonstrated
   gold-evidence ceiling and the conditional `6/6` compact-evidence result
-  without flooding context or depending on unreliable public search.
+  without flooding context or depending on unreliable public search. The V3
+  recovery result proves useful headroom is reachable, but not with its current
+  exact-missing-resource discrimination.
 - Whether a capability-specific deterministic postcondition can trigger only on
   observed failure and recover state without another universal model judge.
 - Whether a capability-specific argument or postcondition mechanism can fix a
