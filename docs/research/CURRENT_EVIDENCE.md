@@ -117,6 +117,12 @@ calls and latency while tying or losing to unchanged Thaddeus.
   full-support v1. The adapter and implementation were deleted. This was the
   third consecutive valid candidate rejection, so further MMLU candidate runs
   are paused for recalibration rather than another rationale-format mutation.
+- Phase A then froze fresh, answer-free learning-capacity instruments and caught
+  an incomplete-support selection defect before any model call. The corrected
+  pre-training SciQ oracle improved the unchanged 1.2B model from `13/30` to
+  `17/30` with gold human support, with four wins and zero losses, but missed
+  the immutable `18/30`, `+6/30`, and eight-win prerequisites. No teacher,
+  adapter training, MMLU-Pro development, repeat, or validation run followed.
 - LFM 1.2B and Qwen 2B each produced `8/8` parsed, schema-valid forced tool
   calls through LM Studio. There is no current headroom for a content-recovery
   parser; the test remains useful for model intake.
@@ -294,15 +300,16 @@ calls and latency while tying or losing to unchanged Thaddeus.
   attempt requires a materially different observable seam, not another grammar
   revision.
 - Whether a learning-based adapter can improve fresh capacity holdouts remains
-  unknown, but the immediate rationale-format sequence is paused. Full-support
+  unknown, but the immediate rationale sequence is stopped. Full-support
   rationale supervision produced a mixed `10/30` signal versus `8/30` controls;
   aggressive evidence compression fell to `9/30`. Reopening requires a
   materially different data-scale, coverage, or learning hypothesis plus a new
   predeclared campaign counter—not a third formatting variant, relaxed scorer,
   or silent extension of the consumed development slice. The
   [learning-capacity recalibration](LEARNING_CAPACITY_RECALIBRATION.md) records
-  the aggregate rank/margin evidence and freezes the evaluator, ceiling, scale,
-  and stop gates for the next decision.
+  the aggregate rank/margin evidence and the later gold-evidence diagnostic.
+  The model moved `13/30 -> 17/30` with support but missed the frozen prerequisite,
+  so the 512-example scale test never trained and is not the next action.
 - Whether runtime prompt budgeting can safely align with the provider's actual
   loaded context without weakening compaction, memory, safety, or continuity.
 - Whether no-change completion-repair attempts can be identified without

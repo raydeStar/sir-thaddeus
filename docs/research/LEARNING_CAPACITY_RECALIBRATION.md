@@ -1,10 +1,10 @@
 # Learning-Capacity Recalibration
 
-**Status:** active planning gate; no new adapter or holdout run authorized
+**Status:** completed at pre-training diagnostic; scale-only adapter not authorized
 
 **Date:** July 18, 2026
 
-**Production baseline:** `84f96e64236d49c94ffef73a1da258f761aaebf2`
+**Production baseline:** `6b4119cbcfd85c4667fa7976d1f92593a6ca7b62`
 
 **Primary scorecard:** adapted-model closed-book capacity
 
@@ -13,10 +13,12 @@ hot invocations
 
 ## Verdict
 
-Do not try another rationale-format variation. The recent adapters changed the
-model, but the evidence is too coarse to show a repeatable capacity gain. The
-next work is evaluator preparation followed, only after its gates pass, by one
-scale-only rationale-distillation candidate using the same 1.2B base model.
+Do not train the proposed 512-example rationale adapters. Evaluator preparation
+passed, but the frozen pre-training gold-evidence utilization gate did not. The
+unchanged 1.2B model improved from `13/30` question-only to `17/30` with human
+SciQ support: four wins, zero losses, and mean correct-option margin moving from
+`-0.889` to `+0.255`. The immutable prerequisite required `18/30`, `+6/30`, and
+eight wins. It was not relaxed after observing the result.
 
 This is a recalibration, not abandonment. The most defensible interpretation is:
 
@@ -24,9 +26,12 @@ This is a recalibration, not abandonment. The most defensible interpretation is:
 - answer-only exposure did not move the consumed development slice;
 - full human support produced a small directional signal;
 - aggressive support compression surrendered part of that signal;
-- 64 source examples and 30 evaluation items are insufficient to separate a
-  small general effect from sampling noise; and
-- nothing yet distinguishes inadequate data scale from a student-model ceiling.
+- 64 source examples and 30 evaluation items were insufficient to separate a
+  small general effect from sampling noise;
+- the student can use supplied evidence somewhat, but the effect did not clear
+  the predeclared utilization prerequisite; and
+- the 512-example scale hypothesis remains untested because no adapter was
+  trained.
 
 No production behavior, provider, default model, routing rule, or benchmark
 scorer should change during this recalibration.
@@ -35,8 +40,8 @@ scorer should change during this recalibration.
 flowchart LR
     A["Consumed 30-item evidence"] --> B["Answer-blind aggregate diagnosis"]
     B --> C["Evaluator-only suite and timing preparation"]
-    C --> D{"Teacher, gold-evidence, and timing gates pass?"}
-    D -- "No" --> E["Stop or replace the diagnostic instrument"]
+    C --> D{"Gold-evidence utilization gate passes?"}
+    D -- "No: 17/30 vs required 18/30" --> E["Stop before teacher or training"]
     D -- "Yes" --> F["One 512-example scale-only candidate"]
     F --> G{"Fresh development gate passes?"}
     G -- "No" --> H["Reject and close this rationale family"]
@@ -47,6 +52,13 @@ flowchart LR
 ```
 
 ## What the recent evidence establishes
+
+The fresh 30-item SciQ validation oracle now adds an evidence-utilization
+boundary. Gold human support improved strict option-content ranking by four
+items with zero losses and improved rank, top-three coverage, and margin. This
+is real evidence headroom, but it missed the frozen prerequisite for spending
+the larger adaptation campaign. No stronger-teacher call, adapter training,
+MMLU-Pro development, mutation, validation, or transfer run followed.
 
 The frozen science comparison used `LiquidAI/LFM2.5-1.2B-Instruct`, 64 public
 SciQ examples, 128 records per adapter, one epoch/64 steps, and unlabeled
@@ -198,10 +210,10 @@ separately hashed invocations; do not shrink the evaluation after seeing a
 candidate result. Validation may likewise be split into predeclared immutable
 shards so that no individual invocation exceeds ten minutes.
 
-## Smallest next candidate
+## Scale-only candidate disposition
 
-The next candidate, if the evaluator gates pass, is a **scale-only
-full-support rationale-distillation experiment**:
+The predeclared candidate was a **scale-only full-support
+rationale-distillation experiment** that would have:
 
 - keep the exact LFM2.5 1.2B base revision, 4-bit load, LoRA targets, sequence
   length, optimizer family, prompt construction, and format-independent scorer;
@@ -227,9 +239,10 @@ Provisional advancement requires all of the following before exact repeat:
 - no benchmark or evaluation content enters training; and
 - every invocation remains within the frozen resource budget.
 
-Numeric gates must be finalized from the minimum effect worth shipping, the
-frozen native-base aggregate, and the timing sentinel before either adapter is
-trained. They may not be altered after candidate scoring.
+The numeric gates were finalized before the diagnostic. Because the earlier
+gold-evidence prerequisite failed, none of these training or development steps
+ran. Reopening this candidate requires a materially different, answer-blind
+evidence-utilization mechanism and fresh predeclaration, not a lower threshold.
 
 ## Interpretation matrix
 
@@ -245,7 +258,7 @@ trained. They may not be altered after candidate scoring.
 
 ## Reversible implementation phases
 
-### Phase A — evaluator-only preparation
+### Phase A — evaluator-only preparation — complete
 
 1. Preserve the consumed 30-item slice as historical evidence.
 2. Add aggregate paired statistics, rank distributions, and margins without
@@ -258,7 +271,7 @@ trained. They may not be altered after candidate scoring.
 Exit: suite fingerprints, planned case counts, timing estimate, and final gates
 are reviewed; no adapter has been trained.
 
-### Phase B — scale-only development
+### Phase B — scale-only development — stopped before training
 
 1. Predeclare the matched 512-example answer-only and full-support arms.
 2. Build training data twice and require identical hashes.
@@ -267,6 +280,10 @@ are reviewed; no adapter has been trained.
 5. Reject, classify mixed, or authorize an exact repeat under the frozen rules.
 
 Exit: one verdict and immutable hashes. A development win is not promotion.
+
+Actual exit: the gold-evidence prerequisite failed at `17/30` versus the frozen
+`18/30` minimum and `+4/30` versus the required `+6/30`. The teacher, training,
+development, repeat, and validation invocations were not run.
 
 ### Phase C — exact repeat and validation
 
@@ -303,11 +320,11 @@ harness gain from one adapted checkpoint.
 
 ## Direct conclusion
 
-The rationale-distillation idea remains plausible, but the current results do
-not justify implementation or promotion. They justify one better-powered,
-scale-only experiment after evaluator preparation. If 512 clean examples do
-not produce a repeatable rank and strict-score movement on a fresh 120-item
-development set—despite a healthy teacher ceiling—the responsible conclusion
-is that this mechanism does not materially improve this 1.2B checkpoint. At
-that point the project should move to a different causal hypothesis, not a
-fourth rationale variant.
+The rationale-distillation idea remains scientifically plausible, but it is no
+longer the next recommended experiment for this 1.2B checkpoint. The model used
+gold support directionally but failed the immutable utilization prerequisite,
+so the 512-example adapters were never trained. Move to a different causal
+hypothesis centered on reliable evidence packaging, externally verifiable
+outcomes, and deterministic postconditions. Reopen closed-book rationale
+training only after a fresh answer-blind control demonstrates stronger evidence
+utilization; do not lower this gate or try another rationale formatter.

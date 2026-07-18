@@ -269,6 +269,14 @@ keeps the consumed 30-item slice historical, requires evaluator-only ceiling
 and timing preparation, and permits at most one fresh scale-only full-support
 candidate before this rationale family is reconsidered.
 
+That prerequisite has now been exercised. Gold SciQ support improved the
+unchanged 1.2B model from `13/30` to `17/30` with four paired wins and zero
+losses, but missed the frozen `18/30`, `+6/30`, and eight-win utilization gate.
+The scale-only candidate stopped before teacher scoring or adapter training;
+fresh MMLU-Pro development and validation remain untouched. Rationale training
+is therefore no longer the next candidate. Reopening it requires a materially
+different evidence-utilization hypothesis, not a relaxed gate.
+
 ### Phase 5 - Reduce latency without removing quality controls globally
 
 Objective: improve conversational feel after measuring which helper stages
@@ -337,7 +345,7 @@ model success.
 | Priority | Candidate | Primary scorecard | Why now |
 | ---: | --- | --- | --- |
 | Completed | Current-master postcondition and local-read recovery refresh | Harness capability diagnostic | Audited recovery produced four verified fresh gains but failed the exact-missing-resource boundary at 11/12 validity; the implementation was removed |
-| Paused after three valid rejections | QLoRA or rationale-distillation pilot | Adapted-model capacity | Full-support rationale supervision produced a mixed `10/30` versus `8/30` controls, but concise-evidence v2 fell to `9/30` despite valid activation. Recalibrate data scale/coverage, model ceiling, and development-slice suitability before authorizing a new campaign; do not try another rationale-format mutation. |
+| Stopped at prerequisite | QLoRA or rationale-distillation pilot | Adapted-model capacity | Full-support rationale supervision produced a mixed `10/30` versus `8/30`, concise-evidence v2 fell to `9/30`, and the fresh gold-support prerequisite reached only `17/30` versus the frozen `18/30` and `+6/30` gates. No scale adapter was trained. Pursue reliable evidence utilization and externally verified outcomes before reopening learning. |
 | Closed | Distinct corrective local retrieval with abstention | Harness capability | Fresh route-agnostic validation found four wins but one forbidden exact-missing-file activation; three implementations are rejected and the family is closed pending a materially different existence signal |
 | Closed | Native provider-context contract v2 | Product quality | Current master at a verified 16K context reproduced the irrelevant memory-write permission prompt twice, so the large lifecycle candidate was not rebased |
 | Closed | Conservative explicit-memory tool budget revalidation | Harness capability and reliability | Fresh development repeated good precision (`3/4` positives, `0/6` negatives) and removed two permission prompts, but increased provider calls from 45 to 50; no repeat ran |
