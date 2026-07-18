@@ -252,6 +252,18 @@ learning, not demonstrated knowledge gain. That adapter and its research
 branches are rejected; future learning candidates must predeclare a
 format-independent capacity metric alongside generated strict scoring.
 
+The next rationale-distillation sequence produced a useful boundary rather
+than a promotable win. With matched 128-record SciQ QLoRA arms and a
+format-independent scorer, native base and answer-only remained `8/30` while
+full-support rationale supervision reached `10/30` with three wins and one
+loss. It missed the frozen `+3/30` gate and reduced option-rotation invariance
+to `4/6`, so it remains mixed, unmerged research. A separately predeclared
+answer-blind concise-evidence v2 compressed 55/64 supports by a median 74.65%
+and restored `5/6` invariance, but fell to `9/30`. V2 was rejected and deleted.
+That third consecutive valid rejection pauses further MMLU candidate launches.
+Recalibration must distinguish data scale/coverage, model ceiling, and
+development-slice suitability before another learning mechanism is coded.
+
 ### Phase 5 - Reduce latency without removing quality controls globally
 
 Objective: improve conversational feel after measuring which helper stages
@@ -320,7 +332,7 @@ model success.
 | Priority | Candidate | Primary scorecard | Why now |
 | ---: | --- | --- | --- |
 | Completed | Current-master postcondition and local-read recovery refresh | Harness capability diagnostic | Audited recovery produced four verified fresh gains but failed the exact-missing-resource boundary at 11/12 validity; the implementation was removed |
-| Paused | QLoRA or rationale-distillation pilot | Adapted-model capacity | The first QLoRA smoke missed its held-in gate; the later selective science adapter improved response formatting but tied native answer-content ranking at `8/30` and regressed mixed capability. Reopen only with a materially different predeclared training-data or rationale-distillation hypothesis and a format-independent primary control. |
+| Paused after three valid rejections | QLoRA or rationale-distillation pilot | Adapted-model capacity | Full-support rationale supervision produced a mixed `10/30` versus `8/30` controls, but concise-evidence v2 fell to `9/30` despite valid activation. Recalibrate data scale/coverage, model ceiling, and development-slice suitability before authorizing a new campaign; do not try another rationale-format mutation. |
 | Closed | Distinct corrective local retrieval with abstention | Harness capability | Fresh route-agnostic validation found four wins but one forbidden exact-missing-file activation; three implementations are rejected and the family is closed pending a materially different existence signal |
 | Closed | Native provider-context contract v2 | Product quality | Current master at a verified 16K context reproduced the irrelevant memory-write permission prompt twice, so the large lifecycle candidate was not rebased |
 | Closed | Conservative explicit-memory tool budget revalidation | Harness capability and reliability | Fresh development repeated good precision (`3/4` positives, `0/6` negatives) and removed two permission prompts, but increased provider calls from 45 to 50; no repeat ran |

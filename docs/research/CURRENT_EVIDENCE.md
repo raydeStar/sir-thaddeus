@@ -103,6 +103,20 @@ calls and latency while tying or losing to unchanged Thaddeus.
   wrong selections. Treat this as response-contract learning evidence, not a
   capacity improvement; its separate mixed-capability regression remains
   disqualifying.
+- A subsequent matched rationale-distillation control produced the first
+  directional format-independent capacity signal, but not promotion evidence.
+  Native base and an answer-only adapter each scored `8/30`; a full-support
+  SciQ rationale adapter scored `10/30` with three paired wins and one loss.
+  It missed the frozen `+3/30` gate, did not improve the already-high `7/8`
+  held-in activation score, and reduced option-rotation invariance from `5/6`
+  to `4/6`. It remains an unmerged, explicitly mixed research result.
+- Concise-evidence rationale v2 then compressed 55/64 SciQ supports by a median
+  74.65% using an answer-blind deterministic sentence selector. The mechanism
+  activated on all eight held-in score vectors and restored `5/6` rotation
+  invariance, but scored only `9/30`: `+1` over base/answer-only and `-1` versus
+  full-support v1. The adapter and implementation were deleted. This was the
+  third consecutive valid candidate rejection, so further MMLU candidate runs
+  are paused for recalibration rather than another rationale-format mutation.
 - LFM 1.2B and Qwen 2B each produced `8/8` parsed, schema-valid forced tool
   calls through LM Studio. There is no current headroom for a content-recovery
   parser; the test remains useful for model intake.
@@ -279,13 +293,13 @@ calls and latency while tying or losing to unchanged Thaddeus.
   correctable artifacts, but three product candidates never activated. A new
   attempt requires a materially different observable seam, not another grammar
   revision.
-- Whether a separately designed rationale-distillation or QLoRA candidate can
-  improve fresh capacity holdouts remains unknown. The first QLoRA smoke missed
-  its held-in learning gate, while the later selective science adapter improved
-  output compliance without improving answer-content ranking and regressed the
-  mixed guardrail. Reopening the lane requires a materially different,
-  predeclared data/mechanism hypothesis—not a relaxed scorer or silent extension
-  of either rejected run.
+- Whether a learning-based adapter can improve fresh capacity holdouts remains
+  unknown, but the immediate rationale-format sequence is paused. Full-support
+  rationale supervision produced a mixed `10/30` signal versus `8/30` controls;
+  aggressive evidence compression fell to `9/30`. Reopening requires a
+  materially different data-scale, coverage, or learning hypothesis plus a new
+  predeclared campaign counter—not a third formatting variant, relaxed scorer,
+  or silent extension of the consumed development slice.
 - Whether runtime prompt budgeting can safely align with the provider's actual
   loaded context without weakening compaction, memory, safety, or continuity.
 - Whether no-change completion-repair attempts can be identified without
