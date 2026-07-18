@@ -147,6 +147,12 @@ calls and latency while tying or losing to unchanged Thaddeus.
   irrelevant `memory_store_facts` permission prompt. Native lifecycle v2 was
   rejected before implementation; the exact original 8,192-token provider
   configuration was restored.
+- The original conservative memory-read tool budget was then replayed unchanged
+  on current master with fresh inputs. It activated on `3/4` recalls and `0/6`
+  negatives, removed two irrelevant permission prompts, tied public outcomes at
+  `8/10`, and reduced observed p95. It also increased provider calls from 45 to
+  50, entirely on intended recalls, so the frozen call gate rejected it before
+  repeat. The temporary product branch was deleted.
 
 ## What is not working
 

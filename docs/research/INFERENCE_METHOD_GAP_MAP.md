@@ -149,13 +149,14 @@ not evidence that a generalized verifier abstraction would earn its cost.
 
 ## Selected next action
 
-The corrective local-retrieval and native provider-context candidates are now
-closed. The next product candidate is a current-baseline revalidation of the
-original conservative explicit-memory tool budget, not its rejected precedence
-follow-up. Fresh evidence must score precision, recall, public correctness,
-permission prompts, calls, and latency: the route may miss low-confidence
-recalls, but it may not intercept a write, research, file, web, or ordinary
-conversation request. Reopen learning only with a materially different,
+The corrective local-retrieval, native provider-context, and conservative
+memory-tool candidates are now closed. Memory-tool v3 repeated good precision
+(`3/4` recalls and `0/6` negatives) and removed two permission prompts, but
+increased provider calls from 45 to 50 and stopped before repeat. Do not select
+another product mechanism immediately. First aggregate current-master artifacts
+answer-blind across the fixed 1.2B scorecards; run at most one abridged refresh
+if existing evidence cannot identify a repeated observable failure cluster with
+oracle headroom. Reopen learning only with a materially different,
 contamination-audited rationale-distillation or training-data hypothesis.
 
 ## Research basis
