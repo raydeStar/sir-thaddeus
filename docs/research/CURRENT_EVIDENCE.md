@@ -1,8 +1,8 @@
 # Current Evidence
 
-**Evidence cutoff:** July 17, 2026
+**Evidence cutoff:** July 18, 2026
 
-**Production baseline:** `f2d067a`; answer-only successful-tool-evidence
+**Production baseline:** `a94ce44`; answer-only successful-tool-evidence
 projection was promoted through product PR `#219`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
@@ -97,12 +97,21 @@ calls and latency while tying or losing to unchanged Thaddeus.
   schema-valid extracted string. Keep the evaluator diagnostic; do not add
   `response_format` to production until a real contract shows at least three
   reproducible structural failures.
-- On the fresh 16-item local tool-semantic baseline, unchanged full-menu
-  Thaddeus scored `7/16` versus `3/16` with oracle-pruned tools, `1/16`
-  no-tools, and `3/16` raw. Full-menu execution completed the required tool
-  path on `8/10` positive items and made zero forbidden calls on six no-tool
-  items. Tool pruning had zero paired wins and four losses, so another router
-  or relevance classifier is not justified.
+- On the original fresh 16-item local tool-semantic baseline, unchanged
+  full-menu Thaddeus scored `7/16` versus `3/16` with oracle-pruned tools,
+  `1/16` no-tools, and `3/16` raw. After the promoted answer-only evidence
+  projection, a current-master refresh improved unchanged Thaddeus to `9/16`
+  with `16/16` validity, `7/10` positive outcomes, `2/6` no-tool outcomes,
+  44 model calls, and 67,704 tokens. A fresh same-prompt direct arm scored
+  `1/16` and raw remained `3/16`. The harness gain is local-outcome evidence,
+  not model-capacity evidence.
+- An answer-blind offline literal-response oracle raised that current-master
+  artifact from `9/16` to `12/16` twice with three wins and no losses. Three
+  product candidates then remained `9/16` with zero activations. V3 used 44
+  calls and 67,408 tokens, tied unchanged with zero paired wins/losses, and
+  failed before repeat. The disjoint validation set remains unconsumed and the
+  mechanism family is closed; oracle headroom alone did not prove a reachable
+  product seam.
 - Managed SearXNG restored answer-bearing search evidence and reduced the
   degraded evaluator path's calls and latency. That was environment parity,
   not a product capability promotion.
@@ -211,9 +220,10 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - Whether a capability-specific deterministic postcondition can trigger only on
   observed failure and recover state without another universal model judge.
 - Whether a capability-specific argument or postcondition mechanism can fix a
-  fresh, oracle-proven failure cluster. The first tool-semantic baseline found
-  argument and result-contract misses, but no cluster had the required oracle
-  advantage for product work.
+  fresh, oracle-proven failure cluster. The literal-response oracle found three
+  correctable artifacts, but three product candidates never activated. A new
+  attempt requires a materially different observable seam, not another grammar
+  revision.
 - Whether QLoRA or rationale distillation can improve a frozen base
   architecture on fresh capacity holdouts without teaching benchmark artifacts.
 - Whether runtime prompt budgeting can safely align with the provider's actual
