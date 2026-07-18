@@ -96,6 +96,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Helper-call activation and latency cohort v1 | **Diagnostic accepted; no router candidate** | Across 30 repeated turns, Footman used zero LLM calls and optional helpers were 10% of ordinary-conversation end-to-end time. Prompt construction was negligible. The actionable finding was a repeated 16K-runtime versus 8K-provider context overflow, not routing overhead. |
 | Explicit memory tool budget v1 | **Inconclusive retained research** | Removed the repeated overflow, exposed 9 instead of 60 tools, and produced one paired win with zero losses. Fresh validation reached `5/6` intended and `0/8` false activations, so the unmerged conservative branch is not promoted. |
 | Explicit memory precedence v2 | **Rejected; precedence family closed** | Early results repeated the win, but fresh validation routed four of ten browse, file, research, or system actions to memory. Simple precedence is unsafe for overlapping intent. |
+| Conservative explicit memory tool budget v3 | **Rejected on call cost** | Fresh current-master development activated `3/4` recalls and `0/6` negatives, removed two permission prompts, and tied public outcomes `8/10`, but provider calls increased from 45 to 50. No repeat or validation ran; the product branch was deleted. |
 | Missing attachment clarification v1 | **Rejected** | Repeated a large zero-call latency gain, then falsely replaced a reminder and an email-drafting request on fresh validation. |
 | Missing attachment request clause v2 | **Rejected; regex family closed** | Clause anchoring repeated positive p95 of 74 ms first-visible and 883 ms end-to-end versus 1,235 ms and 2,481 ms unchanged, but fresh validation reached only `5/7` intended with `2/12` false activations. Use structured attachment state or an explicit action if revisited. |
 | Native model-load contract v1 | **Inconclusive retained research** | Reproduced the requested 16,384-token provider state and removed overflow, but added one irrelevant permission prompt and repeated at `1.258x` baseline p95, narrowly missing the `1.25x` gate. |
@@ -161,6 +162,7 @@ Use these repository-relative locations in the sibling
   `experiments/verdicts/2026-07-16-helper-call-latency-cohort-v1.md`,
   `2026-07-16-explicit-memory-tool-budget-v1.md`,
   `2026-07-16-explicit-memory-precedence-v2.md`,
+  `2026-07-17-explicit-memory-tool-budget-v3.md`,
   `2026-07-16-missing-attachment-clarification-v1.md`, and
   `2026-07-16-missing-attachment-request-clause-v2.md`, plus
   `2026-07-17-native-model-load-contract-v1.md` and

@@ -280,6 +280,14 @@ permission prompt during read-only recall. Provider state was restored exactly.
 Native provider-context v2 is therefore rejected before implementation: loading
 the larger context reliably would reproduce the known permission regression.
 
+The current-baseline conservative memory-tool revalidation also stopped at
+development. It activated on `3/4` fresh high-confidence recalls and `0/6`
+fresh negatives, removed two irrelevant permission prompts, tied public
+outcomes at `8/10`, and reduced observed p95. It nevertheless increased
+provider calls from 45 to 50, entirely on intended recalls. The frozen
+non-increasing call gate rejected it before repeat; the product branch was
+deleted and validation remains untouched.
+
 Two deterministic missing-attachment clarifiers also showed a genuine speed
 signal, reducing repeated positive p95 end-to-end latency from roughly 2.5
 seconds to 0.9 seconds with zero model calls. Both were rejected on fresh
@@ -306,7 +314,8 @@ model success.
 | Paused | QLoRA or rationale-distillation pilot | Adapted-model capacity | The first QLoRA smoke missed its held-in learning gate. Reopen only with a materially different predeclared training-data or rationale-distillation hypothesis. |
 | Closed | Distinct corrective local retrieval with abstention | Harness capability | Fresh route-agnostic validation found four wins but one forbidden exact-missing-file activation; three implementations are rejected and the family is closed pending a materially different existence signal |
 | Closed | Native provider-context contract v2 | Product quality | Current master at a verified 16K context reproduced the irrelevant memory-write permission prompt twice, so the large lifecycle candidate was not rebased |
-| 1 | Conservative explicit-memory tool budget revalidation | Harness capability and reliability | The original branch repeated one win with zero losses, `5/6` unseen recall coverage, and `0/8` false activations; the new 16K diagnostic reproduced the exact full-menu permission failure it is designed to prevent. Use a fresh precision-first risk/coverage suite and do not reuse the failed precedence expansion. |
+| Closed | Conservative explicit-memory tool budget revalidation | Harness capability and reliability | Fresh development repeated good precision (`3/4` positives, `0/6` negatives) and removed two permission prompts, but increased provider calls from 45 to 50; no repeat ran |
+| 1 | Current fixed-model answer-blind failure-map refresh | Diagnostic | Three successive routes have now failed hard gates. Aggregate existing current-master artifacts first; run at most one abridged fixed-model refresh only if needed to identify a repeated observable cluster with oracle headroom before more product code. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |
