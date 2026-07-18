@@ -141,6 +141,12 @@ calls and latency while tying or losing to unchanged Thaddeus.
   permission prompt and repeated at `1.258x` p95 versus the `1.25x` gate. A
   separate prepermission no-op candidate made correctness, prompts, calls, and
   latency worse. Both remain unmerged evidence; reliability is not promoted.
+- A current-master eligibility check held the same production SHA at a verified
+  16,384-token context for two identical three-turn runs. Both completed `3/3`,
+  passed `2/3` public contracts, used 13 provider calls, and raised the same
+  irrelevant `memory_store_facts` permission prompt. Native lifecycle v2 was
+  rejected before implementation; the exact original 8,192-token provider
+  configuration was restored.
 
 ## What is not working
 

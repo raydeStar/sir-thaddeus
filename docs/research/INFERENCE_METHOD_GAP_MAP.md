@@ -120,18 +120,22 @@ not evidence that a generalized verifier abstraction would earn its cost.
 
 ### 4. Native provider-context contract v2
 
-- Reason for rank: the 8K/16K mismatch is a real reliability defect, but v1
-  added a permission prompt and narrowly missed its latency ceiling.
+- Disposition: rejected before product implementation.
+- Result: two identical current-master runs at a verified 16K context each
+  completed `3/3`, passed `2/3` public contracts, and reproduced one irrelevant
+  `memory_store_facts` permission prompt. The provider was restored exactly.
 - Primary scorecard: product reliability, not capability.
-- Hypothesis: the frozen lifecycle mechanism removes overflow on the current
-  baseline without new prompts or more than `1.25x` p95.
+- Conclusion: the frozen lifecycle mechanism would reliably expose a product
+  state that still violates the permission gate. Do not rebase it until the
+  read-only memory tool surface is independently safe.
 - Activation: native provider metadata confirms the requested loaded instance.
 - Controls: unchanged JIT load, candidate load, already-loaded preservation.
 - Budget: three public contracts per arm, reversed order, under ten minutes.
 - Gate: zero overflow, no permission regression, same or better correctness,
   p95 within `1.25x`.
 - Stop: any new prompt, state displacement, or repeated latency miss.
-- Rollback: restore the exact provider instance and remove the candidate branch.
+- Rollback: completed without a product branch; the exact provider instance was
+  restored.
 
 ### Deferred mechanisms
 
@@ -145,13 +149,13 @@ not evidence that a generalized verifier abstraction would earn its cost.
 
 ## Selected next action
 
-No product implementation is authorized from the literal-response or rejected
-QLoRA-smoke results. The next capability experiment is the corrective
-local-retrieval lane, but only after freezing a stable local corpus and a
-distinct evidence-sufficiency failure cluster that the promoted Wiki packet and
-answer-only projection do not already solve. If that prerequisite cannot be
-established cheaply, run the native provider-context v2 reliability
-candidate instead. Reopen learning only with a materially different,
+The corrective local-retrieval and native provider-context candidates are now
+closed. The next product candidate is a current-baseline revalidation of the
+original conservative explicit-memory tool budget, not its rejected precedence
+follow-up. Fresh evidence must score precision, recall, public correctness,
+permission prompts, calls, and latency: the route may miss low-confidence
+recalls, but it may not intercept a write, research, file, web, or ordinary
+conversation request. Reopen learning only with a materially different,
 contamination-audited rationale-distillation or training-data hypothesis.
 
 ## Research basis
