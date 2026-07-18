@@ -33,6 +33,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Arithmetic Plan-and-Solve scaffold | **Rejected** | Compact one-pass planning did not improve LFM 1.2B strict correctness. |
 | Sampled self-consistency and tool-aware voting | **Rejected historically** | Added model calls and latency and did not beat unchanged controls. |
 | Native-checkpoint QLoRA training-path smoke v1 | **Rejected; plumbing retained in evaluator** | In 89.25 seconds, loss fell `6.8134 -> 2.2826` and a 884,736-parameter adapter saved/reloaded consistently, but held-in exact reproduction stayed `0/4` versus a frozen `3/4` gate. This is infrastructure evidence only, not a benchmark or capacity gain. |
+| Behavior-preserving selective science adapter | **Rejected; research branches deleted** | Fresh OpenBookQA improved `15/40 -> 19/40`, and generated MMLU-Pro science improved `0/30 -> 4/30` twice, but the adapter regressed a mixed guardrail from `8/10` to `6/10`. A format-independent option-content control tied native base at `8/30` with zero paired wins/losses, showing response-contract improvement rather than attributable knowledge gain. |
 | Historical raw-versus-harness 140-item result | **Consumed attribution evidence** | Different system prompts prevent routing attribution; it is not holdout or promotion evidence. |
 
 ## Tool and verification campaign
@@ -123,6 +124,11 @@ Use these repository-relative locations in the sibling
 
 - MMLU attribution and stop decision: `experiments/verdicts/baseline-mmlu-attribution-v1.md`
   and `experiments/verdicts/mmlu-campaign-stop-20260714.md`.
+- Selective science adaptation and format-independent attribution:
+  `experiments/verdicts/2026-07-18-behavior-preserving-logit-distillation-v1.md`,
+  `2026-07-18-selective-science-adapter-activation-v1.md`,
+  `2026-07-18-selective-science-adapter-cross-benchmark-v1.md`, and
+  `2026-07-18-selective-science-answer-selection-v1.md`.
 - General battery and evidence/calculator headroom:
   `experiments/verdicts/2026-07-15-general-capability-headroom-v1.md`.
 - Search and evidence sequence: `experiments/manifests/selective-evidence-v1.yaml`,
