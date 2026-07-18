@@ -157,7 +157,10 @@ another product mechanism immediately. First aggregate current-master artifacts
 answer-blind across the fixed 1.2B scorecards; run at most one abridged refresh
 if existing evidence cannot identify a repeated observable failure cluster with
 oracle headroom. Reopen learning only with a materially different,
-contamination-audited rationale-distillation or training-data hypothesis.
+contamination-audited rationale-distillation or training-data hypothesis. The
+[learning-capacity recalibration](LEARNING_CAPACITY_RECALIBRATION.md) now
+defines that lane: evaluator-only timing and ceiling preparation first, then at
+most one scale-only 512-example candidate on a fresh 120-item development slice.
 
 ## Research basis
 

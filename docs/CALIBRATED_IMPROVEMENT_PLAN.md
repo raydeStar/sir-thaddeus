@@ -2,8 +2,8 @@
 
 **Status:** active research plan
 
-**Calibrated:** July 16, 2026
-**Production baseline at calibration:** `8fc24ea`
+**Calibrated:** July 18, 2026
+**Production baseline at calibration:** `84f96e6`
 
 ## Decision
 
@@ -263,6 +263,11 @@ and restored `5/6` invariance, but fell to `9/30`. V2 was rejected and deleted.
 That third consecutive valid rejection pauses further MMLU candidate launches.
 Recalibration must distinguish data scale/coverage, model ceiling, and
 development-slice suitability before another learning mechanism is coded.
+The resulting
+[learning-capacity recalibration](research/LEARNING_CAPACITY_RECALIBRATION.md)
+keeps the consumed 30-item slice historical, requires evaluator-only ceiling
+and timing preparation, and permits at most one fresh scale-only full-support
+candidate before this rationale family is reconsidered.
 
 ### Phase 5 - Reduce latency without removing quality controls globally
 

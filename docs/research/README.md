@@ -14,9 +14,12 @@ that has already failed.
 3. [INFERENCE_METHOD_GAP_MAP.md](INFERENCE_METHOD_GAP_MAP.md) reconciles the
    research literature with current implementation seams, evidence, and the
    ranked experiment basket.
-4. [../CALIBRATED_IMPROVEMENT_PLAN.md](../CALIBRATED_IMPROVEMENT_PLAN.md)
+4. [LEARNING_CAPACITY_RECALIBRATION.md](LEARNING_CAPACITY_RECALIBRATION.md)
+   explains why the rationale-distillation campaign is paused and defines the
+   evaluator, scale, ceiling, and stop gates required before it resumes.
+5. [../CALIBRATED_IMPROVEMENT_PLAN.md](../CALIBRATED_IMPROVEMENT_PLAN.md)
    defines the current forward plan and stop rules.
-5. [../EXPERIMENTATION.md](../EXPERIMENTATION.md) defines the experiment
+6. [../EXPERIMENTATION.md](../EXPERIMENTATION.md) defines the experiment
    protocol; [../BENCHMARKING.md](../BENCHMARKING.md) defines the scorecards.
 
 ## Source of truth
