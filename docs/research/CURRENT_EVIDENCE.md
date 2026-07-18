@@ -2,7 +2,7 @@
 
 **Evidence cutoff:** July 18, 2026
 
-**Production baseline:** `b72ebb2`; answer-only successful-tool-evidence
+**Production baseline:** `88e994d`; answer-only successful-tool-evidence
 projection was promoted through product PR `#219`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
@@ -93,6 +93,16 @@ calls and latency while tying or losing to unchanged Thaddeus.
   `0/4` exact on its four held-in nonce mappings, below the frozen `3/4` gate,
   so the smoke is rejected. This proves the local training/save/reload plumbing
   is usable; it is not model-capacity or benchmark evidence.
+- A later behavior-preserving science adapter produced a reproducible generated
+  signal but no attributable knowledge gain. It moved fresh OpenBookQA from
+  `15/40` to `19/40` with nine wins and five losses, then moved generated,
+  parse-correct MMLU-Pro science from `0/30` to `4/30` twice. A frozen
+  answer-content likelihood control removed labels, generation, and parsing;
+  native base and adapter both selected `8/30` correct option texts with zero
+  paired wins or losses. The adapter changed four wrong selections into other
+  wrong selections. Treat this as response-contract learning evidence, not a
+  capacity improvement; its separate mixed-capability regression remains
+  disqualifying.
 - LFM 1.2B and Qwen 2B each produced `8/8` parsed, schema-valid forced tool
   calls through LM Studio. There is no current headroom for a content-recovery
   parser; the test remains useful for model intake.
@@ -166,7 +176,7 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - Blind regeneration, universal planning, and same-model self-critique have no
   demonstrated default-path value.
 
-### First QLoRA training-path smoke
+### Learning-based capacity attempts
 
 - The frozen held-in smoke did not establish even the deliberately narrow
   memorization signal required before a real adaptation campaign. Falling loss,
@@ -174,6 +184,11 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - The rejected adapter is not deployed. More steps, different targets, new
   data, or altered LoRA settings would be a new experiment; do not tune this
   smoke repeatedly until it passes.
+- Behavior-preserving logit distillation improved final-answer compliance but
+  regressed the frozen mixed-capability guardrail and did not improve
+  format-independent science answer selection. Do not infer knowledge from a
+  generated strict-score gain until an answer-content or equivalent
+  format-independent control confirms it.
 
 ### Forced tool use
 
@@ -265,10 +280,12 @@ calls and latency while tying or losing to unchanged Thaddeus.
   attempt requires a materially different observable seam, not another grammar
   revision.
 - Whether a separately designed rationale-distillation or QLoRA candidate can
-  improve fresh capacity holdouts remains unknown, but the first QLoRA
-  training-path smoke missed its own held-in learning gate. Reopening the lane
-  requires a materially different, predeclared data/mechanism hypothesis—not
-  a relaxed scorer or silent extension of the rejected run.
+  improve fresh capacity holdouts remains unknown. The first QLoRA smoke missed
+  its held-in learning gate, while the later selective science adapter improved
+  output compliance without improving answer-content ranking and regressed the
+  mixed guardrail. Reopening the lane requires a materially different,
+  predeclared data/mechanism hypothesis—not a relaxed scorer or silent extension
+  of either rejected run.
 - Whether runtime prompt budgeting can safely align with the provider's actual
   loaded context without weakening compaction, memory, safety, or continuity.
 - Whether no-change completion-repair attempts can be identified without

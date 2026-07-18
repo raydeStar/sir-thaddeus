@@ -243,6 +243,15 @@ adapter are rejected; no real training campaign or holdout consumption is
 authorized from it. Evaluator plumbing may remain. Reopening requires a new,
 materially different data or rationale-distillation hypothesis.
 
+A later behavior-preserving science adapter established a narrower lesson. It
+improved generated OpenBookQA and MMLU-Pro science scores, but regressed the
+mixed-capability guardrail. On a frozen format-independent attribution control,
+native base and adapter each ranked `8/30` correct option texts with zero paired
+wins or losses. The prior generated gain was therefore response-contract
+learning, not demonstrated knowledge gain. That adapter and its research
+branches are rejected; future learning candidates must predeclare a
+format-independent capacity metric alongside generated strict scoring.
+
 ### Phase 5 - Reduce latency without removing quality controls globally
 
 Objective: improve conversational feel after measuring which helper stages
@@ -311,7 +320,7 @@ model success.
 | Priority | Candidate | Primary scorecard | Why now |
 | ---: | --- | --- | --- |
 | Completed | Current-master postcondition and local-read recovery refresh | Harness capability diagnostic | Audited recovery produced four verified fresh gains but failed the exact-missing-resource boundary at 11/12 validity; the implementation was removed |
-| Paused | QLoRA or rationale-distillation pilot | Adapted-model capacity | The first QLoRA smoke missed its held-in learning gate. Reopen only with a materially different predeclared training-data or rationale-distillation hypothesis. |
+| Paused | QLoRA or rationale-distillation pilot | Adapted-model capacity | The first QLoRA smoke missed its held-in gate; the later selective science adapter improved response formatting but tied native answer-content ranking at `8/30` and regressed mixed capability. Reopen only with a materially different predeclared training-data or rationale-distillation hypothesis and a format-independent primary control. |
 | Closed | Distinct corrective local retrieval with abstention | Harness capability | Fresh route-agnostic validation found four wins but one forbidden exact-missing-file activation; three implementations are rejected and the family is closed pending a materially different existence signal |
 | Closed | Native provider-context contract v2 | Product quality | Current master at a verified 16K context reproduced the irrelevant memory-write permission prompt twice, so the large lifecycle candidate was not rebased |
 | Closed | Conservative explicit-memory tool budget revalidation | Harness capability and reliability | Fresh development repeated good precision (`3/4` positives, `0/6` negatives) and removed two permission prompts, but increased provider calls from 45 to 50; no repeat ran |
