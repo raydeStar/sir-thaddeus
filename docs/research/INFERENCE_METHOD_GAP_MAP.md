@@ -79,7 +79,7 @@ not evidence that a generalized verifier abstraction would earn its cost.
 - Stop: the mechanism family is closed; validation remains unconsumed.
 - Rollback: evaluator evidence only; write no product branch until the gate.
 
-### 2. Learning-lane dataset and QLoRA pilot
+### 2. Learning-lane dataset and QLoRA pilot — smoke rejected
 
 - Reason for rank: prompt-only capacity work reached its stop rule; weight
   adaptation is materially different and may move stable reasoning failures.
@@ -93,6 +93,13 @@ not evidence that a generalized verifier abstraction would earn its cost.
 - Gate: repeatable fresh-holdout gain with no leakage and acceptable breadth.
 - Stop: no dev learning signal, contamination risk, or holdout regression.
 - Rollback: delete the adapter; production remains on the frozen base.
+- Result: the contamination audit, native load, 40-step QLoRA run, adapter save,
+  and fresh reload completed in 89.25 seconds. Loss fell `6.8134 -> 2.2826`,
+  but held-in exact reproduction stayed `0/4` versus the frozen `3/4` gate.
+- Disposition: reject the smoke and do not start a real training campaign from
+  it. Retain only the evaluator plumbing and provenance record. A materially
+  different rationale-distillation or training-data hypothesis needs a new
+  predeclaration; changing steps or targets is not a continuation.
 
 ### 3. Distinct corrective local retrieval with abstention
 
@@ -138,14 +145,14 @@ not evidence that a generalized verifier abstraction would earn its cost.
 
 ## Selected next action
 
-No product implementation is authorized from the literal-response result. The
-next capability experiment is the rank-2 learning lane: prepare a contamination-
-audited, generalized QLoRA or rationale-distillation pilot for the frozen base
-model, with base/adapted and raw/harness arms kept separate. Before an expensive
-training run, use a tiny overfit-only smoke to prove the training path works;
-do not count that smoke as capability evidence. Corrective local retrieval
-remains the next harness-only option when a stable local corpus and a distinct
-evidence-sufficiency failure cluster are available.
+No product implementation is authorized from the literal-response or rejected
+QLoRA-smoke results. The next capability experiment is the corrective
+local-retrieval lane, but only after freezing a stable local corpus and a
+distinct evidence-sufficiency failure cluster that the promoted Wiki packet and
+answer-only projection do not already solve. If that prerequisite cannot be
+established cheaply, run the native provider-context v2 reliability
+candidate instead. Reopen learning only with a materially different,
+contamination-audited rationale-distillation or training-data hypothesis.
 
 ## Research basis
 
