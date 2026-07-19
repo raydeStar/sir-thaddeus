@@ -72,6 +72,15 @@ calls and latency while tying or losing to unchanged Thaddeus.
   before completion validation only when one unique verbatim scalar is proved
   by both the draft and successful tool evidence. This is harness capability,
   not closed-book model improvement.
+- Fail-closed unique local-file suffix resolution improved a fresh disjoint
+  16-case validation slice from `5/16` unchanged to `12/16` twice, with seven
+  paired wins, zero losses, `16/16` validity, and zero negative activations.
+  Candidate calls fell from 48 to 39 and tokens from 39,074 to 37,102; p50 and
+  p95 were lower in both orders. A 10,000-file synthetic root kept unique,
+  missing, and ambiguous resolution below 8 ms on the validation machine. The
+  resolver stays inside allowed roots, skips reparse points, and never applies
+  to writes. This is product capability and path reliability, not model
+  knowledge or MMLU improvement.
 - Gold or supplied document evidence produced a large DROP headroom signal:
   the tested model scored `5-6/10` with the passage and `0/10` without it. This
   justifies testing evidence retrieval and packaging, not assuming the current

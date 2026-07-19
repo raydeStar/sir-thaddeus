@@ -1,5 +1,5 @@
-using System.ComponentModel;
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
 using SirThaddeus.DocumentReader;
@@ -44,9 +44,16 @@ public static class FileTools
 
         try
         {
-            var resolvedPath = ResolveRequestedPath(path, out var resolutionError);
+            var resolvedPath = ResolveRequestedPath(
+                path,
+                allowUniqueFileSuffix: true,
+                out var uniqueSuffixApplied,
+                out var resolutionError);
             if (resolutionError is not null)
                 return resolutionError;
+
+            if (uniqueSuffixApplied)
+                Console.Error.WriteLine("[file_read] unique_suffix_resolution_applied");
 
             var fullPath = resolvedPath!;
             var accessError = ValidatePathAccess(fullPath);
@@ -115,9 +122,16 @@ public static class FileTools
 
         try
         {
-            var resolvedPath = ResolveRequestedPath(path, out var resolutionError);
+            var resolvedPath = ResolveRequestedPath(
+                path,
+                allowUniqueFileSuffix: true,
+                out var uniqueSuffixApplied,
+                out var resolutionError);
             if (resolutionError is not null)
                 return BuildError("path_resolution_failed", path);
+
+            if (uniqueSuffixApplied)
+                Console.Error.WriteLine("[file_read] unique_suffix_resolution_applied");
 
             var fullPath = resolvedPath!;
             var accessError = ValidatePathAccess(fullPath);
@@ -181,7 +195,11 @@ public static class FileTools
 
         try
         {
-            var resolvedPath = ResolveRequestedPath(path, out var resolutionError);
+            var resolvedPath = ResolveRequestedPath(
+                path,
+                allowUniqueFileSuffix: false,
+                out _,
+                out var resolutionError);
             if (resolutionError is not null)
                 return resolutionError;
 
@@ -225,7 +243,11 @@ public static class FileTools
 
         try
         {
-            var resolvedPath = ResolveRequestedPath(path, out var resolutionError);
+            var resolvedPath = ResolveRequestedPath(
+                path,
+                allowUniqueFileSuffix: false,
+                out _,
+                out var resolutionError);
             if (resolutionError is not null)
                 return BuildError("path_resolution_failed", path);
 
@@ -330,8 +352,13 @@ public static class FileTools
         }, JsonOpts);
     }
 
-    private static string? ResolveRequestedPath(string path, out string? error)
+    private static string? ResolveRequestedPath(
+        string path,
+        bool allowUniqueFileSuffix,
+        out bool uniqueSuffixApplied,
+        out string? error)
     {
+        uniqueSuffixApplied = false;
         error = null;
 
         if (string.IsNullOrWhiteSpace(path))
@@ -353,6 +380,13 @@ public static class FileTools
                 var candidateWithinRoot = Path.Combine(allowedRoots[0], trimmed);
                 if (File.Exists(candidateWithinRoot) || Directory.Exists(candidateWithinRoot))
                     return NormalizePath(candidateWithinRoot);
+            }
+
+            if (allowUniqueFileSuffix &&
+                AllowedRootFileResolver.TryResolveUniqueSuffix(trimmed, allowedRoots, out var suffixMatch))
+            {
+                uniqueSuffixApplied = true;
+                return NormalizePath(suffixMatch!);
             }
 
             return NormalizePath(trimmed);
