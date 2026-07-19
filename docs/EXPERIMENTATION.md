@@ -216,9 +216,10 @@ Treat `docs/ASSISTANT_PIPELINE.md` as the current production contract and
 Current conclusions include:
 
 - deterministic tools can create large gains on externally verifiable work;
-- a repeatable `10/20` raw versus `13/20` unchanged-harness development result
-  exists for the 1.2B model, but the broader 8B battery did not show a general
-  uplift, so no universal MMLU claim is established;
+- the stabilized 1.2B same-model MMLU control put raw, same-prompt direct,
+  current harness, and the historical product SHA at `10/20`; the saved
+  `13/20` harness repeats did not reproduce under the frozen runtime and remain
+  consumed historical observations rather than a current harness uplift;
 - three isolated MMLU candidates failed their gates and that campaign is paused
   pending a materially different mechanism;
 - sampled self-consistency and majority voting did not establish an uplift;

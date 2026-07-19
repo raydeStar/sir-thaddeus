@@ -133,7 +133,7 @@ The runtime binds to `127.0.0.1` on an ephemeral port. A bearer token rotates ea
 | --- | ---: | ---: | --- |
 | 1.2B model, six math tasks | **0 / 6** without tools | **5 / 6** with `calculator` | The harness improved the user outcome; it did not change closed-book model capacity. |
 | 20-item compute suite | roughly **0%** without tools | **43%** with `python_eval` | Tools help; model reasoning still sets the ceiling. |
-| 1.2B model, fixed 20-item MMLU-Pro development slice | **10 / 20** raw, twice | **13 / 20** unchanged harness, twice | A repeatable development signal for this model and slice, not promotion evidence or a universal harness gain. |
+| 1.2B model, stabilized 20-item MMLU-Pro development slice | **10 / 20** raw | **10 / 20** same-prompt direct, current harness, and historical product SHA | The saved **13 / 20** harness repeats did not reproduce under the frozen runtime. They remain consumed historical observations, not a current harness uplift. |
 | Native 1.2B model, held-in QLoRA training-path smoke | **0 / 4** exact before training | **0 / 4** exact after training; loss **6.81 -> 2.28** | Rejected on its frozen gate. The adapter saved and reloaded in 89 seconds, proving plumbing only—not generalization or a benchmark gain. |
 | 8B model, 50-item general-capability battery | **37 / 50** raw | **36 / 50** unchanged harness | No general uplift on this battery; broad claims remain unproven. |
 | MMLU-Pro sampled voting | **37.9%** unchanged | **27.9%** with voting | More inference made this model worse, so the experiment was removed. |
