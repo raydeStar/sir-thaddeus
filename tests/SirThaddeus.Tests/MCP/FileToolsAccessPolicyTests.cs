@@ -136,7 +136,7 @@ public sealed class FileToolsAccessPolicyTests
     }
 
     [Fact]
-    public async Task FileRead_ResolvesSuffixAfterLeadingCurrentDirectoryMarker()
+    public async Task FileRead_DoesNotSearchNestedFilesForLeadingCurrentDirectoryMarker()
     {
         var allowedRoot = CreateTempDirectory();
         var nested = Path.Combine(allowedRoot, "archive", "reviews");
@@ -145,7 +145,21 @@ public sealed class FileToolsAccessPolicyTests
 
         using var env = AllowedFileEnvironment(allowedRoot);
 
-        var result = await FileTools.FileRead("./reviews/launch-note.txt", cancellationToken: CancellationToken.None);
+        var result = await FileTools.FileRead("./launch-note.txt", cancellationToken: CancellationToken.None);
+
+        Assert.StartsWith("Error:", result, StringComparison.Ordinal);
+        Assert.DoesNotContain("Launch decision: GO", result, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FileRead_PreservesExactLeadingCurrentDirectoryPathWithinAllowedRoot()
+    {
+        var allowedRoot = CreateTempDirectory();
+        await File.WriteAllTextAsync(Path.Combine(allowedRoot, "launch-note.txt"), "Launch decision: GO");
+
+        using var env = AllowedFileEnvironment(allowedRoot);
+
+        var result = await FileTools.FileRead("./launch-note.txt", cancellationToken: CancellationToken.None);
 
         Assert.Contains("Launch decision: GO", result, StringComparison.Ordinal);
     }

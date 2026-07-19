@@ -74,8 +74,11 @@ internal static class AllowedRootFileResolver
             return false;
 
         var normalized = requestedPath.Trim().Replace('\\', '/');
-        while (normalized.StartsWith("./", StringComparison.Ordinal))
-            normalized = normalized[2..];
+        // A leading current-directory marker expresses exact relative intent.
+        // The ordinary exact-path branch may still resolve it, but optional
+        // suffix assistance must not reinterpret it as a nested basename.
+        if (normalized.StartsWith("./", StringComparison.Ordinal))
+            return false;
 
         if (normalized.Length == 0)
             return false;
