@@ -182,6 +182,11 @@ assemblies for each isolated repeat. `-SkipBuild` is available when a parent
 campaign such as `model-intake.ps1` has already prepared both Debug assemblies.
 Do not use it after source changes unless you have rebuilt first.
 
+The v2 hybrid adapter builds both `Thaddeus.Runtime` and the separately launched
+`SirThaddeus.McpServer` before its first case. This is required for experiments
+that change MCP tool implementations; rebuilding only the runtime can otherwise
+execute stale tool behavior from a previous branch.
+
 If a test id exists in more than one suite, pair it with `--suite`.
 
 Examples:

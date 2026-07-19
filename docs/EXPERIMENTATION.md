@@ -141,7 +141,22 @@ or an explicit escalation path, but it must remain a separate labeled control.
 
 ## Decision rules
 
-Predeclare numeric gates appropriate to the slice. As a default:
+Predeclare numeric gates appropriate to the slice. Separate hard gates from
+suggested decision signals:
+
+- **Hard gates** protect the claimed outcome and product invariants: strict
+  correctness or final state, activation, validity, safety, permissions,
+  false-success behavior, and any resource ceiling derived from a real product
+  SLO or mechanism-specific risk.
+- **Suggested signals** describe desirable efficiency direction: fewer calls,
+  fewer tokens, lower p50/p95, or a default percentage improvement. Missing a
+  suggested signal does not reject a material strict-outcome gain when the hard
+  non-regression budgets pass.
+- Do not turn a suggested signal into a hard gate after seeing a run. Conversely,
+  do not relabel a completed hard gate as suggested to promote its candidate;
+  predeclare a fresh revision on unconsumed inputs.
+
+As defaults:
 
 - require a meaningful net gain over both controls;
 - require activation telemetry or trace evidence before interpreting the score;
@@ -150,12 +165,23 @@ Predeclare numeric gates appropriate to the slice. As a default:
 - require a disjoint validation result in the same direction;
 - reject a candidate that wins only by changing scoring, prompts for one known
   fixture, task weights, exclusions, or hidden strong-model use;
-- reject resource regressions that exceed the declared latency or VRAM budget;
+- reject resource regressions that exceed a predeclared product or
+  mechanism-specific hard ceiling;
+- treat small-slice p95 and percentage token targets as advisory unless the
+  sample plan can support a tail estimate and the threshold maps to a product
+  SLO;
 - stop a mechanism family when oracle controls show that model semantics, not
   routing or execution, are the limiting factor.
 
 Do not average away paired losses. Report wins, losses, unchanged cases,
 category results, and repeat stability.
+
+For a harness-capability candidate, strict verified outcomes are normally the
+primary metric. Raw and same-prompt direct arms without the required capability
+are diagnostic attribution controls, not promotion competitors. Calls, tokens,
+and end-to-end latency remain guardrails; they need not improve by an arbitrary
+percentage when correctness improves materially and the declared non-regression
+budgets pass.
 
 ## Experiment branches
 
