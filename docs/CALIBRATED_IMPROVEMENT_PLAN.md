@@ -96,6 +96,11 @@ removed completely after rejection.
    production.
 12. Record promoted, rejected, inconclusive, and infrastructure results in
     [research/](research/README.md).
+13. Treat default token and latency percentages as suggested signals unless a
+    predeclared product SLO or mechanism-specific risk makes them hard. Never
+    soften safety, permission, validity, false-success, activation, or strict
+    outcome gates. Re-evaluate a promising miss only as a fresh revision on
+    unconsumed inputs; do not rewrite its completed verdict.
 
 ## Phased program
 

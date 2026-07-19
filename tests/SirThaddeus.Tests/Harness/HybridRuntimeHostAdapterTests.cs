@@ -113,6 +113,31 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
     }
 
     [Fact]
+    public void ResolveHybridBuildProjects_IncludesRuntimeAndMcpServer()
+    {
+        var runtimeProject = Path.Combine(
+            _root, "src", "Thaddeus.Runtime", "Thaddeus.Runtime.csproj");
+        var mcpProject = Path.Combine(
+            _root,
+            "apps", "mcp-server", "SirThaddeus.McpServer", "SirThaddeus.McpServer.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(runtimeProject)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(mcpProject)!);
+        File.WriteAllText(runtimeProject, "<Project />");
+        File.WriteAllText(mcpProject, "<Project />");
+
+        var projects = HybridRuntimeHostAdapter.ResolveHybridBuildProjects(_root);
+
+        Assert.Equal(2, projects.Count);
+        Assert.Contains(projects, path => path.EndsWith(
+            Path.Combine("src", "Thaddeus.Runtime", "Thaddeus.Runtime.csproj"),
+            StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(projects, path => path.EndsWith(
+            Path.Combine(
+                "apps", "mcp-server", "SirThaddeus.McpServer", "SirThaddeus.McpServer.csproj"),
+            StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void DiagnosticsReader_ExportsOnlyAllowlistedFieldsAndAggregatesTiming()
     {
         var logDirectory = Path.Combine(_root, "logs");

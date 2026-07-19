@@ -186,26 +186,50 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         {
             if (_runtimeBuilt) return;
 
-            var project = ResolveHybridRuntimeProject();
-            var build = new Process
+            foreach (var project in ResolveHybridBuildProjects(Directory.GetCurrentDirectory()))
             {
-                StartInfo = new ProcessStartInfo
+                using var build = new Process
                 {
-                    FileName = "dotnet",
-                    Arguments = $"build \"{project}\" -c Debug --no-restore",
-                    WorkingDirectory = Directory.GetCurrentDirectory(),
-                    UseShellExecute = false,
-                    CreateNoWindow = false
-                }
-            };
-            build.Start();
-            build.WaitForExit();
-            if (build.ExitCode != 0)
-                throw new InvalidOperationException(
-                    $"Hybrid runtime pre-build failed (exit {build.ExitCode}).");
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "dotnet",
+                        Arguments = $"build \"{project}\" -c Debug --no-restore",
+                        WorkingDirectory = Directory.GetCurrentDirectory(),
+                        UseShellExecute = false,
+                        CreateNoWindow = false
+                    }
+                };
+                build.Start();
+                build.WaitForExit();
+                if (build.ExitCode != 0)
+                    throw new InvalidOperationException(
+                        $"Hybrid dependency pre-build failed for '{project}' " +
+                        $"(exit {build.ExitCode}).");
+            }
 
             _runtimeBuilt = true;
         }
+    }
+
+    internal static IReadOnlyList<string> ResolveHybridBuildProjects(string repositoryRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        var root = Path.GetFullPath(repositoryRoot);
+        var projects = new[]
+        {
+            Path.Combine(
+                root,
+                "apps", "mcp-server", "SirThaddeus.McpServer", "SirThaddeus.McpServer.csproj"),
+            Path.Combine(root, "src", "Thaddeus.Runtime", "Thaddeus.Runtime.csproj")
+        };
+
+        foreach (var project in projects)
+        {
+            if (!File.Exists(project))
+                throw new FileNotFoundException("Hybrid dependency project not found.", project);
+        }
+
+        return projects;
     }
 
     private async Task EnsureRuntimeProcessAsync(CancellationToken cancellationToken)
@@ -873,16 +897,6 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         {
             // Best-effort.
         }
-    }
-
-    private static string ResolveHybridRuntimeProject()
-    {
-        var path = Path.Combine(
-            Directory.GetCurrentDirectory(),
-            "src", "Thaddeus.Runtime", "Thaddeus.Runtime.csproj");
-        if (!File.Exists(path))
-            throw new FileNotFoundException("Hybrid runtime project not found.", path);
-        return path;
     }
 
     private static string ResolveHybridRuntimeAssembly()
