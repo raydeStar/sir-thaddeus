@@ -26,6 +26,24 @@ Behind the scenes:
 User-visible copy is explicit: *"The assistant can READ files in these
 folders. It cannot write, modify, move, or delete anything."*
 
+### Safe incomplete-path recovery
+
+`file_read` first preserves the ordinary exact-path behavior. If that path does
+not exist, it may search authorized roots for a trailing relative path only
+when the reference is syntactically safe and exactly one file matches.
+
+- Bare filenames and directory-qualified suffixes can resolve uniquely.
+- `./name` remains exact current-directory intent and does not trigger a
+  recursive search. `./folder/name` may use the qualified suffix.
+- Missing and ambiguous matches fail closed.
+- Rooted paths, traversal, embedded `.` / `..` segments, empty segments,
+  wildcards, inaccessible enumeration, and reparse points do not receive
+  suffix assistance.
+- The resolver applies only to read operations. File writes are unchanged.
+
+The search never expands `ST_DOCUMENT_READER_ALLOWED_ROOTS`; final access
+validation still runs before content is returned.
+
 ## Write access — through the wiki only
 
 The assistant can create and edit markdown content in **one place**: the
