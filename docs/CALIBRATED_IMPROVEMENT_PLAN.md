@@ -4,6 +4,7 @@
 
 **Calibrated:** July 18, 2026
 **Production baseline at calibration:** `84f96e6`
+**Current production baseline:** `5d8b50a`
 
 ## Decision
 
@@ -15,6 +16,21 @@ damaging the others.
 The project will no longer treat a newer or larger comparison model as an
 improvement to the harness. Model comparisons remain useful as diagnostic
 ceilings, cross-model transfer checks, or explicit escalation studies.
+
+### July 19 harness redirect result
+
+The first verified-outcome redirect block is complete without a product
+candidate. On the frozen 32-task local development scorecard, raw minimal and
+unchanged Thaddeus each scored `9/32`, while same-prompt direct scored `6/32`.
+A scorer-blind declared-capability oracle reached `13/32` twice, but the compact
+product-invariant prompt form reached only `11/32` and missed its predeclared
+gate. Verified structured failure evidence also failed at `0/3` under the
+production prompt. The routing and failure-presentation paths are closed for
+this block; MMLU remains capacity-only, and no runtime behavior changed.
+
+The next candidate must begin with a fresh oracle-measured evidence-to-outcome
+failure cluster and independently verifiable success. Do not tune another
+conversation router or response-contract detector against the consumed slice.
 
 ## The claim we are testing
 

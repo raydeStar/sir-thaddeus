@@ -1,8 +1,8 @@
 # Current Evidence
 
-**Evidence cutoff:** July 18, 2026
+**Evidence cutoff:** July 19, 2026
 
-**Production baseline:** `88e994d`; answer-only successful-tool-evidence
+**Production baseline:** `5d8b50a`; answer-only successful-tool-evidence
 projection was promoted through product PR `#219`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
@@ -45,6 +45,11 @@ calls and latency while tying or losing to unchanged Thaddeus.
   traversal-safe disposable root, alongside existing Wiki final-state checks.
   The frozen local outcome battery covers tool aliases, irrelevant-tool
   negatives, local evidence, Wiki/file state, reasoning, and response contracts.
+- The harness redirect now has a clean 32-task verified-outcome development
+  baseline for the frozen 1.2B model. Raw and unchanged Thaddeus each completed
+  `9/32`; same-prompt direct completed `6/32`. The evaluator applies the same
+  required-tool, forbidden-tool, and observed-state contract to every arm, so a
+  direct answer cannot receive completion credit for guessing a tool outcome.
 
 ### Narrow harness gains
 
@@ -80,10 +85,24 @@ calls and latency while tying or losing to unchanged Thaddeus.
 
 ### Useful negative and diagnostic results
 
-- The four-arm MMLU attribution baseline found no two-item prompt or
-  orchestration-loss trigger. On the lower-bound LFM 1.2B development slice,
-  raw scored `10/20` twice and unchanged harness scored `13/20` twice. This is
-  encouraging development evidence, not validated universal uplift.
+- A scorer-blind declared-capability route combined the raw no-capability arm
+  with unchanged Thaddeus on capability-required tasks and reached `13/32`
+  twice, four outcomes above both controls. It is an evaluator-only ceiling:
+  runtime code cannot read evaluator capability declarations, and the raw arm
+  omits product identity, personality, memory, continuity, and safety context.
+- Replacing raw with a compact benchmark-agnostic Sir Thaddeus identity and
+  safety prompt reduced that composite to `11/32`, only two above both
+  controls, below the frozen `12/32` and `+3` gate. A second oracle supplied
+  verified structured tool-failure evidence under the production prompt and
+  scored `0/3`. No routing or failure-presentation product candidate was
+  created. The result bounds these mechanisms without weakening their gates.
+
+- The stabilized same-model MMLU rerun found no reproducible harness uplift.
+  With the exact LFM 1.2B Q4_K_M artifact loaded at context 8192 and parallel
+  one, raw, same-prompt direct, unchanged current Thaddeus, and the historical
+  product SHA each scored `10/20`. The saved `13/20` repeats remain consumed
+  historical observations, but they did not reproduce under the frozen runtime
+  and are not a current harness-capability claim. MMLU is now capacity-only.
 - The 50-item general-capability battery is a useful fast portfolio. On the 8B
   diagnostic run, raw scored `37/50` and unchanged harness `36/50`, so it did
   not support a general routing or prompt-expansion candidate.
@@ -109,7 +128,9 @@ calls and latency while tying or losing to unchanged Thaddeus.
   SciQ rationale adapter scored `10/30` with three paired wins and one loss.
   It missed the frozen `+3/30` gate, did not improve the already-high `7/8`
   held-in activation score, and reduced option-rotation invariance from `5/6`
-  to `4/6`. It remains an unmerged, explicitly mixed research result.
+  to `4/6`. The research PR was closed during redirect retirement and its
+  immutable branch history was archived; no adapter or runtime behavior was
+  merged.
 - Concise-evidence rationale v2 then compressed 55/64 SciQ supports by a median
   74.65% using an answer-blind deterministic sentence selector. The mechanism
   activated on all eight held-in score vectors and restored `5/6` rotation
