@@ -74,11 +74,15 @@ internal static class AllowedRootFileResolver
             return false;
 
         var normalized = requestedPath.Trim().Replace('\\', '/');
-        // A leading current-directory marker expresses exact relative intent.
-        // The ordinary exact-path branch may still resolve it, but optional
-        // suffix assistance must not reinterpret it as a nested basename.
+        // A leading current-directory basename expresses exact relative intent.
+        // A directory-qualified suffix still carries enough structure for the
+        // conservative unique-match rule without turning a basename into search.
         if (normalized.StartsWith("./", StringComparison.Ordinal))
-            return false;
+        {
+            normalized = normalized[2..];
+            if (!normalized.Contains('/', StringComparison.Ordinal))
+                return false;
+        }
 
         if (normalized.Length == 0)
             return false;

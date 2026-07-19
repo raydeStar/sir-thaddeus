@@ -152,6 +152,23 @@ public sealed class FileToolsAccessPolicyTests
     }
 
     [Fact]
+    public async Task FileRead_ResolvesDirectoryQualifiedSuffixAfterLeadingCurrentDirectoryMarker()
+    {
+        var allowedRoot = CreateTempDirectory();
+        var nested = Path.Combine(allowedRoot, "archive", "reviews");
+        Directory.CreateDirectory(nested);
+        await File.WriteAllTextAsync(Path.Combine(nested, "launch-note.txt"), "Launch decision: GO");
+
+        using var env = AllowedFileEnvironment(allowedRoot);
+
+        var result = await FileTools.FileRead(
+            "./reviews/launch-note.txt",
+            cancellationToken: CancellationToken.None);
+
+        Assert.Contains("Launch decision: GO", result, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task FileRead_PreservesExactLeadingCurrentDirectoryPathWithinAllowedRoot()
     {
         var allowedRoot = CreateTempDirectory();
