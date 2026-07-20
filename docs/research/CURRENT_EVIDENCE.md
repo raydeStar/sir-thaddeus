@@ -87,6 +87,14 @@ calls and latency while tying or losing to unchanged Thaddeus.
 
 ### Narrow harness gains
 
+- A typed-capability Wiki confirmation candidate prevented two unauthorized
+  root creations in development and exact repeat (`6/6` no-action states versus
+  `4/6` unchanged), then prevented one further mutation on a disjoint validation
+  slice (`6/6` versus `5/6`). It preserved all paired authorized and read-only
+  outcomes, used identical model-call counts, and stayed within the `1.25x` p95
+  guardrail. Validation also showed the 1.2B model still fails some authorized
+  writes for argument and selection reasons; the permission boundary improves
+  safety, not model capacity.
 - Explicit Wiki-root creation is the clearest promoted capability result. The
   expanded semantic selector scored `14/16` twice on unseen validation versus
   `9/16` for its frozen parent, with five paired wins, zero paired losses, full

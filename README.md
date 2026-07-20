@@ -70,6 +70,9 @@ When a protected capability is set to **Ask**, the turn pauses. You see the tool
 | Stop this call. | Approve only this action. | Remember it until you leave. | Update the visible policy. |
 
 File, web, system, screen, and memory capabilities stay independently configurable. Individual tools can override their group.
+Wiki mutations are deliberately stricter: each state-changing Wiki call asks
+for a fresh **Allow once** decision, even when its broader group or tool policy
+is **Always**. Read-only Wiki access continues to follow the configured policy.
 
 ## Answers Should Show Their Work
 
@@ -178,6 +181,7 @@ The July 2026 pass tightened the real answer and measurement paths rather than t
 | Windows-native output quirks could masquerade as model-load or reporting failures. | Model loading uses the real process exit code, reporting filters incidental stream records, and malformed summary data fails closed. | Infrastructure errors are less likely to be reported as model weakness—or as a misleading scorecard. |
 | Wiki page mutations required the model to carry opaque ids and versions across several calls. | By-name Wiki contracts resolve unique roots, folders, pages, and current versions inside the audited tool boundary; ambiguous targets fail closed. | Small models perform less mechanical bookkeeping while permissions, revisions, and concurrency checks remain intact. |
 | Explicit Wiki-root creation could be lost among many available tools. | A deterministic policy selects `wiki_root_create` only for explicit, unambiguous root requests and only on the first model round. | The model still supplies arguments and the normal permissioned tool loop executes the write. |
+| A mistaken Wiki write could ride a prior Session or Always grant. | Typed `WikiWrite` calls require a fresh call-scoped confirmation; Session, Always, per-tool Always, and developer Always cannot persist a bypass. | Two repeated development comparisons and disjoint validation prevented three observed unauthorized root creations without losing a paired authorized or read-only outcome or adding a model call. |
 | Attaching a multi-page Wiki scope concatenated pages until a large prompt budget was exhausted, so late or contradictory facts could be missed. | Root, folder, and all-Wiki attachments now rank pages against the question and compile up to four bounded extractive passages; source metadata stays outside the model packet. | Small models receive less irrelevant text without adding a classifier, embedding request, or extra model call. |
 | A small model could request the correct filename or trailing folder path but miss an authorized parent directory. | `file_read` resolves a safe suffix only when exactly one file matches inside allowed roots; explicit `./name`, unsafe syntax, ambiguity, and missing files fail closed. | The harness removes mechanical path bookkeeping without expanding permissions, guessing among files, or adding a model call. |
 
