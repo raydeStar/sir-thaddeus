@@ -36,6 +36,9 @@ updates:
       - "dependencies"
       - "automation"
     ignore:
+      # The immutable assets-v2 wheelhouse currently contains FastAPI 0.139.0.
+      - dependency-name: "fastapi"
+        versions: [">0.139.0"]
       # The packaged voice runtime is Python 3.11; NumPy 2.5+ requires 3.12.
       - dependency-name: "numpy"
         versions: [">=2.5"]
