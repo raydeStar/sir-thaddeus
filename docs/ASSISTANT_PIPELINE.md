@@ -49,6 +49,13 @@ boundary remains the final authority. This prevents a small model from turning
 a recognized non-action request into an unnecessary mutation attempt or
 permission prompt.
 
+Temporal deferral is evaluated at the same narrow Wiki-root seam. Future-date
+scheduling, a leading condition such as approval or event completion, and
+explicit "not now" language can withhold `wiki_root_create`. Immediate markers
+such as `now`, `today`, or `immediately`, future-purpose clauses, and temporal
+words inside root names remain eligible for ordinary creation. The policy is
+deterministic, adds no model call, and never schedules work for later.
+
 ## Attached local Wiki evidence
 
 When the user explicitly attaches an entire Wiki library, root, or folder, the

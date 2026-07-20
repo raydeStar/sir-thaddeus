@@ -87,6 +87,15 @@ calls and latency while tying or losing to unchanged Thaddeus.
 
 ### Narrow harness gains
 
+- Deterministic Wiki-root temporal-deferral pruning reproduced exactly on a
+  fresh 16-case development slice, improving `4/16` unchanged to `11/16` with
+  seven paired wins and zero losses. Disjoint validation improved `4/18` to
+  `13/18` with nine wins, zero losses, `10/10` deferred state preservation,
+  `8/8` immediate-control root-tool reachability, full validity, and model calls
+  reduced from 55 to 48. The candidate recognizes generalized future-date,
+  conditional-approval, post-event, and explicit-not-now language while
+  preserving immediate temporal distractors. This is tool precision and
+  permission-interruption reduction, not model capacity.
 - Deterministic Wiki-root non-action tool pruning reproduced on three fresh
   slices without changing the model or positive selector. V1 development and
   repeat each improved `6/12` to `9/12` with three wins and zero losses. A
@@ -98,6 +107,13 @@ calls and latency while tying or losing to unchanged Thaddeus.
   withholds only `wiki_root_create` when the existing policy already classifies
   the turn as informational, hypothetical, negated, or deferred. This is a
   tool-precision and permission-interruption gain, not model capacity.
+- Application-owned default-location schema projection remains unmerged
+  research. It reproduced `10/16` unchanged to `14/16` candidate in development
+  and exact repeat, then improved disjoint validation `10/22` to `17/22` with
+  seven wins and zero losses. It was rejected for promotion because one
+  deferred non-action activated the mutation projection, reducing candidate
+  validity to `21/22`. The promising branch is retained; the consumed prompt
+  must not be used to tune a replacement.
 - A typed-capability Wiki confirmation candidate prevented two unauthorized
   root creations in development and exact repeat (`6/6` no-action states versus
   `4/6` unchanged), then prevented one further mutation on a disjoint validation
