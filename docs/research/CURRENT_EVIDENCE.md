@@ -2,8 +2,9 @@
 
 **Evidence cutoff:** July 20, 2026
 
-**Production baseline:** `4d692444`; typed call-scoped Wiki write confirmation
-was promoted through product PR `#244`
+**Production baseline:** `d2771ce2`; exact-identity completion-repair
+termination was promoted through product PR `#250`, followed by documentation
+reconciliation in PR `#251`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -283,6 +284,19 @@ calls and latency while tying or losing to unchanged Thaddeus.
   `8/10`, and reduced observed p95. It also increased provider calls from 45 to
   50, entirely on intended recalls, so the frozen call gate rejected it before
   repeat. The temporary product branch was deleted.
+- Content-free prompt-envelope attribution then reproduced the explicit-memory
+  overflow twice at the exact frozen 8,192-token provider context. The main
+  request contained an estimated 1,594 message tokens and 8,455 tool-definition
+  tokens; with the 2,048-token output reserve, its estimated request budget was
+  12,097 tokens. The advertised 60-tool surface, not prompt construction or a
+  preliminary reasoning call, was the dominant overage.
+- An evaluation-only one-capability oracle repeated twice with the same model,
+  prompt, state, and settings. Exposing only the required read tool reduced the
+  estimated request budget to 3,890 tokens, left 4,302 tokens of headroom, and
+  satisfied the truthful empty-memory contract both times. This proves causal
+  headroom, but it does not reopen the conservative selector family: precedence
+  v2 was unsafe and current-master v3 increased provider calls. No behavior was
+  shipped from the diagnostic.
 - Content-free repair attribution then reproduced seven completion-repair
   attempts across two 15-turn cohorts: five generations were identical to
   their input and two changed generations were adopted. An exact ordinal
