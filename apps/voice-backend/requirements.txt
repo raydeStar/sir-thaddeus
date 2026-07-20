@@ -1,6 +1,6 @@
 # Voice backend dependencies
 # Install: pip install -r requirements.txt
-fastapi>=0.136.1
+fastapi>=0.139.2
 uvicorn[standard]>=0.51.0
 python-multipart>=0.0.26
 numpy>=2.5.1,<3
