@@ -4,7 +4,7 @@ fastapi>=0.139.2
 uvicorn[standard]>=0.51.0
 python-multipart>=0.0.32
 # The bundled runtime is Python 3.11; NumPy 2.5+ requires Python 3.12.
-numpy>=1.24,<2.5
+numpy>=2.4.6,<2.5
 faster-whisper>=1.2.1
 # Ensures VC++ runtime DLLs are available on fresh Windows machines where
 # ctranslate2/faster-whisper can otherwise crash the process during model load.
