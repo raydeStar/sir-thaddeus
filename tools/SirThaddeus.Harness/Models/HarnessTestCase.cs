@@ -163,6 +163,7 @@ public sealed record HarnessObservationRequest
 
     [JsonPropertyName("root_names")]
     [YamlMember(Alias = "root_names")]
+    // Empty means capture every Wiki root, including an explicitly empty snapshot.
     public List<string> RootNames { get; init; } = [];
 
     [JsonPropertyName("paths")]

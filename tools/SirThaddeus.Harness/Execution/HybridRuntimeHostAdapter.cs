@@ -631,11 +631,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         IReadOnlyList<HarnessObservationRequest> requests,
         CancellationToken cancellationToken)
     {
-        var rootNames = requests
-            .Where(request => string.Equals(request.Type, "wiki", StringComparison.OrdinalIgnoreCase))
-            .SelectMany(request => request.RootNames)
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .ToHashSet(StringComparer.Ordinal);
+        var (observeWiki, rootNames) = ResolveWikiObservationScope(requests);
         var filePaths = requests
             .Where(request => string.Equals(request.Type, "files", StringComparison.OrdinalIgnoreCase))
             .SelectMany(request => request.Paths)
@@ -643,11 +639,11 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             .Distinct(StringComparer.Ordinal)
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
-        if (rootNames.Count == 0 && filePaths.Length == 0)
+        if (!observeWiki && filePaths.Length == 0)
             return null;
 
         var snapshots = new List<ObservedWikiRoot>();
-        if (rootNames.Count > 0)
+        if (observeWiki)
         {
             Debug.Assert(_http is not null);
             using var rootsResponse = await _http!.GetAsync("api/wiki/roots", cancellationToken)
@@ -659,7 +655,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             foreach (var root in rootsDocument.RootElement.GetProperty("roots").EnumerateArray())
             {
                 var name = root.GetProperty("name").GetString() ?? string.Empty;
-                if (!rootNames.Contains(name))
+                if (rootNames.Count > 0 && !rootNames.Contains(name))
                     continue;
 
                 var rootId = root.GetProperty("id").GetString()
@@ -695,7 +691,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         }
 
         var state = new Dictionary<string, object>(StringComparer.Ordinal);
-        if (rootNames.Count > 0)
+        if (observeWiki)
         {
             state["wiki"] = new ObservedWikiState(
                 snapshots.OrderBy(root => root.Name, StringComparer.Ordinal).ToArray());
@@ -714,6 +710,19 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         }
 
         return JsonSerializer.SerializeToElement(state, JsonOptions);
+    }
+
+    internal static (bool ObserveWiki, HashSet<string> RootNames) ResolveWikiObservationScope(
+        IReadOnlyList<HarnessObservationRequest> requests)
+    {
+        var wikiRequests = requests
+            .Where(request => string.Equals(request.Type, "wiki", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var rootNames = wikiRequests
+            .SelectMany(request => request.RootNames)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.Ordinal);
+        return (wikiRequests.Length > 0, rootNames);
     }
 
     private string ResolveFilesRoot()
