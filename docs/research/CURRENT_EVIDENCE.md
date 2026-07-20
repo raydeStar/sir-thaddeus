@@ -408,12 +408,32 @@ calls and latency while tying or losing to unchanged Thaddeus.
   incorrect intent interception. A future path needs structured runtime/UI
   attachment state or an explicit user action.
 
+### Fresh outcome discovery v2
+
+- A source-audited bank of 24 newly authored tasks covered eight ordinary-work
+  categories. Sixteen balanced triage tasks were executed, with one frozen
+  local-file reserve used only after that category produced two misses.
+- Unchanged Thaddeus scored `7/16` strict and `11/16` valid. Verified
+  computation and verified state change each scored `2/2`; local-file
+  extraction scored `0/2` because neither triage task reached `file_read`.
+- The preauthored local-file reserve then passed `1/1`, including a successful
+  `file_read`. The apparent two-case cluster therefore did not reproduce as the
+  required three-case failure region, and no oracle or product candidate was
+  authorized.
+- One no-action case exposed an evaluator-observation defect rather than a
+  model failure: an explicitly requested Wiki observation with no roots was
+  treated as absent. Product PR `#256` now records an explicit empty Wiki state
+  while preserving omitted and named-scope behavior.
+- The staged screen used 17 model-evaluated cases and about 90 seconds of hot
+  model time. It demonstrates that cheap answer-blind discovery is practical,
+  but it does not establish prevalence weights or a new capability claim.
+
 ## What remains uncertain
 
-- Whether a larger fresh representative outcome battery confirms that direct
-  extraction and verified scalar-result delivery are the only broad
-  high-headroom regions for the frozen 1.2B model. The 12-task screen is a fast
-  causal map, not enough evidence for prevalence weights or a product change.
+- Whether a larger labeled outcome set reveals a repeated, oracle-correctable
+  failure region for the frozen 1.2B model. The fresh 16-task triage plus one
+  conditional reserve found no qualifying three-case cluster, so it is not
+  enough evidence for prevalence weights or another product mutation.
 - Whether compact local Wiki/document retrieval can approach the demonstrated
   gold-evidence ceiling and the conditional `6/6` compact-evidence result
   without flooding context or depending on unreliable public search. The V3
