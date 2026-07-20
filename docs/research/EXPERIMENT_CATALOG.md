@@ -109,6 +109,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 
 | Experiment | Disposition | Result and lesson |
 | --- | --- | --- |
+| Exact-identity completion-repair termination v1 | **Promoted** | Paired development, exact repeat, and disjoint validation preserved all public outcomes and changed-repair decisions while provider calls fell `124 -> 119`. Three savings were directly case-matched; stochastic differences are not attributed to the mechanism. Shipped in product PR `#250`. |
 | Helper-call activation and latency cohort v1 | **Diagnostic accepted; no router candidate** | Across 30 repeated turns, Footman used zero LLM calls and optional helpers were 10% of ordinary-conversation end-to-end time. Prompt construction was negligible. The actionable finding was a repeated 16K-runtime versus 8K-provider context overflow, not routing overhead. |
 | Explicit memory tool budget v1 | **Inconclusive retained research** | Removed the repeated overflow, exposed 9 instead of 60 tools, and produced one paired win with zero losses. Fresh validation reached `5/6` intended and `0/8` false activations, so the unmerged conservative branch is not promoted. |
 | Explicit memory precedence v2 | **Rejected; precedence family closed** | Early results repeated the win, but fresh validation routed four of ten browse, file, research, or system actions to memory. Simple precedence is unsafe for overlapping intent. |
@@ -197,7 +198,9 @@ Use these repository-relative locations in the sibling
   `2026-07-16-missing-attachment-clarification-v1.md`, and
   `2026-07-16-missing-attachment-request-clause-v2.md`, plus
   `2026-07-17-native-model-load-contract-v1.md` and
-  `2026-07-17-native-model-load-current-baseline-eligibility-v2.md`.
+  `2026-07-17-native-model-load-current-baseline-eligibility-v2.md`, followed
+  by `2026-07-20-repair-outcome-attribution-v1.md` and
+  `2026-07-20-identical-repair-revalidation-skip-v1.md`.
 
 ## Update rule
 

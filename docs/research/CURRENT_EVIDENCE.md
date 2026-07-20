@@ -283,6 +283,15 @@ calls and latency while tying or losing to unchanged Thaddeus.
   `8/10`, and reduced observed p95. It also increased provider calls from 45 to
   50, entirely on intended recalls, so the frozen call gate rejected it before
   repeat. The temporary product branch was deleted.
+- Content-free repair attribution then reproduced seven completion-repair
+  attempts across two 15-turn cohorts: five generations were identical to
+  their input and two changed generations were adopted. An exact ordinal
+  identity termination was promoted after paired development, exact repeat,
+  and disjoint 12-turn semantic validation preserved every public outcome and
+  every changed-repair adoption or rejection. Aggregate provider calls fell
+  `124 -> 119`; three savings were directly case-matched, while two additional
+  differences remain labeled stochastic helper activation rather than causal
+  savings. Product PR `#250` shipped the narrow invariant.
 
 ## What is not working
 
@@ -416,8 +425,6 @@ calls and latency while tying or losing to unchanged Thaddeus.
   so the 512-example scale test never trained and is not the next action.
 - Whether runtime prompt budgeting can safely align with the provider's actual
   loaded context without weakening compaction, memory, safety, or continuity.
-- Whether no-change completion-repair attempts can be identified without
-  storing response text and then removed at a capability-specific seam.
 - Whether native streaming can improve perceived latency without exposing a
   draft that later validation must replace.
 
