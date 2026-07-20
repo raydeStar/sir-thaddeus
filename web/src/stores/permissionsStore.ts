@@ -25,9 +25,10 @@ interface PermissionsStoreState {
 let unsubscribe: (() => void) | null = null;
 let started = false;
 
-/** Older runtimes omit `scope`; treat anything but 'tool' as 'group'. */
+/** Older runtimes omit `scope`; preserve known scopes and default to group. */
 function withScopeDefault(req: PendingPermission): PendingPermission {
-  return { ...req, scope: req.scope === 'tool' ? 'tool' : 'group' };
+  const scope = req.scope === 'tool' || req.scope === 'call' ? req.scope : 'group';
+  return { ...req, scope };
 }
 
 function enqueueUnique(queue: PendingPermission[], req: PendingPermission): PendingPermission[] {

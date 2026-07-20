@@ -39,6 +39,7 @@ export function PermissionModal() {
 
   const current = queue[0];
   const queued = queue.length;
+  const callScoped = current?.scope === 'call';
 
   // Checked = apply the decision group-wide. Defaults from the request's own
   // scope (missing scope = 'group'); a manual toggle only sticks for the
@@ -47,7 +48,7 @@ export function PermissionModal() {
     current && scopeChoice?.id === current.id
       ? scopeChoice.group
       : current
-        ? current.scope !== 'tool'
+        ? current.scope === 'group'
         : true;
 
   const prettyArgs = useMemo(() => {
@@ -72,7 +73,7 @@ export function PermissionModal() {
     if (submitting) return;
     setSubmitting(decision);
     try {
-      await resolve(current.id, decision, groupScope ? 'group' : 'tool');
+      await resolve(current.id, decision, callScoped ? 'call' : groupScope ? 'group' : 'tool');
     } finally {
       setSubmitting(null);
     }
@@ -107,7 +108,11 @@ export function PermissionModal() {
             >
               Allow <span className="font-mono text-[15px]">{current.tool}</span>?
             </h2>
-            <p className="mt-1 text-[13px] text-ink-muted">{meta.blurb}</p>
+            <p className="mt-1 text-[13px] text-ink-muted">
+              {callScoped
+                ? 'This changes local Wiki state and must be approved every time.'
+                : meta.blurb}
+            </p>
           </div>
         </div>
 
@@ -123,7 +128,7 @@ export function PermissionModal() {
           </pre>
         </div>
 
-        <label className="mt-4 flex cursor-pointer items-start gap-2.5">
+        {!callScoped ? <label className="mt-4 flex cursor-pointer items-start gap-2.5">
           <input
             type="checkbox"
             data-testid="permission-scope-checkbox"
@@ -139,7 +144,14 @@ export function PermissionModal() {
               Deny and Allow once always apply to this call only.
             </span>
           </span>
-        </label>
+        </label> : (
+          <p
+            className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200"
+            data-testid="permission-call-scope-notice"
+          >
+            This approval applies only to this action. Session and Always grants cannot bypass it.
+          </p>
+        )}
 
         <div className="mt-5 flex flex-wrap items-center gap-2">
           <button
@@ -162,7 +174,7 @@ export function PermissionModal() {
           >
             Allow once
           </button>
-          <button
+          {!callScoped ? <button
             type="button"
             data-testid="permission-session"
             onClick={() => act('session')}
@@ -170,8 +182,8 @@ export function PermissionModal() {
             className="rounded-full border border-line px-3.5 py-2 text-sm font-medium text-ink transition-colors hover:bg-accent-soft disabled:opacity-50"
           >
             For session
-          </button>
-          <button
+          </button> : null}
+          {!callScoped ? <button
             type="button"
             data-testid="permission-always"
             onClick={() => act('always')}
@@ -179,11 +191,11 @@ export function PermissionModal() {
             className="btn-primary"
           >
             Always
-          </button>
+          </button> : null}
         </div>
-        <p className="mt-3 text-center text-[11px] text-ink-subtle">
+        {!callScoped ? <p className="mt-3 text-center text-[11px] text-ink-subtle">
           "Always" updates your Settings for this category. You can change it in Settings → Permissions.
-        </p>
+        </p> : null}
       </div>
     </div>
   );
