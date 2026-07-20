@@ -29,6 +29,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Six-category gold-headroom screen | Evaluation infrastructure | **Retained; breadth gate rejected** | Compact scorer-blind support improved the frozen 1.2B model from `2/12` to `9/12` with seven wins, zero losses, and full validity. Extraction and verified arithmetic-result use cleared `2/2`; three policy/selection categories remained `1/2`, so only two of the required three categories established headroom. No product candidate was authorized. Evaluator PR `#92`. |
 | Fresh capability-closure scorecard | Evaluation infrastructure | **Retained; existing capabilities confirmed** | On 20 newly authored tasks, raw scored `4/20`, unchanged Thaddeus `15/20`, and compact gold support `19/20`. Thaddeus captured 13 of 15 gold-supported positive wins; Wiki extraction and explicit calculator use each reached `4/4`. Reliability remained `19/20` valid with `2/4` exact no-tool controls, and no category met the frozen residual-gap rule, so no new mechanism was authorized. Evaluator PR `#93`. |
 | Matched existing-capability ablation | Evaluation infrastructure | **Retained; reliability gate rejected** | With the same production pipeline in both arms, exposing existing tools and attachments improved `4/20` to `10/20`, with seven paired wins and one loss. Calculator work reached `4/4`; three broader capability categories reached only `1/4`, and one deferred no-action request changed state. The hard safety gate and eight-win floor rejected a new product candidate. Evaluator PR `#94`. |
+| Fresh outcome discovery v2 | Evaluation infrastructure | **Diagnostic complete; no candidate** | A 24-task source-audited bank yielded a balanced 16-task triage at `7/16` strict and `11/16` valid. Computation and verified state change each scored `2/2`; local-file extraction scored `0/2`, then its preauthored reserve passed `1/1` with `file_read`. No three-case cluster remained, so no oracle or product mutation ran. One empty-state observation defect was repaired separately in product PR `#256`. |
 
 ## Model-capacity campaign
 
@@ -159,6 +160,8 @@ Use these repository-relative locations in the sibling
   `experiments/verdicts/2026-07-20-capability-closure-scorecard-v1.md`.
 - Matched existing-capability ablation:
   `experiments/verdicts/2026-07-20-existing-capability-ablation-v1.md`.
+- Fresh outcome discovery v2:
+  `experiments/verdicts/2026-07-20-fresh-outcome-discovery-v2.md`.
 - Search and evidence sequence: `experiments/manifests/selective-evidence-v1.yaml`,
   `response-contract-evidence-v1.yaml`, `model-visible-search-evidence-v1.yaml`,
   `compact-search-evidence-envelope-v1.yaml`, and

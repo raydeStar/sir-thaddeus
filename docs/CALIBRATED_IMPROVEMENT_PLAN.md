@@ -2,9 +2,9 @@
 
 **Status:** active research plan
 
-**Calibrated:** July 18, 2026
+**Calibrated:** July 20, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `b7934c0`
+**Current production baseline:** `60000e4c`
 
 ## Decision
 
@@ -31,6 +31,16 @@ this block; MMLU remains capacity-only, and no runtime behavior changed.
 The next candidate must begin with a fresh oracle-measured evidence-to-outcome
 failure cluster and independently verifiable success. Do not tune another
 conversation router or response-contract detector against the consumed slice.
+
+### July 20 fresh outcome discovery result
+
+The staged fresh-outcome screen completed without authorizing another product
+candidate. Unchanged Thaddeus scored `7/16` strict and `11/16` valid across
+eight ordinary-work categories. The only clean two-case failure region was
+local-file extraction, but its preauthored reserve passed `1/1` with a
+successful `file_read`. No qualifying three-case cluster remained, so no oracle
+or product mutation ran. Invest next in economical labeled-outcome accumulation
+rather than another router, prompt, retrieval, or postcondition candidate.
 
 ## The claim we are testing
 
@@ -379,6 +389,7 @@ model success.
 | Closed | Conservative explicit-memory tool budget revalidation | Harness capability and reliability | Fresh development repeated good precision (`3/4` positives, `0/6` negatives) and removed two permission prompts, but increased provider calls from 45 to 50; no repeat ran |
 | Completed | Prompt-envelope and memory capability-surface attribution | Harness capability diagnostic | Two exact 8K full-surface repeats measured a 12,097-token request budget dominated by 8,455 estimated tool-definition tokens. A one-read-tool oracle repeated at 3,890 tokens with 4,302 headroom and passed the contract. This proves causal headroom but does not reopen the rejected selector family. |
 | Completed | Expand the representative verified-outcome scorecard | Evaluation infrastructure | The fresh 20-task expansion confirmed large fixed-model harness value (`4/20` raw to `15/20` unchanged) but found no repeated residual category large enough to authorize another mechanism. Preserve the consumed evidence and select the next experiment only from a fresh causal seam. |
+| Completed | Fresh outcome discovery v2 | Harness capability diagnostic | A balanced 16-task triage scored `7/16` strict and `11/16` valid. Local-file extraction missed `0/2`, but its preauthored reserve passed `1/1` with `file_read`, leaving no qualifying three-case cluster and authorizing no oracle or product candidate. The staged 17-case screen used about 90 seconds of hot model time. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |
