@@ -95,7 +95,8 @@ calls and latency while tying or losing to unchanged Thaddeus.
   reduced from 55 to 48. The candidate recognizes generalized future-date,
   conditional-approval, post-event, and explicit-not-now language while
   preserving immediate temporal distractors. This is tool precision and
-  permission-interruption reduction, not model capacity.
+  permission-interruption reduction, not model capacity. Promoted through
+  product PR `#248`.
 - Deterministic Wiki-root non-action tool pruning reproduced on three fresh
   slices without changing the model or positive selector. V1 development and
   repeat each improved `6/12` to `9/12` with three wins and zero losses. A
