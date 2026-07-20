@@ -1,7 +1,7 @@
 # Voice backend dependencies
 # Install: pip install -r requirements.txt
 fastapi>=0.136.1
-uvicorn[standard]>=0.46.0
+uvicorn[standard]>=0.51.0
 python-multipart>=0.0.26
 numpy>=1.24,<3
 faster-whisper>=1.2.1
