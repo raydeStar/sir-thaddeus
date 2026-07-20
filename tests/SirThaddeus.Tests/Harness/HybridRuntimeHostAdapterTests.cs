@@ -27,6 +27,10 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
                 ContextWindowTokens = 8192,
                 Temperature = 0.125,
             },
+            Mcp = new McpSettings
+            {
+                Permissions = new McpPermissionsSettings { Files = "always" }
+            }
         };
         var adapter = new HybridRuntimeHostAdapter(settings);
 
@@ -39,6 +43,8 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         Assert.Equal(321, llm.GetProperty("maxTokens").GetInt32());
         Assert.Equal(8192, llm.GetProperty("contextWindowTokens").GetInt32());
         Assert.Equal(0.125, llm.GetProperty("temperature").GetDouble());
+        var permissions = document.RootElement.GetProperty("permissions");
+        Assert.Equal("always", permissions.GetProperty("files").GetString());
     }
 
     [Fact]
@@ -48,6 +54,7 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
             {
               "id": "wiki-state",
               "user_message": "Update the page.",
+              "permission_decision": "once",
               "state_setup": {
                 "files": [{ "path": "notes/input.txt", "content": "local evidence" }],
                 "wiki_roots": [
@@ -72,6 +79,7 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         var test = JsonSerializer.Deserialize<HarnessTestCase>(json);
 
         Assert.NotNull(test);
+        Assert.Equal("once", test.PermissionDecision);
         Assert.Equal("Research", test.StateSetup.WikiRoots.Single().Name);
         Assert.Equal("notes/input.txt", test.StateSetup.Files.Single().Path);
         Assert.Equal("Plan", test.StateSetup.WikiRoots.Single().Pages.Single().Title);
@@ -81,6 +89,19 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         Assert.Equal("wiki", test.Observations[0].Type);
         Assert.Equal("Research", test.Observations[0].RootNames.Single());
         Assert.Equal("notes/input.txt", test.Observations[1].Paths.Single());
+    }
+
+    [Theory]
+    [InlineData("deny", "deny")]
+    [InlineData(" ONCE ", "once")]
+    [InlineData("always", "always")]
+    [InlineData("unexpected", "session")]
+    [InlineData(null, "session")]
+    public void NormalizePermissionDecision_UsesSupportedDecisionOrSessionDefault(
+        string? value,
+        string expected)
+    {
+        Assert.Equal(expected, HybridRuntimeHostAdapter.NormalizePermissionDecision(value));
     }
 
     [Fact]
