@@ -2,8 +2,8 @@
 
 **Evidence cutoff:** July 20, 2026
 
-**Production baseline:** `e5ffb45e`; fail-closed unique local-file suffix
-resolution was promoted through product PR `#233`
+**Production baseline:** `4d692444`; typed call-scoped Wiki write confirmation
+was promoted through product PR `#244`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
