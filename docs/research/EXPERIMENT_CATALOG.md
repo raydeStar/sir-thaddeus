@@ -22,6 +22,8 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Answer-only successful-tool-evidence projection | Harness capability | **Promoted through product PR `#219`** | Project one unique verbatim scalar only when it exists in both the sanitized draft and successful local tool evidence. Development repeated at `10/12` versus `5/12`; disjoint validation was `12/16` versus `8/16`, four wins, zero losses, full validity, and zero negative activations. Applied cases skip one completion-validator call. |
 | Fail-closed unique local-file suffix resolution | Harness capability | **Protected product PR `#233`** | Resolve an incomplete read path only when one authorized-root file has the requested safe suffix. Fresh validation repeated at `12/16` versus `5/16`, with seven wins, zero losses, full validity, zero negative activations, fewer calls/tokens, and lower latency. Explicit `./name`, ambiguity, unsafe syntax, and writes do not receive recursive assistance. |
 | Verified-outcome harness redirect scorecard | Evaluation infrastructure | **Accepted; no product behavior changed** | A frozen 32-task local scorecard applies required-tool, forbidden-tool, and observed-state verification to raw, same-prompt direct, and unchanged Thaddeus. Raw and harness each scored `9/32`; direct scored `6/32`. It is consumed development evidence, not the eventual 80% claim. Evaluator PR `#78`. |
+| Source-audited representative task pilot | Evaluation infrastructure | **Accepted; no product behavior changed** | Eleven public sources were audited for task, evaluation, or exclusion roles. Ten newly authored local tasks scored `3/10` raw and `4/10` unchanged harness, with two paired wins and one loss. One open-ended exact scorer was unsuitable, so the result is diagnostic rather than a capability claim. Evaluator PR `#90`. |
+| Six-category gold-headroom screen | Evaluation infrastructure | **Retained; breadth gate rejected** | Compact scorer-blind support improved the frozen 1.2B model from `2/12` to `9/12` with seven wins, zero losses, and full validity. Extraction and verified arithmetic-result use cleared `2/2`; three policy/selection categories remained `1/2`, so only two of the required three categories established headroom. No product candidate was authorized. Evaluator PR `#92`. |
 
 ## Model-capacity campaign
 
@@ -141,6 +143,9 @@ Use these repository-relative locations in the sibling
   `experiments/verdicts/2026-07-18-concise-evidence-rationale-distillation-v2.md`.
 - General battery and evidence/calculator headroom:
   `experiments/verdicts/2026-07-15-general-capability-headroom-v1.md`.
+- Source-audited representative tasks and the six-category headroom screen:
+  `experiments/verdicts/2026-07-19-representative-task-executable-v2.md` and
+  `experiments/verdicts/2026-07-20-gold-headroom-screen-v1.md`.
 - Search and evidence sequence: `experiments/manifests/selective-evidence-v1.yaml`,
   `response-contract-evidence-v1.yaml`, `model-visible-search-evidence-v1.yaml`,
   `compact-search-evidence-envelope-v1.yaml`, and
