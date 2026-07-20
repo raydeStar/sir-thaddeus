@@ -1,8 +1,8 @@
 # Inference Method Gap Map
 
 **Reconciled:** July 20, 2026
-**Production baseline:** `60000e4c`
-**Evaluator baseline:** `861c16bb`
+**Production baseline:** `af044548`
+**Evaluator baseline:** `bd3e2c89`
 
 This map ranks research mechanisms against Sir Thaddeus evidence. It does not
 replace the experiment ledger or promotion policy. Model capacity, fixed-model
@@ -43,7 +43,7 @@ activation before scoring.
 | Multi-model/specialist routing | Deferred | No 300-outcome complementary failure map; changing models does not improve the fixed model | Potentially high | Escalation can improve system outcomes | VRAM and routing latency | Strong if disclosed and paired | Attribution confusion and operational complexity | Keep deferred |
 | Broad conversational fast path/router rewrite | Rejected by measurement | Footman made zero LLM calls; optional helpers were 10% of ordinary-turn time; global validation/retry removal reduced quality | Medium | Limited measured upside | Engineering and regression cost | Product latency only | Quality, memory, safety, continuity | Do not reopen without a new measured blocker |
 | Capability-surface context headroom | Causally demonstrated; selector family closed | Repeated 8K attribution measured 8,455 estimated tool-definition tokens across 60 tools and a 12,097-token request budget; a one-read-tool oracle repeated with 4,302 tokens of headroom and passed the contract | High for small contexts | Prevent provider overflow and reduce irrelevant capability burden | Potentially lower prompt and permission cost | Strong for envelope size; weak for safe selection | Prior precedence was unsafe and conservative v3 increased calls | Keep as diagnostic evidence; require a materially different selector before reopening |
-| Fresh representative outcome discovery | Diagnostic complete; no candidate | A 16-task, eight-category triage scored `7/16` strict and `11/16` valid. The only two-case clean cluster, local-file extraction, passed its preauthored reserve with a successful `file_read`, so no three-case cluster remained | High as an evaluation method | Finds current failure regions without committing to architecture | 17 staged case evaluations; about 90 seconds hot model time | Strong for the observed cases, not prevalence | Small samples can create false clusters | Keep the staged method; accumulate labeled outcomes before another mutation |
+| Fresh representative outcome discovery | Diagnostic complete; no open candidate | V2 found no three-case cluster. V3 scored `19/32` strict and `31/32` valid; instruction contracts and multi-source synthesis each failed `3/4`, but both map to mechanism families already closed by stronger activation and safety evidence | High as an evaluation method | Finds current failure regions without committing to architecture | V3 used two 16-case invocations and about 101 seconds command time | Strong for observed cases, not prevalence | Synthetic mixes can create misleading clusters | Keep accumulating outcomes; require both prevalence and a materially open seam |
 
 ## Verification audit
 
@@ -58,8 +58,9 @@ activation before scoring.
 | `CompletionValidator` LLM fallback | LLM completeness heuristic | A same-model quality opinion | Independent verification; it fails open by design |
 | `RepairLoop` | Bounded same-model repair using observed feedback | One targeted retry was attempted; changed text was rechecked, while exactly identical text stopped without redundant revalidation | Correctness unless the triggering and final checks are external or deterministic |
 
-The current pieces are sufficient for another narrow postcondition. They are
-not evidence that a generalized verifier abstraction would earn its cost.
+The current pieces are sufficient to test another narrow postcondition only
+after a fresh open seam establishes oracle headroom. They are not evidence that
+a generalized verifier abstraction would earn its cost.
 
 ## Ranked experiment basket
 
@@ -152,17 +153,21 @@ not evidence that a generalized verifier abstraction would earn its cost.
 
 ## Selected next action
 
-The fresh failure-cluster census is complete. Its 16-task triage found two
-local-file misses, but the preauthored reserve passed with the correct
-`file_read`; no category produced the required three-case reproducible cluster.
-The run therefore authorizes no oracle and no new fixed-model runtime mutation.
+The expanded fresh failure-cluster census is complete. V3 found two numeric
+three-of-four clusters, instruction contracts and multi-source synthesis, but
+both belong to mechanism families already closed by stronger activation,
+safety, or resource evidence. The count alone therefore authorizes no oracle
+and no new fixed-model runtime mutation.
 
 Pause router, prompt, retrieval, and postcondition candidates until fresh
 labeled outcomes expose a repeated independently verifiable seam. The next
 investment is economical outcome accumulation for risk/coverage analysis and,
 eventually, calibrated abstention or disclosed specialist escalation. A new
 candidate still requires at least three aligned failures, answer-blind oracle
-headroom, and a mechanism materially different from the closed families.
+headroom, and a mechanism materially different from the closed families. The
+public benchmark fit audit supports borrowing deterministic-state and
+insufficient-information archetypes, but no audited external system is a free,
+local, sub-ten-minute drop-in scorecard for the current capability surface.
 
 ## Research basis
 
