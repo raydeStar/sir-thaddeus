@@ -161,16 +161,27 @@ public sealed class ToolLoopStep : ITurnStep
                 : null;
             if (tools is not null)
             {
-                var projectedTools = WikiRootNonActionToolPolicy.Project(
+                var temporalProjectedTools = WikiRootTemporalDeferralToolPolicy.Project(
                     context.UserText,
                     forcedTool,
                     tools);
                 if (round == 0)
-                    LogWikiRootNonActionActivation(context, !ReferenceEquals(projectedTools, tools));
-                tools = projectedTools;
+                    LogWikiRootTemporalDeferralActivation(
+                        context,
+                        !ReferenceEquals(temporalProjectedTools, tools));
+                var nonActionProjectedTools = WikiRootNonActionToolPolicy.Project(
+                    context.UserText,
+                    forcedTool,
+                    temporalProjectedTools);
+                if (round == 0)
+                    LogWikiRootNonActionActivation(
+                        context,
+                        !ReferenceEquals(nonActionProjectedTools, temporalProjectedTools));
+                tools = nonActionProjectedTools;
             }
             else if (round == 0)
             {
+                LogWikiRootTemporalDeferralActivation(context, activated: false);
                 LogWikiRootNonActionActivation(context, activated: false);
             }
             if (round == 0 && string.IsNullOrWhiteSpace(forcedTool) && tools is not null)
@@ -538,6 +549,18 @@ public sealed class ToolLoopStep : ITurnStep
             "EXPERIMENT_ACTIVATION",
             $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
             "event=wiki_root_non_action_pruning " +
+            $"decision={(activated ? "activated" : "inactive")}");
+    }
+
+    private void LogWikiRootTemporalDeferralActivation(TurnContext context, bool activated)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_root_temporal_deferral_pruning " +
             $"decision={(activated ? "activated" : "inactive")}");
     }
 

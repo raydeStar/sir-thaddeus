@@ -1034,6 +1034,75 @@ public class ToolLoopStepTests
             entry.Message.Contains("decision=activated", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("Create a Wiki Canvas root named Elm Ledger tomorrow, not now.")]
+    [InlineData("Please set up a wiki root called Fjord Papers next week.")]
+    [InlineData("When I approve it, create a Wiki Canvas root named Grove Register.")]
+    [InlineData("Only after I confirm, initialize a wiki root called Harbor Journal.")]
+    [InlineData("After we finish the review, establish a Wiki Canvas root named Indigo Archive.")]
+    [InlineData("Once the budget is signed off, build a wiki root called Juniper Notebook.")]
+    public async Task Temporal_deferral_withholds_root_mutation_tool(string prompt)
+    {
+        var llm = new FakeLlm(LlmReply.Final("Ready."));
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, log: (eventName, message) => logs.Add((eventName, message)));
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs =
+            [
+                ToolDefinitionFor("wiki_root_create"),
+                ToolDefinitionFor("wiki_roots_list"),
+            ],
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.Null(llm.ForcedToolNames[0]);
+        var advertised = Assert.Single(llm.ReceivedTools)!;
+        Assert.DoesNotContain(advertised, tool => tool.Function.Name == "wiki_root_create");
+        Assert.Contains(advertised, tool => tool.Function.Name == "wiki_roots_list");
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_root_temporal_deferral_pruning", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("Create a Wiki Canvas root named Tomorrow Notes now.")]
+    [InlineData("Create a wiki root called Meeting Atlas now for tomorrow's planning session.")]
+    [InlineData("Create a Wiki Canvas root named Planning Brief for tomorrow's meeting.")]
+    [InlineData("Initialize a Wiki Canvas root named After Review Archive right now.")]
+    [InlineData("Build a wiki root called Launch Notes immediately; we will use it after sign-off.")]
+    [InlineData("Set up a Wiki Canvas root named Next Week Ledger now.")]
+    [InlineData("Create a wiki root called Eventually Better now.")]
+    [InlineData("Create a Wiki Canvas root named Daily Brief today; we can populate it tomorrow.")]
+    public async Task Immediate_temporal_context_retains_root_mutation_tool(string prompt)
+    {
+        var llm = new FakeLlm(LlmReply.Final("Ready."));
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, log: (eventName, message) => logs.Add((eventName, message)));
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs = [ToolDefinitionFor("wiki_root_create")],
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.Equal("wiki_root_create", llm.ForcedToolNames[0]);
+        var advertised = Assert.Single(llm.ReceivedTools)!;
+        Assert.Contains(advertised, tool => tool.Function.Name == "wiki_root_create");
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_root_temporal_deferral_pruning", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=inactive", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task Explicit_root_creation_retains_root_mutation_tool()
     {
