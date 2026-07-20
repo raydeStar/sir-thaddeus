@@ -128,13 +128,37 @@ public sealed class ToolPermissionGate
         // Per-tool override layer (most-specific wins). Consulted before the
         // group session cache and the group policy.
         var toolOverride = ToolGroupPolicy.ResolveToolOverride(doc.Permissions?.ToolOverrides, canonical);
-        switch (toolOverride)
+        if (string.Equals(toolOverride, "off", StringComparison.OrdinalIgnoreCase))
         {
-            case "off":
+            _logger.LogInformation(
+                "tool.permission.denied_by_tool_override tool={Tool} group={Group}",
+                canonical, group);
+            return ToolPermissionDecision.Deny;
+        }
+
+        // Wiki mutations always require a fresh, call-scoped confirmation.
+        // This is capability-based rather than language-based: a mistaken model
+        // call cannot ride a prior group session grant, group Always policy,
+        // per-tool Always override, or developer Always override. Explicit Off
+        // policies above still fail closed without prompting.
+        if (ToolCapabilityRegistry.ResolveCapability(canonical) == ToolCapability.WikiWrite)
+        {
+            if (toolOverride is null &&
+                string.Equals(ResolveEffectivePolicy(doc.Permissions, group), "off", StringComparison.Ordinal))
+            {
                 _logger.LogInformation(
-                    "tool.permission.denied_by_tool_override tool={Tool} group={Group}",
+                    "tool.permission.denied_by_policy tool={Tool} group={Group}",
                     canonical, group);
                 return ToolPermissionDecision.Deny;
+            }
+
+            return await AskUserAsync(
+                toolName, canonical, argumentsJson, threadId, turnId, group, "call", ct)
+                .ConfigureAwait(false);
+        }
+
+        switch (toolOverride)
+        {
             case "always":
                 return ToolPermissionDecision.Allow;
             case "ask":
@@ -184,14 +208,20 @@ public sealed class ToolPermissionGate
     /// against the single canonical tool the prompt was raised for. The scope
     /// carried by the response is honored regardless of the prompt's own
     /// <see cref="PendingPermission.Scope"/> — a user may answer a per-tool
-    /// prompt with a group-wide grant, or vice versa. Deny/Once never
-    /// persist and never cache, for either scope.</para>
+    /// prompt with a group-wide grant, or vice versa. A server-issued
+    /// <c>call</c> scope is authoritative: every response applies only to the
+    /// current mutation even if an older client submits Session or Always.
+    /// Deny/Once never persist and never cache, for any scope.</para>
     /// </summary>
     public bool Respond(string id, ToolPermissionResponse decision, string scope = "group")
     {
         if (!_pending.TryRemove(id, out var pending)) return false;
 
         var toolScoped = string.Equals(scope, "tool", StringComparison.OrdinalIgnoreCase);
+        var callScoped = string.Equals(
+            pending.Snapshot.Scope,
+            "call",
+            StringComparison.OrdinalIgnoreCase);
 
         switch (decision)
         {
@@ -202,12 +232,21 @@ public sealed class ToolPermissionGate
                 pending.Completion.TrySetResult(ToolPermissionDecision.Allow);
                 break;
             case ToolPermissionResponse.Session:
-                if (toolScoped) _sessionAllowTool[pending.Canonical] = true;
-                else _sessionAllow[pending.Group] = true;
+                if (!callScoped)
+                {
+                    if (toolScoped) _sessionAllowTool[pending.Canonical] = true;
+                    else _sessionAllow[pending.Group] = true;
+                }
                 pending.Completion.TrySetResult(ToolPermissionDecision.Allow);
                 break;
             case ToolPermissionResponse.Always:
-                if (toolScoped)
+                if (callScoped)
+                {
+                    // A stale or non-UI client may still submit Always. Honor
+                    // the current explicit approval but never persist or cache
+                    // it for a call-scoped mutation.
+                }
+                else if (toolScoped)
                 {
                     _sessionAllowTool[pending.Canonical] = true;
                     _ = PersistToolAlwaysAsync(pending.Canonical); // fire-and-forget
@@ -469,9 +508,9 @@ public sealed record PendingPermission(
     string ThreadId,
     string TurnId,
     DateTimeOffset CreatedAt,
-    // "group" (the prompt was raised for the whole capability group) or
-    // "tool" (an explicit per-tool "ask" override). The UI uses this to pick
-    // a default response scope; the response may still override it.
+    // "group" (the prompt was raised for the whole capability group),
+    // "tool" (an explicit per-tool "ask" override), or "call" (the action
+    // must be confirmed every time). The UI uses this to constrain choices.
     string Scope = "group");
 
 /// <summary>Wire format for GET /api/permissions/catalog.</summary>

@@ -71,6 +71,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
     private CancellationTokenSource? _wsCts;
     private Process? _process;
     private bool _processSpawnedThisCall;
+    private string _permissionDecision = "session";
 
     // Per-turn event capture. ExecuteAsync sets these before posting the
     // chat message; the WS reader publishes into them as events arrive.
@@ -93,6 +94,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(test);
+
+        _permissionDecision = NormalizePermissionDecision(test.PermissionDecision);
 
         var totalStopwatch = Stopwatch.StartNew();
 
@@ -309,8 +312,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         // v2 reads runtime-settings.json from the lock file's directory by
         // default. Start from the complete production defaults, then override
         // the evaluator's frozen provider settings so LM Studio expectations
-        // match v1's. Permissions stay "ask" by default — the harness
-        // auto-approves via the WS permission flow.
+        // match v1's. Permission policies mirror evaluator configuration;
+        // interactive decisions still travel through the real WS + REST flow.
         var llm = _baseSettings.Llm;
         var baseUrl = llm.BaseUrl;
         if (!string.IsNullOrWhiteSpace(baseUrl) && !baseUrl.EndsWith("/v1"))
@@ -345,7 +348,16 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             {
                 AllowedRoots = [filesRoot],
                 DisableAllFileAccess = false
-            }
+            },
+            Permissions = new PermissionsSettings(
+                DeveloperOverride: _baseSettings.Mcp.Permissions.DeveloperOverride,
+                Screen: _baseSettings.Mcp.Permissions.Screen,
+                Files: _baseSettings.Mcp.Permissions.Files,
+                System: _baseSettings.Mcp.Permissions.System,
+                Web: _baseSettings.Mcp.Permissions.Web,
+                MemoryRead: _baseSettings.Mcp.Permissions.MemoryRead,
+                MemoryWrite: _baseSettings.Mcp.Permissions.MemoryWrite,
+                ToolOverrides: _baseSettings.Mcp.Permissions.ToolOverrides)
         };
 
         var settingsPath = Path.Combine(sandboxRoot, "runtime-settings.json");
@@ -484,7 +496,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
 
             using var resp = await _http.PostAsJsonAsync(
                 "api/permissions/respond",
-                new { id = pendingId, decision = "session" },
+                new { id = pendingId, decision = _permissionDecision },
                 JsonOptions);
             // Ignore failures; the runtime will time out the request and
             // the test will surface that as a failure organically.
@@ -494,6 +506,14 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             // Best-effort: a permission-respond failure shouldn't crash
             // the WS reader.
         }
+    }
+
+    internal static string NormalizePermissionDecision(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized is "deny" or "once" or "session" or "always"
+            ? normalized
+            : "session";
     }
 
     private async Task ApplyHarnessResetAsync(HarnessTestCase test, CancellationToken cancellationToken)

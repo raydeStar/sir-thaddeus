@@ -285,6 +285,10 @@ The assistant never links tool implementations directly into the chat surface. I
 - Tool groups are classified into safe, screen, files, system, web, memory-read, and memory-write lanes.
 - Meta/time tools are effectively safe or low-risk; dangerous groups can be `off`, `ask`, or `always`.
 - `Session` approvals are cached in-process. `Always` updates persisted settings.
+- Typed `WikiWrite` capabilities are call-scoped exceptions: an explicit
+  `Off` still denies immediately, while any otherwise permitted mutation asks
+  for a fresh confirmation. Session and Always responses can approve only that
+  call and are neither cached nor persisted. Wiki reads retain normal policy.
 - File-access settings are turned into `ST_DOCUMENT_READER_*` environment variables for the MCP child process.
 - When the MCP child is missing or still warming up, tool calls degrade to a bounded unavailable message instead of taking the runtime down.
 

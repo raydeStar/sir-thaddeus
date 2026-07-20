@@ -27,6 +27,16 @@ public sealed record HarnessTestCase
     [YamlMember(Alias = "allowed_tools")]
     public List<string> AllowedTools { get; init; } = [];
 
+    /// <summary>
+    /// Evaluator-owned response to an interactive runtime permission request.
+    /// Defaults to the historical session approval. Safety suites can use
+    /// <c>deny</c> or <c>once</c> to model the user's decision without changing
+    /// production permission policy or exposing scorer data to the model.
+    /// </summary>
+    [JsonPropertyName("permission_decision")]
+    [YamlMember(Alias = "permission_decision")]
+    public string PermissionDecision { get; init; } = "session";
+
     [JsonPropertyName("mode")]
     [YamlMember(Alias = "mode")]
     public string Mode { get; init; } = "headless";

@@ -182,6 +182,90 @@ public class RuntimePermissionGateAdapterTests
         Assert.Equal("ask", perms.Web); // group policy untouched
     }
 
+    [Fact]
+    public async Task WikiWrite_RequiresCallScopedConfirmation_WhenSystemPolicyIsAlways()
+    {
+        using var fixture = new GateFixture(systemPolicy: "always");
+
+        var pending = await DriveToPromptAsync(fixture.Gate, "wiki_root_create");
+
+        Assert.Equal("call", pending.Pending.Scope);
+        Assert.Equal("System", pending.Pending.Group);
+        Assert.True(fixture.Gate.Respond(
+            pending.Pending.Id,
+            ToolPermissionResponse.Once,
+            "call"));
+        Assert.Equal(ToolPermissionDecision.Allow, await pending.Decision);
+    }
+
+    [Theory]
+    [InlineData(ToolPermissionResponse.Session)]
+    [InlineData(ToolPermissionResponse.Always)]
+    public async Task WikiWrite_CallScope_NeverCachesOrPersistsBroaderGrant(
+        ToolPermissionResponse response)
+    {
+        using var fixture = new GateFixture(
+            systemPolicy: "always",
+            toolOverrides: new Dictionary<string, string>
+            {
+                ["wiki_root_create"] = "always",
+            });
+
+        var first = await DriveToPromptAsync(fixture.Gate, "wiki_root_create");
+        Assert.True(fixture.Gate.Respond(first.Pending.Id, response, "group"));
+        Assert.Equal(ToolPermissionDecision.Allow, await first.Decision);
+
+        var second = await DriveToPromptAsync(fixture.Gate, "wiki_root_create");
+        Assert.Equal("call", second.Pending.Scope);
+        Assert.True(fixture.Gate.Respond(
+            second.Pending.Id,
+            ToolPermissionResponse.Deny,
+            "call"));
+        Assert.Equal(ToolPermissionDecision.Deny, await second.Decision);
+
+        Assert.Equal("always", fixture.Store.Current.Permissions!.System);
+        Assert.Equal(
+            "always",
+            fixture.Store.Current.Permissions.ToolOverrides!["wiki_root_create"]);
+    }
+
+    [Fact]
+    public async Task WikiWrite_ExplicitOff_DeniesWithoutPrompt()
+    {
+        using var fixture = new GateFixture(
+            systemPolicy: "always",
+            toolOverrides: new Dictionary<string, string>
+            {
+                ["wiki_root_create"] = "off",
+            });
+
+        var decision = await fixture.Gate.DecideAsync(
+            "wiki_root_create",
+            "{\"name\":\"Blocked\"}",
+            "t1",
+            "turn1",
+            CancellationToken.None);
+
+        Assert.Equal(ToolPermissionDecision.Deny, decision);
+        Assert.Empty(fixture.Gate.ListPending());
+    }
+
+    [Fact]
+    public async Task WikiRead_DoesNotRequireCallScopedConfirmation()
+    {
+        using var fixture = new GateFixture(systemPolicy: "always");
+
+        var decision = await fixture.Gate.DecideAsync(
+            "wiki_page_read",
+            "{}",
+            "t1",
+            "turn1",
+            CancellationToken.None);
+
+        Assert.Equal(ToolPermissionDecision.Allow, decision);
+        Assert.Empty(fixture.Gate.ListPending());
+    }
+
     // ── Catalog shape ──────────────────────────────────────────────────
 
     [Fact]
@@ -298,6 +382,8 @@ public class RuntimePermissionGateAdapterTests
 
         public GateFixture(
             string webPolicy = "ask",
+            string filesPolicy = "ask",
+            string systemPolicy = "ask",
             bool offlineMode = false,
             Dictionary<string, string>? toolOverrides = null)
         {
@@ -305,6 +391,8 @@ public class RuntimePermissionGateAdapterTests
             var perms = defaults.Permissions! with
             {
                 Web = webPolicy,
+                Files = filesPolicy,
+                System = systemPolicy,
                 ToolOverrides = toolOverrides,
             };
             var doc = defaults with

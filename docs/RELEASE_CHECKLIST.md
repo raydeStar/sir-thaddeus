@@ -75,6 +75,10 @@ Use this checklist before declaring Sir Thaddeus v1 ready. Mark skipped checks w
 - [ ] **For session** path: tool runs; next call does not prompt.
 - [ ] **Always** path: tool runs; the decision persists in `~/.thaddeus/runtime-settings.json`. Restart and confirm no re-prompt.
 - [ ] Confirm persisted policy is visible or reflected in behavior.
+- [ ] With Wiki writes configured to **Always**, request a Wiki mutation and
+      confirm the modal exposes only **Deny** and **Allow once**.
+- [ ] Approve one Wiki mutation, request a second, and confirm it prompts again.
+- [ ] Confirm a Wiki read still follows its normal configured group policy.
 
 ## MCP Web Tool Test
 

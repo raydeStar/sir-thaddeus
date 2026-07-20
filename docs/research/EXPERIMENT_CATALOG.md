@@ -9,6 +9,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 
 | Campaign | Lane | Disposition | Reusable conclusion |
 | --- | --- | --- | --- |
+| Typed Wiki write confirmation | Product safety | **Validated; protected PR pending** | Every `WikiWrite` call gets a fresh confirmation even after Session or Always grants. Development and exact repeat each preserved `6/6` no-action states versus `4/6`; disjoint validation preserved `6/6` versus `5/6`, with no paired authorized/read loss or extra model call. This is a permission gain, not a model-capacity gain. |
 | Expanded semantic Wiki-root language | Harness capability | **Promoted** through product PR `#208` | A narrow deterministic first-tool selection can materially improve an explicit operation while leaving arguments, permission, execution, and later rounds in the normal loop. Unseen validation was `14/16` twice versus `9/16`, five wins and zero losses. |
 | By-name Wiki contracts | Harness capability | **Promoted** | Resolve unique local targets inside the audited tool boundary to reduce opaque ID/version bookkeeping; fail closed on ambiguity. |
 | Hybrid managed-search parity | Evaluation infrastructure | **Accepted** through product PR `#209` | Start managed search only for harness suites that declare web capability. This corrected an invalid environment; it is not a search-quality claim. |

@@ -4,9 +4,10 @@ import { runtimeFetch, readRuntimeMetadata, parseRuntimeJson } from './runtime';
 /**
  * Scope of a permission decision: 'group' applies the decision to the whole
  * capability group (historical behavior), 'tool' pins Session/Always grants
- * to the single tool that asked. Missing on the wire = 'group'.
+ * to the single tool that asked, and 'call' permits only the current action.
+ * Missing on the wire = 'group'.
  */
-export type PermissionScope = 'group' | 'tool';
+export type PermissionScope = 'group' | 'tool' | 'call';
 
 export interface PendingPermission {
   id: string;

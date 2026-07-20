@@ -134,6 +134,16 @@ test.describe('permissions editor', () => {
         createdAt: '2026-07-09T12:00:01Z',
         scope: 'tool',
       },
+      {
+        id: 'perm_fixture_3',
+        tool: 'wiki_root_create',
+        group: 'System',
+        argsJson: '{"name":"Research"}',
+        threadId: 't1',
+        turnId: 'u1',
+        createdAt: '2026-07-09T12:00:02Z',
+        scope: 'call',
+      },
     ];
 
     await page.route(`${baseUrl}/api/permissions/pending`, async (route) => {
@@ -171,5 +181,18 @@ test.describe('permissions editor', () => {
       .poll(() => responses.length, { timeout: 5_000 })
       .toBe(2);
     expect(responses[1]).toEqual({ id: 'perm_fixture_2', decision: 'always', scope: 'tool' });
+
+    // Call-scoped mutations expose no broader grant controls and submit an
+    // explicit call scope with Allow once.
+    await expect(page.getByTestId('permission-modal-tool')).toContainText('wiki_root_create');
+    await expect(page.getByTestId('permission-call-scope-notice')).toBeVisible();
+    await expect(page.getByTestId('permission-scope-checkbox')).toHaveCount(0);
+    await expect(page.getByTestId('permission-session')).toHaveCount(0);
+    await expect(page.getByTestId('permission-always')).toHaveCount(0);
+    await page.getByTestId('permission-once').click();
+    await expect
+      .poll(() => responses.length, { timeout: 5_000 })
+      .toBe(3);
+    expect(responses[2]).toEqual({ id: 'perm_fixture_3', decision: 'once', scope: 'call' });
   });
 });
