@@ -3,7 +3,7 @@
 fastapi>=0.136.1
 uvicorn[standard]>=0.46.0
 python-multipart>=0.0.26
-numpy>=1.24,<3
+numpy>=2.5.1,<3
 faster-whisper>=1.2.1
 # Ensures VC++ runtime DLLs are available on fresh Windows machines where
 # ctranslate2/faster-whisper can otherwise crash the process during model load.
