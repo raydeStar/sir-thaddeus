@@ -30,6 +30,17 @@ internal static partial class WikiRootCreateSelectionPolicy
             : null;
     }
 
+    internal static bool IsExplicitNonActionRequest(string? userText)
+    {
+        if (string.IsNullOrWhiteSpace(userText))
+            return false;
+
+        var lower = userText.Trim().ToLowerInvariant();
+        return ContainsWord(lower, "wiki") &&
+               ContainsWord(lower, "root") &&
+               IsNonActionRequest(lower);
+    }
+
     private static bool IsNonActionRequest(string lower) =>
         lower.StartsWith("how ", StringComparison.Ordinal) ||
         lower.StartsWith("explain ", StringComparison.Ordinal) ||

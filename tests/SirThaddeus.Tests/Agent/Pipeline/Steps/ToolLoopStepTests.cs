@@ -6,6 +6,7 @@ using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Tests.Agent.Pipeline.Steps;
 
+[Collection(RoutingLatencyEnvironmentCollection.Name)]
 public class ToolLoopStepTests
 {
     [Fact]
@@ -999,6 +1000,65 @@ public class ToolLoopStepTests
         Assert.Null(llm.ForcedToolNames[0]);
     }
 
+    [Theory]
+    [InlineData("Maybe create a Wiki Canvas root named Scratch later.")]
+    [InlineData("Hypothetically, create a wiki root called Scratch.")]
+    [InlineData("What would happen if you created a Wiki Canvas root named Scratch?")]
+    [InlineData("Do not create a Wiki Canvas root named Scratch.")]
+    [InlineData("Explain how to create a Wiki Canvas root named Scratch.")]
+    public async Task Explicit_non_action_request_withholds_root_mutation_tool(string prompt)
+    {
+        var llm = new FakeLlm(LlmReply.Final("Ready."));
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, log: (eventName, message) => logs.Add((eventName, message)));
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs =
+            [
+                ToolDefinitionFor("wiki_root_create"),
+                ToolDefinitionFor("wiki_roots_list"),
+            ],
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var advertised = Assert.Single(llm.ReceivedTools)!;
+        Assert.DoesNotContain(advertised, tool => tool.Function.Name == "wiki_root_create");
+        Assert.Contains(advertised, tool => tool.Function.Name == "wiki_roots_list");
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_root_non_action_pruning", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Explicit_root_creation_retains_root_mutation_tool()
+    {
+        var prompt = "Create a Wiki Canvas root named Field Notes.";
+        var llm = new FakeLlm(LlmReply.Final("Ready."));
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, log: (eventName, message) => logs.Add((eventName, message)));
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs = [ToolDefinitionFor("wiki_root_create")],
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var advertised = Assert.Single(llm.ReceivedTools)!;
+        Assert.Contains(advertised, tool => tool.Function.Name == "wiki_root_create");
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_root_non_action_pruning", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=inactive", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task Upstream_forced_tool_overrides_wiki_root_selection()
     {
@@ -1041,7 +1101,8 @@ public class ToolLoopStepTests
         IToolPermissionGate? gate = null,
         IEnumerable<IToolCallInterceptor>? interceptors = null,
         IEnumerable<IToolArgsRewriter>? argsRewriters = null,
-        int maxRoundTrips = 6)
+        int maxRoundTrips = 6,
+        Action<string, string>? log = null)
         => new(
             llm,
             mcp ?? new StubMcp(_ => ""),
@@ -1050,7 +1111,8 @@ public class ToolLoopStepTests
             groupClassifier: null,
             interceptors,
             argsRewriters,
-            maxRoundTrips);
+            maxRoundTrips,
+            log: log);
 
     private static TurnContext NewContext() => new()
     {
@@ -1082,17 +1144,21 @@ public class ToolLoopStepTests
         public List<int> MaxTokenOverrides { get; } = new();
         public List<string?> ForcedToolNames { get; } = new();
         public List<IReadOnlyList<ChatMessage>> ReceivedMessages { get; } = new();
+        public List<IReadOnlyList<ToolDefinition>?> ReceivedTools { get; } = new();
 
         public FakeLlm(params LlmReply[] replies) => _replies = new(replies);
 
         public Task<LlmResponse> ChatAsync(
             IReadOnlyList<ChatMessage> messages,
             IReadOnlyList<ToolDefinition>? tools = null,
-            CancellationToken cancellationToken = default) => Task.FromResult(
-                Record(messages,
+            CancellationToken cancellationToken = default)
+        {
+            ReceivedTools.Add(tools);
+            return Task.FromResult(Record(messages,
                 _replies.Count > 0
                     ? _replies.Dequeue().ToResponse()
                     : new LlmResponse { IsComplete = true, Content = "(ran out)", FinishReason = "stop" }));
+        }
 
         public Task<LlmResponse> ChatAsync(
             IReadOnlyList<ChatMessage> messages,
@@ -1196,6 +1262,21 @@ public class ToolLoopStepTests
         public InlineArgsRewriter(Func<TurnContext, string, string, string> impl) { _impl = impl; }
         public string Rewrite(TurnContext context, string toolName, string argumentsJson)
             => _impl(context, toolName, argumentsJson);
+    }
+
+    private sealed class EnvironmentScope : IDisposable
+    {
+        private readonly string _name;
+        private readonly string? _previous;
+
+        public EnvironmentScope(string name, string value)
+        {
+            _name = name;
+            _previous = Environment.GetEnvironmentVariable(name);
+            Environment.SetEnvironmentVariable(name, value);
+        }
+
+        public void Dispose() => Environment.SetEnvironmentVariable(_name, _previous);
     }
 
     private sealed class CapturingSink : IChatEventSink
