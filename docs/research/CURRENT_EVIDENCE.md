@@ -87,6 +87,17 @@ calls and latency while tying or losing to unchanged Thaddeus.
 
 ### Narrow harness gains
 
+- Deterministic Wiki-root non-action tool pruning reproduced on three fresh
+  slices without changing the model or positive selector. V1 development and
+  repeat each improved `6/12` to `9/12` with three wins and zero losses. A
+  corrected, disjoint v2 development slice and exact repeat each improved
+  `7/12` to `9/12` with two wins and zero losses; validation improved `10/16`
+  to `13/16` with three wins, zero losses, `8/8` candidate non-action outcomes,
+  full validity, correct activation, and model calls reduced from 49 to 44.
+  Authorized-write outcomes were identical in every comparison. The mechanism
+  withholds only `wiki_root_create` when the existing policy already classifies
+  the turn as informational, hypothetical, negated, or deferred. This is a
+  tool-precision and permission-interruption gain, not model capacity.
 - A typed-capability Wiki confirmation candidate prevented two unauthorized
   root creations in development and exact repeat (`6/6` no-action states versus
   `4/6` unchanged), then prevented one further mutation on a disjoint validation

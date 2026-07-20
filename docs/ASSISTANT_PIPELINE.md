@@ -41,6 +41,14 @@ free to use the ordinary tool loop. Other Wiki mutations continue through
 normal model selection and may use by-name contracts that resolve unique local
 targets inside the tool.
 
+When that same deterministic policy recognizes a Wiki-root request as
+informational, hypothetical, negated, or deferred, `wiki_root_create` is not
+advertised to the model for the turn. Read-only Wiki tools remain available,
+an upstream explicit forced-tool decision is preserved, and the permission
+boundary remains the final authority. This prevents a small model from turning
+a recognized non-action request into an unnecessary mutation attempt or
+permission prompt.
+
 ## Attached local Wiki evidence
 
 When the user explicitly attaches an entire Wiki library, root, or folder, the

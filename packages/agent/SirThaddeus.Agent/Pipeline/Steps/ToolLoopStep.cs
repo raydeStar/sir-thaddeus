@@ -156,7 +156,23 @@ public sealed class ToolLoopStep : ITurnStep
             // we'd loop forever trying to call web_search over and over.
             var forcedTool = forcedToolForNextRound ?? (round == 0 ? context.ForcedTool : null);
             forcedToolForNextRound = null;
-            var tools = context.ToolDefs.Count > 0 ? context.ToolDefs : null;
+            IReadOnlyList<ToolDefinition>? tools = context.ToolDefs.Count > 0
+                ? context.ToolDefs
+                : null;
+            if (tools is not null)
+            {
+                var projectedTools = WikiRootNonActionToolPolicy.Project(
+                    context.UserText,
+                    forcedTool,
+                    tools);
+                if (round == 0)
+                    LogWikiRootNonActionActivation(context, !ReferenceEquals(projectedTools, tools));
+                tools = projectedTools;
+            }
+            else if (round == 0)
+            {
+                LogWikiRootNonActionActivation(context, activated: false);
+            }
             if (round == 0 && string.IsNullOrWhiteSpace(forcedTool) && tools is not null)
             {
                 forcedTool = ResolveMemoryRetrieveForPersonalContext(context, tools);
@@ -511,6 +527,18 @@ public sealed class ToolLoopStep : ITurnStep
                string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void LogWikiRootNonActionActivation(TurnContext context, bool activated)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_root_non_action_pruning " +
+            $"decision={(activated ? "activated" : "inactive")}");
     }
 
     private async Task<string?> TryExecuteTimeNowAndBuildDraftAsync(
