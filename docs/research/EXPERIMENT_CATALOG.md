@@ -1,6 +1,6 @@
 # Experiment Catalog
 
-This is a compact index of material Sir Thaddeus experiments through July 19,
+This is a compact index of material Sir Thaddeus experiments through July 20,
 2026. It records reusable conclusions, not hidden benchmark content. Exact
 manifests, commands, artifact hashes, and verdicts live in the sibling private
 `local-benchmark-runner` repository under `experiments/`.
@@ -24,6 +24,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Verified-outcome harness redirect scorecard | Evaluation infrastructure | **Accepted; no product behavior changed** | A frozen 32-task local scorecard applies required-tool, forbidden-tool, and observed-state verification to raw, same-prompt direct, and unchanged Thaddeus. Raw and harness each scored `9/32`; direct scored `6/32`. It is consumed development evidence, not the eventual 80% claim. Evaluator PR `#78`. |
 | Source-audited representative task pilot | Evaluation infrastructure | **Accepted; no product behavior changed** | Eleven public sources were audited for task, evaluation, or exclusion roles. Ten newly authored local tasks scored `3/10` raw and `4/10` unchanged harness, with two paired wins and one loss. One open-ended exact scorer was unsuitable, so the result is diagnostic rather than a capability claim. Evaluator PR `#90`. |
 | Six-category gold-headroom screen | Evaluation infrastructure | **Retained; breadth gate rejected** | Compact scorer-blind support improved the frozen 1.2B model from `2/12` to `9/12` with seven wins, zero losses, and full validity. Extraction and verified arithmetic-result use cleared `2/2`; three policy/selection categories remained `1/2`, so only two of the required three categories established headroom. No product candidate was authorized. Evaluator PR `#92`. |
+| Fresh capability-closure scorecard | Evaluation infrastructure | **Retained; existing capabilities confirmed** | On 20 newly authored tasks, raw scored `4/20`, unchanged Thaddeus `15/20`, and compact gold support `19/20`. Thaddeus captured 13 of 15 gold-supported positive wins; Wiki extraction and explicit calculator use each reached `4/4`. Reliability remained `19/20` valid with `2/4` exact no-tool controls, and no category met the frozen residual-gap rule, so no new mechanism was authorized. Evaluator PR `#93`. |
 
 ## Model-capacity campaign
 
@@ -146,6 +147,8 @@ Use these repository-relative locations in the sibling
 - Source-audited representative tasks and the six-category headroom screen:
   `experiments/verdicts/2026-07-19-representative-task-executable-v2.md` and
   `experiments/verdicts/2026-07-20-gold-headroom-screen-v1.md`.
+- Fresh capability-closure scorecard:
+  `experiments/verdicts/2026-07-20-capability-closure-scorecard-v1.md`.
 - Search and evidence sequence: `experiments/manifests/selective-evidence-v1.yaml`,
   `response-contract-evidence-v1.yaml`, `model-visible-search-evidence-v1.yaml`,
   `compact-search-evidence-envelope-v1.yaml`, and

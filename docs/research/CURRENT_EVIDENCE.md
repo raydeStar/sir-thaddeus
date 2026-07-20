@@ -64,6 +64,16 @@ calls and latency while tying or losing to unchanged Thaddeus.
   interpretation, and state decisions each retained one genuine supported
   failure, so only two categories met the frozen rule and the three-category
   breadth gate authorized no product candidate.
+- A follow-on fresh 20-task capability-closure scorecard scored `4/20` raw,
+  `15/20` unchanged Thaddeus, and `19/20` with compact gold support. On 16
+  positive extraction and compute tasks, the harness captured 13 of the 15 net
+  wins exposed by gold support. Attached Wiki extraction and explicit
+  calculator expressions each reached `4/4`; file extraction reached `2/4`
+  and word-to-expression computation reached `3/4`. The frozen reliability
+  gate still failed because validity was `19/20` and exact no-tool controls
+  were `2/4`, although no forbidden tool was called. No category had the
+  required three-outcome residual gold gap, so the result confirms existing
+  shipped value but selects no new product mechanism. Evaluator PR `#93`.
 
 ### Narrow harness gains
 
