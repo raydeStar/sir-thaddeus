@@ -85,6 +85,19 @@ call for that turn. When it does not succeed, the existing completion validation
 and bounded repair path is unchanged. This is a narrow response-contract seam,
 not a router, retriever, benchmark path, or global validation removal.
 
+## Exact-identity repair termination
+
+Completion repair remains bounded and validation-led. After a failed completion
+check, the repair loop may request corrected text. If that non-empty generation
+is ordinally identical to the draft it was asked to repair, the loop retains the
+existing validation failure and stops the attempt without revalidating unchanged
+text. Revalidation cannot discover different content when no content changed.
+
+This short circuit occurs only after repair generation. It does not skip initial
+completion validation, create a conversational fast path, or weaken safety and
+response-contract checks. Any changed repair text still follows the complete
+existing validation and adoption path.
+
 ## Supported diagnostics
 
 `ST_ROUTING_LATENCY_TRACE=1` enables duration-only routing diagnostics. It may
@@ -95,6 +108,11 @@ The v2 harness derives a sanitized per-turn `diagnostics.json` from its isolated
 runtime logs before deleting the sandbox. The artifact is restricted to stage
 names, outcomes, booleans, counts, and durations. Prompts, responses, memory,
 tool payloads, suite identifiers, and expected answers are excluded.
+
+Completion-repair diagnostics may additionally record content-free attempt,
+non-empty-generation, changed-generation, revalidation-pass, and adoption
+counts. They expose repair outcomes without retaining either the draft or the
+generated text.
 
 `ST_HARNESS_PRESERVE_SANDBOX=1` is a test-support option for retaining v1 or v2
 local logs and audit records during diagnosis. It is not a production route.
