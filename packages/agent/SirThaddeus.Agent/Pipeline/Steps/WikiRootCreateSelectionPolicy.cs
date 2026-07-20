@@ -18,7 +18,9 @@ internal static partial class WikiRootCreateSelectionPolicy
             return null;
 
         var lower = userText.Trim().ToLowerInvariant();
-        if (IsNonActionRequest(lower) || ContainsWord(lower, "page"))
+        if (IsNonActionRequest(lower) ||
+            WikiRootTemporalDeferralToolPolicy.IsDeferredRootCreateRequest(lower) ||
+            ContainsWord(lower, "page"))
             return null;
 
         if (!ExplicitRootCreateRegex().IsMatch(lower) && !DirectNeedForRootRegex().IsMatch(lower))
