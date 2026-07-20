@@ -4,7 +4,7 @@
 
 **Calibrated:** July 18, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `5d8b50a`
+**Current production baseline:** `b7934c0`
 
 ## Decision
 
@@ -367,11 +367,12 @@ model success.
 | ---: | --- | --- | --- |
 | Completed | Current-master postcondition and local-read recovery refresh | Harness capability diagnostic | Audited recovery produced four verified fresh gains but failed the exact-missing-resource boundary at 11/12 validity; the implementation was removed |
 | Completed | Source-diverse gold-headroom screen | Harness capability diagnostic | Compact support moved the frozen 1.2B model from `2/12` to `9/12` with seven wins and zero losses, but only extraction and arithmetic-result use cleared `2/2`; the frozen three-category breadth gate rejected a new product candidate. |
+| Completed | Fresh capability-closure scorecard | Harness capability diagnostic | Raw scored `4/20`, unchanged Thaddeus `15/20`, and compact gold support `19/20`. The harness captured 13/15 gold-supported positive wins, but `19/20` validity and `2/4` exact no-tool controls failed the frozen reliability gate; no category met the three-outcome residual-gap rule. |
 | Stopped at prerequisite | QLoRA or rationale-distillation pilot | Adapted-model capacity | Full-support rationale supervision produced a mixed `10/30` versus `8/30`, concise-evidence v2 fell to `9/30`, and the fresh gold-support prerequisite reached only `17/30` versus the frozen `18/30` and `+6/30` gates. No scale adapter was trained. Pursue reliable evidence utilization and externally verified outcomes before reopening learning. |
 | Closed | Distinct corrective local retrieval with abstention | Harness capability | Fresh route-agnostic validation found four wins but one forbidden exact-missing-file activation; three implementations are rejected and the family is closed pending a materially different existence signal |
 | Closed | Native provider-context contract v2 | Product quality | Current master at a verified 16K context reproduced the irrelevant memory-write permission prompt twice, so the large lifecycle candidate was not rebased |
 | Closed | Conservative explicit-memory tool budget revalidation | Harness capability and reliability | Fresh development repeated good precision (`3/4` positives, `0/6` negatives) and removed two permission prompts, but increased provider calls from 45 to 50; no repeat ran |
-| 1 | Expand the representative verified-outcome scorecard | Evaluation infrastructure | The source-audited 10-task baseline and 12-task gold screen are useful causal probes but too small for prevalence or product selection. Add fresh independently scored tasks in small batches, prioritize extraction and verified-result delivery, and require a repeated observable seam before more product code. |
+| Completed | Expand the representative verified-outcome scorecard | Evaluation infrastructure | The fresh 20-task expansion confirmed large fixed-model harness value (`4/20` raw to `15/20` unchanged) but found no repeated residual category large enough to authorize another mechanism. Preserve the consumed evidence and select the next experiment only from a fresh causal seam. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |
