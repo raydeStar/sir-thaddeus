@@ -1,8 +1,9 @@
 # Inference Method Gap Map
 
 **Reconciled:** July 20, 2026
-**Production baseline:** `7ea069fb`
-**Evaluator baseline:** `67c09598` through promotion evidence PR `#106`
+**Production baseline:** `d2771ce2`
+**Evaluator baseline:** `68ed4feb` through memory capability-surface oracle PR
+`#108`; the post-hoc decision reconciliation is tracked separately
 
 This map ranks research mechanisms against Sir Thaddeus evidence. It does not
 replace the experiment ledger or promotion policy. Model capacity, fixed-model
@@ -42,6 +43,7 @@ activation before scoring.
 | QLoRA/rationale distillation | Missing; planned separate lane | Three prompt/scaffold candidates failed; stable capacity misses exist, but no clean training corpus is frozen | High for a chosen architecture | Only remaining route likely to move intrinsic capacity materially | Training plus new artifact | Strong with four-arm fresh holdouts | Leakage, narrow overfit, quantization drift | Prepare after a generalized failure cluster and dataset audit |
 | Multi-model/specialist routing | Deferred | No 300-outcome complementary failure map; changing models does not improve the fixed model | Potentially high | Escalation can improve system outcomes | VRAM and routing latency | Strong if disclosed and paired | Attribution confusion and operational complexity | Keep deferred |
 | Broad conversational fast path/router rewrite | Rejected by measurement | Footman made zero LLM calls; optional helpers were 10% of ordinary-turn time; global validation/retry removal reduced quality | Medium | Limited measured upside | Engineering and regression cost | Product latency only | Quality, memory, safety, continuity | Do not reopen without a new measured blocker |
+| Capability-surface context headroom | Causally demonstrated; selector family closed | Repeated 8K attribution measured 8,455 estimated tool-definition tokens across 60 tools and a 12,097-token request budget; a one-read-tool oracle repeated with 4,302 tokens of headroom and passed the contract | High for small contexts | Prevent provider overflow and reduce irrelevant capability burden | Potentially lower prompt and permission cost | Strong for envelope size; weak for safe selection | Prior precedence was unsafe and conservative v3 increased calls | Keep as diagnostic evidence; require a materially different selector before reopening |
 
 ## Verification audit
 
@@ -150,19 +152,22 @@ not evidence that a generalized verifier abstraction would earn its cost.
 
 ## Selected next action
 
-Exact-identity completion-repair termination is now shipped; it resolved the
-content-free no-change-repair question without weakening changed-text
-validation. The next action is diagnostic, not another router: measure the
-model-visible request envelope on the repeated 8,192-token explicit-memory
-overflow. Current transport budgeting estimates message characters only; it
-does not include advertised tool schemas, output reserve, or provider chat
-template overhead, and it preserves every system message even above the soft
-cap. Record content-free system, non-system, tool-definition, requested-output,
-and configured-context estimates on one unchanged sentinel and one exact
-repeat. Do not prune tools, prompts, memory, safety, or history until that
-breakdown identifies the causal overage. If system plus required capability
-surface already exceeds context, use an oracle capability set before choosing
-between context-aware budgeting and another capability-scoped tool experiment.
+Prompt-envelope attribution and the one-capability oracle are complete. They
+prove that the 60-tool surface caused the repeated 8K overflow and that the
+unchanged model can satisfy the task when given the correct narrow capability.
+They do not authorize another conservative memory selector: compatible v1-v3
+experiments already found incomplete activation, unsafe precedence, and a
+provider-call regression.
+
+Do not implement another routing mutation from this result alone. The next
+action is an offline failure-cluster census over fresh, independently verifiable
+product tasks, using content-free traces and public outcomes. Select a new
+candidate only if at least three failures share one observable capability seam,
+an oracle corrects them, and the mechanism is materially different from the
+closed prompt, retrieval, memory-selector, and generic-postcondition families.
+If no such cluster exists, pause fixed-model product mutations and invest in the
+labeled outcome set needed for calibrated abstention or later specialist
+escalation.
 
 ## Research basis
 
