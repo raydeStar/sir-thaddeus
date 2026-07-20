@@ -74,6 +74,16 @@ calls and latency while tying or losing to unchanged Thaddeus.
   were `2/4`, although no forbidden tool was called. No category had the
   required three-outcome residual gold gap, so the result confirms existing
   shipped value but selects no new product mechanism. Evaluator PR `#93`.
+- A harder matched capability ablation then held the production prompt and
+  pipeline constant while withholding versus exposing evaluator-declared tools
+  and attachments. Outcomes improved from `4/20` to `10/20`, with seven paired
+  wins and one loss. Explicit calculator work reached `4/4`, while attached
+  evidence, local reads, and verified Wiki state changes each reached `1/4`
+  strict. One deferred no-action request executed `wiki_root_create`, so the
+  hard state-safety gate failed at `3/4`; the frozen eight-win gate also missed
+  by one. This bounds the earlier gain without invalidating it: existing
+  capabilities add net value, but broader strict reliability remains uneven.
+  No product candidate was authorized. Evaluator PR `#94`.
 
 ### Narrow harness gains
 
