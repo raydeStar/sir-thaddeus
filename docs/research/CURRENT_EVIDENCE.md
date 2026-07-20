@@ -2,9 +2,9 @@
 
 **Evidence cutoff:** July 20, 2026
 
-**Production baseline:** `d2771ce2`; exact-identity completion-repair
-termination was promoted through product PR `#250`, followed by documentation
-reconciliation in PR `#251`
+**Production baseline:** `af044548`; empty-state Wiki observation coverage was
+repaired through product PR `#256`, followed by evidence reconciliation in PR
+`#257`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -428,12 +428,30 @@ calls and latency while tying or losing to unchanged Thaddeus.
   model time. It demonstrates that cheap answer-blind discovery is practical,
   but it does not establish prevalence weights or a new capability claim.
 
+### Fresh outcome discovery v3
+
+- A second source-audited bank froze 32 newly authored tasks across the same
+  eight practical categories, informed by public stateful-agent and knowledge-
+  work taxonomies without copying their prompts, fixtures, or answers.
+- Two separate 16-case invocations scored `19/32` strict and `31/32` valid with
+  zero runtime errors. First-token p50 was 311 ms, end-to-end p50 was 1,346 ms,
+  and peak VRAM was 3,099 MB.
+- Verified computation passed `4/4`; local-file extraction, verified Wiki
+  creation, and no-action state safety each passed `3/4`.
+- Instruction contracts and multi-source evidence synthesis each failed `3/4`,
+  satisfying the numeric cluster count but not the open-mechanism gate. Both
+  map to response-contract and evidence-synthesis families already closed by
+  repeated activation, safety, or resource evidence.
+- No raw, direct, gold, oracle, candidate, repeat, or validation arm ran. The
+  result narrows the boundary honestly instead of using low scores to justify
+  another prompt patch or benchmark-derived renderer.
+
 ## What remains uncertain
 
-- Whether a larger labeled outcome set reveals a repeated, oracle-correctable
-  failure region for the frozen 1.2B model. The fresh 16-task triage plus one
-  conditional reserve found no qualifying three-case cluster, so it is not
-  enough evidence for prevalence weights or another product mutation.
+- Whether continued labeled outcome accumulation reveals a repeated,
+  oracle-correctable failure region in a materially open mechanism family. The
+  32-task v3 cohort found two numeric clusters, but both were already closed;
+  neither synthetic cohort establishes prevalence weights.
 - Whether compact local Wiki/document retrieval can approach the demonstrated
   gold-evidence ceiling and the conditional `6/6` compact-evidence result
   without flooding context or depending on unreliable public search. The V3

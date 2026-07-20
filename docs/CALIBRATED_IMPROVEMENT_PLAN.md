@@ -4,7 +4,7 @@
 
 **Calibrated:** July 20, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `60000e4c`
+**Current production baseline:** `af044548`
 
 ## Decision
 
@@ -390,6 +390,7 @@ model success.
 | Completed | Prompt-envelope and memory capability-surface attribution | Harness capability diagnostic | Two exact 8K full-surface repeats measured a 12,097-token request budget dominated by 8,455 estimated tool-definition tokens. A one-read-tool oracle repeated at 3,890 tokens with 4,302 headroom and passed the contract. This proves causal headroom but does not reopen the rejected selector family. |
 | Completed | Expand the representative verified-outcome scorecard | Evaluation infrastructure | The fresh 20-task expansion confirmed large fixed-model harness value (`4/20` raw to `15/20` unchanged) but found no repeated residual category large enough to authorize another mechanism. Preserve the consumed evidence and select the next experiment only from a fresh causal seam. |
 | Completed | Fresh outcome discovery v2 | Harness capability diagnostic | A balanced 16-task triage scored `7/16` strict and `11/16` valid. Local-file extraction missed `0/2`, but its preauthored reserve passed `1/1` with `file_read`, leaving no qualifying three-case cluster and authorizing no oracle or product candidate. The staged 17-case screen used about 90 seconds of hot model time. |
+| Completed | Fresh outcome discovery v3 | Harness capability diagnostic | Two balanced 16-case invocations scored `19/32` strict and `31/32` valid. Computation reached `4/4`; local files, Wiki creation, and no-action safety each reached `3/4`. Instruction contracts and multi-source synthesis each failed `3/4`, but both map to already-closed mechanism families, so no oracle or product candidate was authorized. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |
