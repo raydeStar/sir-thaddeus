@@ -1,9 +1,9 @@
 # Current Evidence
 
-**Evidence cutoff:** July 19, 2026
+**Evidence cutoff:** July 20, 2026
 
-**Production baseline:** `5d8b50a`; answer-only successful-tool-evidence
-projection was promoted through product PR `#219`
+**Production baseline:** `e5ffb45e`; fail-closed unique local-file suffix
+resolution was promoted through product PR `#233`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -50,6 +50,20 @@ calls and latency while tying or losing to unchanged Thaddeus.
   `9/32`; same-prompt direct completed `6/32`. The evaluator applies the same
   required-tool, forbidden-tool, and observed-state contract to every arm, so a
   direct answer cannot receive completion credit for guessing a tool outcome.
+- A source-audited representative-task layer now derives newly authored local
+  fixtures from OASST1, Dolly-15K, IFEval, BFCL, and tau-bench capability
+  taxonomies without copying public prompts or answers. Its first ten-task
+  diagnostic scored `3/10` raw and `4/10` unchanged Thaddeus, with two paired
+  harness wins, one loss, and one unsuitable open-ended exact scorer. This is
+  task-distribution and evaluator evidence, not a population or capability
+  claim.
+- A fresh six-category gold-headroom screen then scored `2/12` raw and `9/12`
+  with compact scorer-blind support: seven paired wins, zero losses, and full
+  validity. Direct extraction and verified arithmetic-result use each cleared
+  `2/2`; classification was already `2/2` raw. Evidence synthesis, tool-result
+  interpretation, and state decisions each retained one genuine supported
+  failure, so only two categories met the frozen rule and the three-category
+  breadth gate authorized no product candidate.
 
 ### Narrow harness gains
 
@@ -317,6 +331,10 @@ calls and latency while tying or losing to unchanged Thaddeus.
 
 ## What remains uncertain
 
+- Whether a larger fresh representative outcome battery confirms that direct
+  extraction and verified scalar-result delivery are the only broad
+  high-headroom regions for the frozen 1.2B model. The 12-task screen is a fast
+  causal map, not enough evidence for prevalence weights or a product change.
 - Whether compact local Wiki/document retrieval can approach the demonstrated
   gold-evidence ceiling and the conditional `6/6` compact-evidence result
   without flooding context or depending on unreliable public search. The V3
