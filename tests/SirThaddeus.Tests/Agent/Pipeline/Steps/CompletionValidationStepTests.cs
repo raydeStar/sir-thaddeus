@@ -147,6 +147,39 @@ public class CompletionValidationStepTests
         Assert.Equal(1, llm.CallCount);
     }
 
+    [Fact]
+    public async Task Repair_trace_attributes_identical_generation_without_logging_content()
+    {
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        const string draft = "Mixing blue and yellow produces green.";
+        var llm = new CountingLlm(draft);
+        var events = new List<(string Action, string Message)>();
+        var validator = new CompletionValidator(llm);
+        var step = new CompletionValidationStep(
+            validator,
+            new RepairLoop(llm, validator),
+            (action, message) => events.Add((action, message)));
+        var ctx = WithDraft(
+            "Put the final answer on its own line as `Final answer: <answer>`. " +
+            "What color results from mixing blue and yellow?",
+            draft);
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Same(ctx, cont.Next);
+        Assert.Equal(1, llm.CallCount);
+        var repairEvent = Assert.Single(events, item =>
+            item.Action == "COMPLETION_REPAIR_TIMING");
+        Assert.Contains("changed=False", repairEvent.Message, StringComparison.Ordinal);
+        Assert.Contains("attempts=1", repairEvent.Message, StringComparison.Ordinal);
+        Assert.Contains("generated_nonempty=True", repairEvent.Message, StringComparison.Ordinal);
+        Assert.Contains("generated_changed=False", repairEvent.Message, StringComparison.Ordinal);
+        Assert.Contains("passed_revalidation=False", repairEvent.Message, StringComparison.Ordinal);
+        Assert.Contains("adopted=False", repairEvent.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(draft, repairEvent.Message, StringComparison.Ordinal);
+    }
+
     // Happy-path (validation + repair round-trip) requires a real
     // CompletionValidator / RepairLoop with a fake ILlmClient. Those
     // types are `sealed` and call `llm.ChatAsync` directly, so full
@@ -166,6 +199,10 @@ public class CompletionValidationStepTests
 
     private sealed class CountingLlm : ILlmClient
     {
+        private readonly Queue<string> _responses;
+
+        public CountingLlm(params string[] responses) => _responses = new Queue<string>(responses);
+
         public int CallCount { get; private set; }
 
         public Task<LlmResponse> ChatAsync(
@@ -174,7 +211,7 @@ public class CompletionValidationStepTests
             CancellationToken cancellationToken = default)
         {
             CallCount++;
-            return Task.FromResult(new LlmResponse { IsComplete = true, Content = "{\"passed\":true}" });
+            return Task.FromResult(Response());
         }
 
         public Task<LlmResponse> ChatAsync(
@@ -184,11 +221,17 @@ public class CompletionValidationStepTests
             CancellationToken cancellationToken = default)
         {
             CallCount++;
-            return Task.FromResult(new LlmResponse { IsComplete = true, Content = "{\"passed\":true}" });
+            return Task.FromResult(Response());
         }
 
         public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<string?>("fake");
+
+        private LlmResponse Response() => new()
+        {
+            IsComplete = true,
+            Content = _responses.Count > 0 ? _responses.Dequeue() : "{\"passed\":true}"
+        };
     }
 
     private sealed class EnvironmentScope : IDisposable

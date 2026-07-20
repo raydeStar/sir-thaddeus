@@ -125,20 +125,38 @@ public sealed class CompletionValidationStep : ITurnStep
         }
         catch
         {
-            LogRepair(context, "error_original_retained", repairStarted, changed: false);
+            LogRepair(
+                context,
+                "error_original_retained",
+                repairStarted,
+                adopted: false,
+                repair: null,
+                originalDraft: context.AssistantDraft!);
             return new StepResult.Continue(context);
         }
 
         if (string.IsNullOrWhiteSpace(repair.FinalText) ||
             string.Equals(repair.FinalText, context.AssistantDraft, StringComparison.Ordinal))
         {
-            LogRepair(context, "complete_original_retained", repairStarted, changed: false);
+            LogRepair(
+                context,
+                "complete_original_retained",
+                repairStarted,
+                adopted: false,
+                repair,
+                context.AssistantDraft!);
             return new StepResult.Continue(context);
         }
 
         // Adopt the repaired text as the new draft. ResponseComposerStep
         // will pick it up as the final response.
-        LogRepair(context, "complete_repaired", repairStarted, changed: true);
+        LogRepair(
+            context,
+            "complete_repaired",
+            repairStarted,
+            adopted: true,
+            repair,
+            context.AssistantDraft!);
         return new StepResult.Continue(context with { AssistantDraft = repair.FinalText });
     }
 
@@ -168,16 +186,32 @@ public sealed class CompletionValidationStep : ITurnStep
             $"path={path} passed={passed} repair_needed={repairNeeded} elapsed_ms={duration}");
     }
 
-    private void LogRepair(TurnContext context, string outcome, long started, bool changed)
+    private void LogRepair(
+        TurnContext context,
+        string outcome,
+        long started,
+        bool adopted,
+        RepairResult? repair,
+        string originalDraft)
     {
         if (!IsLatencyTracingEnabled() || _log is null)
             return;
 
         var elapsedMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        var attempts = repair?.Attempts ?? [];
+        var generatedNonEmpty = attempts.Any(attempt =>
+            !string.IsNullOrWhiteSpace(attempt.RepairedText));
+        var generatedChanged = attempts.Any(attempt =>
+            !string.IsNullOrWhiteSpace(attempt.RepairedText) &&
+            !string.Equals(attempt.RepairedText, originalDraft, StringComparison.Ordinal));
+        var passedRevalidation = repair?.Repaired ?? false;
         _log(
             "COMPLETION_REPAIR_TIMING",
             $"thread_id={context.ThreadId} turn_id={context.MessageId} outcome={outcome} " +
-            $"changed={changed} elapsed_ms={elapsedMs:0.###}");
+            $"changed={adopted} attempts={attempts.Count} " +
+            $"generated_nonempty={generatedNonEmpty} generated_changed={generatedChanged} " +
+            $"passed_revalidation={passedRevalidation} adopted={adopted} " +
+            $"elapsed_ms={elapsedMs:0.###}");
     }
 
     private void LogExperimentActivation(

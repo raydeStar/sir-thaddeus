@@ -88,6 +88,24 @@ public sealed class RepairLoop
                     break;
                 }
 
+                // Revalidating byte-identical text cannot change the response
+                // shown to the user. Stop before a potentially model-backed
+                // validation pass; changed text retains the complete existing
+                // validation and adoption path below.
+                if (string.Equals(repairedText, currentText, StringComparison.Ordinal))
+                {
+                    attempts.Add(new RepairAttempt
+                    {
+                        AttemptNumber = i,
+                        FailureReason = currentValidation.MissingElement ?? "unknown",
+                        RepairPrompt = repairPrompt,
+                        RepairedText = repairedText,
+                        RepairSucceeded = false,
+                        ElapsedMs = sw.Elapsed.TotalMilliseconds
+                    });
+                    break;
+                }
+
                 // A targeted shape-only repair succeeds when it now satisfies
                 // the exact deterministic contract that triggered it. Other
                 // repair types still receive the full completion validation.

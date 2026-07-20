@@ -119,6 +119,38 @@ public class RepairLoopTests
         Assert.Equal("Target closes at 10:00 PM.", result.FinalText);
         Assert.Single(result.Attempts);
         Assert.True(result.Attempts[0].RepairSucceeded);
+        Assert.Equal(2, llm.CallCount);
+    }
+
+    [Fact]
+    public async Task TryRepairAsync_IdenticalGeneration_SkipsRevalidation()
+    {
+        const string original = "Target is a retail store.";
+        var llm = new SequentialFakeLlmClient(
+            original,
+            """{"Passed": true, "RepairNeeded": false}""");
+        var validator = new CompletionValidator(llm);
+        var loop = new RepairLoop(llm, validator) { MaxAttempts = 1 };
+        var failedValidation = new CompletionValidationResult
+        {
+            Passed = false,
+            RepairNeeded = true,
+            MissingElement = "No store hours included",
+            SuggestedRepair = "Include actual hours"
+        };
+
+        var result = await loop.TryRepairAsync(
+            "What time does Target close?",
+            original,
+            failedValidation,
+            Array.Empty<ToolCallRecord>());
+
+        Assert.False(result.Repaired);
+        Assert.Equal(original, result.FinalText);
+        var attempt = Assert.Single(result.Attempts);
+        Assert.Equal(original, attempt.RepairedText);
+        Assert.False(attempt.RepairSucceeded);
+        Assert.Equal(1, llm.CallCount);
     }
 
     // ── TryRepairAsync: Repair also fails ────────────────────────────
@@ -325,11 +357,14 @@ public class RepairLoopTests
 
         public SequentialFakeLlmClient(params string[] responses) => _responses = responses;
 
+        public int CallCount { get; private set; }
+
         public Task<LlmResponse> ChatAsync(
             IReadOnlyList<ChatMessage> messages,
             IReadOnlyList<ToolDefinition>? tools,
             CancellationToken cancellationToken = default)
         {
+            CallCount++;
             var content = _index < _responses.Length ? _responses[_index++] : "";
             return Task.FromResult(new LlmResponse { IsComplete = true, Content = content });
         }
