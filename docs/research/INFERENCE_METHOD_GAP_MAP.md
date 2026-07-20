@@ -1,8 +1,8 @@
 # Inference Method Gap Map
 
-**Reconciled:** July 18, 2026
-**Production baseline:** `a94ce44`
-**Evaluator baseline:** `bce818c` through evidence correction PR `#63`
+**Reconciled:** July 20, 2026
+**Production baseline:** `7ea069fb`
+**Evaluator baseline:** `67c09598` through promotion evidence PR `#106`
 
 This map ranks research mechanisms against Sir Thaddeus evidence. It does not
 replace the experiment ledger or promotion policy. Model capacity, fixed-model
@@ -34,6 +34,7 @@ activation before scoring.
 | Provider-constrained JSON/grammar decoding | Missing in product; evaluator retained | Corrected v2: unconstrained and constrained were both `10/10` valid and `9/10` semantically exact; zero outcome gain | High when the model supports it | Guaranteed supported structure | Near-zero in the observed run | Strong for structure only | Provider coupling; schema-valid wrong values | Defer until a real contract has at least three structural failures |
 | External computation | Implemented selectively | Calculator/Python are useful when translation is correct; forced calculator scored `3/10` versus raw `8/10` | Medium-high | Exact arithmetic or execution | Tool call plus synthesis | Strong for executed result | Bad program/expression remains bad | Keep selective; do not force globally |
 | Capability-specific evidence/postconditions | Partial; one promoted | Answer-only tool-evidence projection repeated `10/12` versus `5/12`, then validated `12/16` versus `8/16` with zero negative activations | High | Converts proven tool evidence into correct final contracts | Removes one helper call when active | Strong within its narrow proof | Overprojection or stale evidence | Preferred product pattern after oracle headroom |
+| Bounded completion-repair efficiency | Implemented | Exact-identity termination preserved all paired public and changed-repair outcomes while aggregate calls fell `124 -> 119`; three savings were directly case-matched | High | Avoids revalidating unchanged generated text | Removes a validator pass only when repair is identical | Exact ordinal equality plus ordinary changed-text validation | Small activation rate; aggregate helper drift can overstate savings | Keep; do not generalize into validation removal |
 | Generic verifier and typed repair framework | Partial primitives; framework missing | Deterministic checks, bounded repair, tool results, and state observations exist; generic verifier prompts failed to activate or improve | Medium | Reusable failure-directed repair | Potential extra call | Depends entirely on verifier | Abstraction without sound checks; more `ToolLoopStep` complexity | Do not build until two real capabilities with oracle headroom need the same seam |
 | Corrective retrieval and evidence abstention | Partial/deferred | Gold passage produced `5-6/10` versus `0/10`; forced web routing and several framing changes lost; Wiki packet and answer projection already promoted | Medium-high | Better grounded answers and fewer unsupported claims | Retrieval, rerank, or one retry | Strong only with attributable evidence | Irrelevant/contradictory context; unreliable public search | Find a distinct local or stable-source failure cluster first |
 | Verifier-guided candidate selection | Missing; general voting rejected | Self-consistency/voting added latency and lost; no current domain combines repeated misses with a sound selector | Domain-specific | Can select executable or state-valid candidates | Multiple generations | Strong only with external verifier | Cost and selection bias | Defer until a sound verifier already exists |
@@ -53,7 +54,7 @@ activation before scoring.
 | `ToolBackedResponseQualityGuards` | Capability-specific evidence interpretation | Certain supported tool outcomes can be rendered or rescued deterministically | A universal correctness judgment |
 | `CompletionValidator` heuristics | Deterministic response-quality checks | Empty, echoed, refused, or mechanically malformed contract responses | Factual or semantic correctness |
 | `CompletionValidator` LLM fallback | LLM completeness heuristic | A same-model quality opinion | Independent verification; it fails open by design |
-| `RepairLoop` | Bounded same-model repair using observed feedback | One targeted retry was attempted and rechecked | Correctness unless the triggering and final checks are external or deterministic |
+| `RepairLoop` | Bounded same-model repair using observed feedback | One targeted retry was attempted; changed text was rechecked, while exactly identical text stopped without redundant revalidation | Correctness unless the triggering and final checks are external or deterministic |
 
 The current pieces are sufficient for another narrow postcondition. They are
 not evidence that a generalized verifier abstraction would earn its cost.
@@ -149,18 +150,19 @@ not evidence that a generalized verifier abstraction would earn its cost.
 
 ## Selected next action
 
-The corrective local-retrieval, native provider-context, and conservative
-memory-tool candidates are now closed. Memory-tool v3 repeated good precision
-(`3/4` recalls and `0/6` negatives) and removed two permission prompts, but
-increased provider calls from 45 to 50 and stopped before repeat. Do not select
-another product mechanism immediately. First aggregate current-master artifacts
-answer-blind across the fixed 1.2B scorecards; run at most one abridged refresh
-if existing evidence cannot identify a repeated observable failure cluster with
-oracle headroom. Reopen learning only with a materially different,
-contamination-audited rationale-distillation or training-data hypothesis. The
-[learning-capacity recalibration](LEARNING_CAPACITY_RECALIBRATION.md) now
-defines that lane: evaluator-only timing and ceiling preparation first, then at
-most one scale-only 512-example candidate on a fresh 120-item development slice.
+Exact-identity completion-repair termination is now shipped; it resolved the
+content-free no-change-repair question without weakening changed-text
+validation. The next action is diagnostic, not another router: measure the
+model-visible request envelope on the repeated 8,192-token explicit-memory
+overflow. Current transport budgeting estimates message characters only; it
+does not include advertised tool schemas, output reserve, or provider chat
+template overhead, and it preserves every system message even above the soft
+cap. Record content-free system, non-system, tool-definition, requested-output,
+and configured-context estimates on one unchanged sentinel and one exact
+repeat. Do not prune tools, prompts, memory, safety, or history until that
+breakdown identifies the causal overage. If system plus required capability
+surface already exceeds context, use an oracle capability set before choosing
+between context-aware budgeting and another capability-scoped tool experiment.
 
 ## Research basis
 
