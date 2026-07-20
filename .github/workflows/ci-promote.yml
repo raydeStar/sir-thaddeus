@@ -55,7 +55,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup .NET from global.json
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -99,7 +99,7 @@ jobs:
           lfs: false
 
       - name: Setup .NET from global.json
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -152,7 +152,7 @@ jobs:
           lfs: false
 
       - name: Setup .NET from global.json
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -198,7 +198,7 @@ jobs:
           lfs: false
 
       - name: Setup .NET from global.json
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
