@@ -365,6 +365,7 @@ model success.
 
 | Priority | Candidate | Primary scorecard | Why now |
 | ---: | --- | --- | --- |
+| Completed | Deterministic Wiki-root non-action tool pruning | Harness capability and product safety | Fresh v2 development and exact repeat each improved `7/12` to `9/12`; disjoint validation improved `10/16` to `13/16`, with zero paired losses, full validity, correct activation, fewer model calls, and all non-action controls passing. Product promotion proceeds through protected review. |
 | Completed | Current-master postcondition and local-read recovery refresh | Harness capability diagnostic | Audited recovery produced four verified fresh gains but failed the exact-missing-resource boundary at 11/12 validity; the implementation was removed |
 | Completed | Source-diverse gold-headroom screen | Harness capability diagnostic | Compact support moved the frozen 1.2B model from `2/12` to `9/12` with seven wins and zero losses, but only extraction and arithmetic-result use cleared `2/2`; the frozen three-category breadth gate rejected a new product candidate. |
 | Completed | Fresh capability-closure scorecard | Harness capability diagnostic | Raw scored `4/20`, unchanged Thaddeus `15/20`, and compact gold support `19/20`. The harness captured 13/15 gold-supported positive wins, but `19/20` validity and `2/4` exact no-tool controls failed the frozen reliability gate; no category met the three-outcome residual-gap rule. |
