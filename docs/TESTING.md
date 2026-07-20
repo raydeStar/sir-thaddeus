@@ -309,6 +309,11 @@ in `input.json` for reproducibility. Expected state and scorer predicates stay
 outside the product repository. The harness tool allowlist is authoritative for
 these runs, so the Footman cannot remove a fixture-pinned tool.
 
+A Wiki observation with an empty `root_names` list requests the complete Wiki
+snapshot. It still writes `observations.json` when the library is empty, using
+`{"wiki":{"roots":[]}}`; omitting the Wiki observation is what disables Wiki
+capture. A nonempty list captures only the named roots.
+
 File paths must be relative and remain under the harness-created `files` root.
 Rooted paths and traversal are rejected. Only explicitly requested paths are
 captured, and file permissions expose only that disposable root to the runtime.

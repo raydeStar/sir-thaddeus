@@ -91,6 +91,52 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         Assert.Equal("notes/input.txt", test.Observations[1].Paths.Single());
     }
 
+    [Fact]
+    public void ResolveWikiObservationScope_EmptyNamesMeansObserveAllRoots()
+    {
+        HarnessObservationRequest[] requests =
+        [
+            new() { Type = "wiki", RootNames = [] },
+            new() { Type = "files", Paths = ["notes/input.txt"] }
+        ];
+
+        var (observeWiki, rootNames) =
+            HybridRuntimeHostAdapter.ResolveWikiObservationScope(requests);
+
+        Assert.True(observeWiki);
+        Assert.Empty(rootNames);
+    }
+
+    [Fact]
+    public void ResolveWikiObservationScope_NoWikiRequestDoesNotObserveWiki()
+    {
+        HarnessObservationRequest[] requests =
+        [
+            new() { Type = "files", Paths = ["notes/input.txt"] }
+        ];
+
+        var (observeWiki, rootNames) =
+            HybridRuntimeHostAdapter.ResolveWikiObservationScope(requests);
+
+        Assert.False(observeWiki);
+        Assert.Empty(rootNames);
+    }
+
+    [Fact]
+    public void ResolveWikiObservationScope_NamedRootsRemainScoped()
+    {
+        HarnessObservationRequest[] requests =
+        [
+            new() { Type = "WIKI", RootNames = ["Research", "", "Research"] }
+        ];
+
+        var (observeWiki, rootNames) =
+            HybridRuntimeHostAdapter.ResolveWikiObservationScope(requests);
+
+        Assert.True(observeWiki);
+        Assert.Equal(["Research"], rootNames);
+    }
+
     [Theory]
     [InlineData("deny", "deny")]
     [InlineData(" ONCE ", "once")]
