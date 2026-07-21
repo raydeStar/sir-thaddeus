@@ -131,6 +131,14 @@ public sealed record HarnessFileSetup
     [JsonPropertyName("content")]
     [YamlMember(Alias = "content")]
     public string Content { get; init; } = "";
+
+    /// <summary>
+    /// Optional Base64-encoded bytes for evaluator-owned binary fixtures.
+    /// Mutually exclusive with non-empty <see cref="Content"/>.
+    /// </summary>
+    [JsonPropertyName("content_base64")]
+    [YamlMember(Alias = "content_base64")]
+    public string? ContentBase64 { get; init; }
 }
 
 public sealed record HarnessWikiRootSetup
