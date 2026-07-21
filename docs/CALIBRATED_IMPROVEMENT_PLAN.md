@@ -4,7 +4,7 @@
 
 **Calibrated:** July 20, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `41ac1abd`
+**Current production baseline:** `2aa24bd7`
 
 ## Decision
 
@@ -144,6 +144,27 @@ newly advertised specialist tool is not broadly discoverable by this fixed
 1.2B model. Do not tune the consumed prompts or merge the tool alone. A future
 selection experiment must use fresh disjoint tasks, preserve no-action
 controls, and be materially narrower than global tool forcing.
+
+### July 21 date-selection prerequisite result
+
+A second, disjoint date slice tested whether deterministic first-tool selection
+was still the dominant layer before any selector code was written. Raw and
+unchanged Thaddeus each scored `0/8` positives. The unchanged v1 date tool then
+scored `3/8` positives and `3/6` controls with `14/14` validity, selecting
+`date_calculate` on `6/8` positives.
+
+Only two misses were tool omissions. Three others selected the tool but bound
+the wrong operation or arguments: forward offset, backward offset, and
+recurrence. Because the frozen selector gate required at least three gains over
+tool-only, selection could causally address at most two, and the candidate was
+stopped before implementation. One zero-call worktree-restore failure was
+discarded and replaced by a clean recovery. Evaluator PR `#136` preserves the
+fresh bank and verdict.
+
+The current open seam is semantic typed-argument binding, not routing. Any
+follow-on must first prove that a deterministic argument oracle corrects a
+fresh disjoint cluster. It may not combine tool selection, argument rewriting,
+and final-response projection in one candidate.
 
 ## The claim we are testing
 
@@ -509,6 +530,7 @@ model success.
 | Closed at baseline gate | XLSX column-fidelity headroom v1 | Harness capability diagnostic | Static inspection found that the reader can collapse physically absent cells, but a fresh 10-case run produced zero successful `file_read` results and `0/10` strict. The intended representation layer never activated, so the conditional gold arm and product candidate did not run. |
 | Closed at baseline gate | System-command outcome discovery v1 | Harness capability diagnostic | Unchanged Thaddeus scored `6/10` strict and `10/10` valid. Safety/no-action controls passed `4/4`; `system_execute` was selected on `5/6` authorized cases and all selected calls succeeded. Only one miss was tool-name selection, while the others were argument binding or final-response fidelity, so a forced-tool candidate was not authorized. |
 | Closed at development gate | Deterministic date arithmetic v1 | Harness capability | Compact gold evidence moved `1/8` raw and `0/8` unchanged to `8/8`, but the real read-only tool candidate reached only `2/8` positives with `4/4` controls. Both selected positive calls succeeded; selection coverage was only `2/8`, below the `7/8` gate. Product code was deleted and evaluator PR `#135` preserves the evidence. |
+| Stopped at prerequisite | Deterministic date first-tool selection v2 | Harness capability diagnostic | On a fresh disjoint slice, raw and unchanged scored `0/8`; tool-only scored `3/8` and already selected on `6/8`. Only two misses were omissions while three were wrong operation/argument bindings, so selection could not meet the frozen +3 causal gate. No selector code ran; evaluator PR `#136`. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |
