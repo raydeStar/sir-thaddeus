@@ -4,6 +4,25 @@ This roadmap keeps v1 focused. It does not turn beta or deferred features into v
 
 > **Discipline:** moving an item up a milestone requires deleting something else from that milestone, not adding to it.
 
+## Current Posture
+
+The v1 MVP is complete and the project is in measured-maintenance mode. The
+highest-leverage work is now:
+
+1. Keep protected CI, release packages, dependency health, and core smoke paths
+   green.
+2. Improve discoverability through a concise demo, public research write-up,
+   screenshots, release notes, and community feedback.
+3. Accept small product improvements when a real failure cluster and a
+   falsifiable mechanism already exist.
+4. Keep MMLU optimization paused until a materially different capacity
+   hypothesis appears; do not spend maintenance cycles on prompt variants,
+   voting, or architectural churn.
+
+The project may be reviewed every few weeks or months without losing research
+continuity. The experiment catalog and calibrated plan preserve the evidence
+needed to resume from the current baseline rather than rediscovering old ideas.
+
 ## v1.0 Power-User Release
 
 Goal: present Sir Thaddeus publicly as a credible local-first AI workspace for controlled agentic workflows.
