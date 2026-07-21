@@ -41,6 +41,20 @@ free to use the ordinary tool loop. Other Wiki mutations continue through
 normal model selection and may use by-name contracts that resolve unique local
 targets inside the tool.
 
+## Current local date and time utility
+
+High-confidence requests for the machine's current local date or time terminate
+through the existing deterministic utility step before model inference. The
+recognizer accepts bounded greeting, politeness, and concise response-style
+wrappers while rejecting event dates, future or historical dates, scheduling,
+elapsed-time questions, location-scoped time, timezone conversion, and compound
+requests that need another capability.
+
+Eligible responses come from the application clock and use no model or tool
+call. Ambiguous or non-current requests continue through the ordinary pipeline;
+the utility does not change memory, personality, permissions, safety,
+validation, retry, or streaming composition.
+
 When that same deterministic policy recognizes a Wiki-root request as
 informational, hypothetical, negated, or deferred, `wiki_root_create` is not
 advertised to the model for the turn. Read-only Wiki tools remain available,

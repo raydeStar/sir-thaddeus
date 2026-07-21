@@ -2,12 +2,13 @@
 
 **Evidence cutoff:** July 21, 2026
 
-**Production baseline:** `974f1b03`; empty-state Wiki observation coverage was
+**Production baseline:** `a1eaab94`; empty-state Wiki observation coverage was
 repaired through product PR `#256`, AngleSharp was pinned to `1.5.2` through
 security PR `#259`, the July outcome evidence was reconciled in PR `#260`, and
 the Wiki default-location projection was promoted through PR `#261`; native
 document evaluation support landed through PR `#263` and its evidence through
-PR `#264`, and structured file-creation findings through PR `#265`
+PR `#264`, structured file-creation findings through PR `#265`, and the date
+specialization family was closed through PRs `#268`-`#270`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -91,6 +92,20 @@ calls and latency while tying or losing to unchanged Thaddeus.
 
 ### Narrow harness gains
 
+- A bounded current-local-date/time utility passed train screening, exact
+  product comparison, repeat, and disjoint answer-blind validation without a
+  model or tool change. Unseen development coverage improved `5/30 -> 8/30`
+  with mechanical false activations reduced `1 -> 0`. Product comparison
+  repeated two genuine local-time correctness gains, six current-date
+  correctness ties with zero provider calls, and one repair of a harmful
+  location-scoped wrong-clock route with no observed paired loss. On repeat,
+  positive first-visible p50/p95 improved `211.5/260.5 ms -> 5.5/10.3 ms`,
+  model calls fell `22 -> 8`, and peak VRAM was unchanged. A final public
+  confirmation retained direction; its sole mechanical false label was a
+  direct current-date command omitted by the evaluator selector and was
+  preserved as a disclosed adjudication rather than silently rescored. This is
+  a narrow harness-capability and product-quality result, not MMLU or a general
+  language router.
 - Deterministic Wiki-root temporal-deferral pruning reproduced exactly on a
   fresh 16-case development slice, improving `4/16` unchanged to `11/16` with
   seven paired wins and zero losses. Disjoint validation improved `4/18` to
