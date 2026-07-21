@@ -159,8 +159,8 @@ activation. Independently promoted temporal-deferral and non-action policies
 now make that request ineligible before schema projection. On fresh inputs, v3
 reproduced `8/12 -> 10/12` in development and exact repeat, then validated at
 `10/18 -> 14/18` with four wins, zero losses, full validity, correct activation,
-and fewer calls. Complete protected product delivery and preserve its evaluator
-record before opening another mechanism.
+and fewer calls. Product PR `#261` carries the protected delivery; preserve its
+evaluator record before opening another mechanism.
 
 After delivery, resume economical outcome accumulation at an under-sampled open
 product boundary. Keep router, prompt, retrieval, response-contract,

@@ -118,8 +118,9 @@ calls and latency while tying or losing to unchanged Thaddeus.
   zero losses. Disjoint validation improved `10/18 -> 14/18` with four wins,
   zero losses, `8/8` default-location writes, `6/6` deferred/non-action state
   preservation, full validity, correct `8` intended and `10` inactive
-  activations, and model calls reduced `60 -> 53`. This is a promotion
-  candidate for argument-ownership reliability, not MMLU or model capacity.
+  activations, and model calls reduced `60 -> 53`. Promoted through protected
+  product PR `#261` as argument-ownership reliability, not MMLU or model
+  capacity.
 - A typed-capability Wiki confirmation candidate prevented two unauthorized
   root creations in development and exact repeat (`6/6` no-action states versus
   `4/6` unchanged), then prevented one further mutation on a disjoint validation
