@@ -154,9 +154,12 @@ a generalized verifier abstraction would earn its cost.
 ## Selected next action
 
 Wiki-root default-location v3 is promoted and its record is preserved. The next
-under-sampled local boundary, CSV/RTF document reading, then scored `8/12`
-strict and `11/12` valid. No category reached the frozen three-valid-failure
-gate; its misses were heterogeneous and authorized no oracle or product code.
+under-sampled local boundaries, CSV/RTF and then native PDF/DOCX/XLSX document
+reading, scored `8/12` strict with `11/12` valid and `6/12` strict with `10/12`
+valid. Neither cohort reached the frozen three-aligned-valid-failure gate. The
+native XLSX slice was only `1/4` strict, but its misses mixed invalid path
+mutations with semantic column selection, so it does not authorize a post-hoc
+format-specific candidate.
 
 Continue economical outcome accumulation at another under-sampled open product
 boundary. Keep router, prompt, retrieval, response-contract,

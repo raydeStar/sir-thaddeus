@@ -500,6 +500,27 @@ calls and latency while tying or losing to unchanged Thaddeus.
   Comprehension Benchmark informed taxonomy only; no public task content was
   copied or downloaded. Evaluator PR `#129`.
 
+### Native document-reading outcome discovery
+
+- Product PR `#263` added harness-only, traversal-safe Base64 file fixtures
+  with a 10 MiB decoded limit and suite-load validation. It did not change the
+  assistant pipeline or production file tools. All twelve generated native
+  fixtures passed the real PDF, DOCX, and XLSX readers before inference.
+- One frozen unchanged-harness invocation evaluated four newly authored files
+  per format and four tasks per category in 83.035 seconds. It scored `6/12`
+  strict, `10/12` valid, and zero runtime errors.
+- Field extraction scored `3/4`, row selection `2/4`, and table aggregation
+  `1/4`. PDF, DOCX, and XLSX scored `2/4`, `3/4`, and `1/4`; format was a
+  balance dimension, not the predeclared oracle gate.
+- The run used 35 model calls, 11 `file_read` calls with nine usable evidence
+  returns, 33,577 tokens, 589/1,424 ms first-token p50/p95,
+  5,128/11,700 ms end-to-end p50/p95, and 3,074 MB peak VRAM.
+- The six misses were heterogeneous: two invalid path mutations, one failure
+  to read, one adjacent-column interpretation, one response that named the
+  date but omitted the requested row label, and one counting error. No category
+  supplied three aligned valid failures. No oracle, repeat, validation, or
+  product candidate ran; evaluator PR `#130`.
+
 ## What remains uncertain
 
 - Whether continued labeled outcome accumulation reveals a repeated,
