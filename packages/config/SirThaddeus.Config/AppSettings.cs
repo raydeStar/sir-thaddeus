@@ -181,6 +181,9 @@ public sealed record UserProfileSettings
 /// </summary>
 public sealed record LlmSettings
 {
+    [JsonPropertyName("provider")]
+    public string Provider { get; init; } = "lmstudio";
+
     [JsonPropertyName("baseUrl")]
     public string BaseUrl { get; init; } = "http://localhost:1234";
 
@@ -189,6 +192,12 @@ public sealed record LlmSettings
 
     [JsonPropertyName("model")]
     public string Model { get; init; } = "";
+
+    [JsonPropertyName("codexCliPath")]
+    public string? CodexCliPath { get; init; }
+
+    [JsonPropertyName("codexReasoningEffort")]
+    public string CodexReasoningEffort { get; init; } = "high";
 
     [JsonPropertyName("preloadModelKey")]
     public string? PreloadModelKey { get; init; }

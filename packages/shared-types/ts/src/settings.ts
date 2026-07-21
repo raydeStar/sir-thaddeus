@@ -12,6 +12,8 @@ export interface LlmSettings {
   gatekeeperModelId?: string | null;
   reusePrimaryForGatekeeperOnSharedEndpoint?: boolean;
   gatekeeperEnabled?: boolean;
+  codexCliPath?: string | null;
+  codexReasoningEffort?: string;
 }
 
 export interface VoiceSettings {

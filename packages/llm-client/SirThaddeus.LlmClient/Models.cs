@@ -291,6 +291,12 @@ public sealed class ConfiguredLlmModelRouter : ILlmModelRouter
 public sealed record LlmClientOptions
 {
     /// <summary>
+    /// Transport provider. <c>lmstudio</c> (the default) uses OpenAI-compatible
+    /// HTTP; <c>codex-cli</c> uses a locally authenticated Codex executable.
+    /// </summary>
+    public string Provider { get; init; } = "lmstudio";
+
+    /// <summary>
     /// Base URL of the OpenAI-compatible API (e.g. http://localhost:1234).
     /// </summary>
     public string BaseUrl { get; init; } = "http://localhost:1234";
@@ -305,6 +311,17 @@ public sealed record LlmClientOptions
     /// Model identifier to use.
     /// </summary>
     public string Model { get; init; } = "auto";
+
+    /// <summary>
+    /// Optional absolute path to the Codex executable. When blank, the provider
+    /// resolves <c>codex</c> from PATH.
+    /// </summary>
+    public string? CodexCliPath { get; init; }
+
+    /// <summary>
+    /// Codex reasoning effort for the isolated provider process.
+    /// </summary>
+    public string CodexReasoningEffort { get; init; } = "high";
 
     public string? PreloadModelKey { get; init; }
 
@@ -403,4 +420,11 @@ public sealed record LlmClientOptions
         const int ThinkingMinTokens = 4096;
         return Math.Max(requested, ThinkingMinTokens);
     }
+}
+
+public static class LlmProvider
+{
+    public static bool IsCodexCli(string? provider) =>
+        string.Equals(provider?.Trim(), "codex", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(provider?.Trim(), "codex-cli", StringComparison.OrdinalIgnoreCase);
 }

@@ -315,9 +315,12 @@ public static class SettingsManager
             ProductProfileId = StringOrFallback(settings.ProductProfileId, defaults.ProductProfileId),
             Llm = llm with
             {
+                Provider = StringOrFallback(llm.Provider, defaults.Llm.Provider),
                 BaseUrl = StringOrFallback(llm.BaseUrl, defaults.Llm.BaseUrl),
                 ChatCompletionPath = EnsureSlashPath(StringOrFallback(llm.ChatCompletionPath, defaults.Llm.ChatCompletionPath)),
                 Model = StringOrFallback(llm.Model, defaults.Llm.Model),
+                CodexCliPath = OptionalString(llm.CodexCliPath),
+                CodexReasoningEffort = NormalizeCodexReasoningEffort(llm.CodexReasoningEffort),
                 PreloadModelKey = OptionalString(llm.PreloadModelKey),
                 ContextLength = IntOrFallback(llm.ContextLength, defaults.Llm.ContextLength, min: 1024, max: 131_072),
                 MaxConcurrentLlmRequests = IntOrFallback(llm.MaxConcurrentLlmRequests, defaults.Llm.MaxConcurrentLlmRequests, min: 1, max: 4),
@@ -584,6 +587,14 @@ public static class SettingsManager
 
     private static string OptionalString(string? value)
         => (value ?? "").Trim();
+
+    private static string NormalizeCodexReasoningEffort(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized is "none" or "minimal" or "low" or "medium" or "high" or "xhigh"
+            ? normalized
+            : "high";
+    }
 
     private static int IntOrFallback(int value, int fallback, int min, int max)
     {

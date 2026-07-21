@@ -29,7 +29,9 @@ public sealed record LlmSettings(
     int WarmupTimeoutSeconds = 120,
     int KeepWarmIntervalMinutes = 30,
     int MaxInputTokensSoftCap = 4000,
-    int MaxOutputTokensDefault = 700);
+    int MaxOutputTokensDefault = 700,
+    string? CodexCliPath = null,
+    string CodexReasoningEffort = "high");
 
 /// <summary>Voice provider configuration.</summary>
 public sealed record VoiceSettings(

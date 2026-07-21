@@ -45,6 +45,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
     private DateTimeOffset? _lastWarmupAt;
     private DateTimeOffset? _lastRequestAt;
     private readonly AsyncLocal<LlmTaskKind> _requestTaskKind = new();
+    private CodexCliLlmClient? _codexCli;
 
     public LmStudioClient(
         LlmClientOptions options,
@@ -54,7 +55,10 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? NullLogger<LmStudioClient>.Instance;
         _http = httpClient ?? new HttpClient();
-        _http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/'));
+        if (!LlmProvider.IsCodexCli(options.Provider))
+            _http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/'));
+        else
+            _codexCli = new CodexCliLlmClient(options);
 
         // ── Sir Thaddeus notes: A butler must exhibit patience! ───
         // Local GPUs require time to sweep their VRAM floors. 
@@ -86,6 +90,28 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         lock (_optionsGate)
         {
             _options = options;
+
+            if (LlmProvider.IsCodexCli(options.Provider))
+            {
+                var oldCodex = _codexCli;
+                _codexCli = new CodexCliLlmClient(options);
+                _requestGate = GetEndpointGate(options);
+                _confirmedLoadedModels.Clear();
+                Task.Run(() =>
+                {
+                    try { oldCodex?.Dispose(); }
+                    catch { /* best effort */ }
+                });
+                return;
+            }
+
+            var previousCodex = _codexCli;
+            _codexCli = null;
+            Task.Run(() =>
+            {
+                try { previousCodex?.Dispose(); }
+                catch { /* best effort */ }
+            });
 
             var targetBase = options.BaseUrl.TrimEnd('/');
             if (!string.IsNullOrWhiteSpace(targetBase))
@@ -224,6 +250,25 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
     {
         ArgumentNullException.ThrowIfNull(messages);
         requestContext ??= new LlmRequestContext();
+
+        CodexCliLlmClient? codexCli;
+        LlmClientOptions options;
+        lock (_optionsGate)
+        {
+            codexCli = _codexCli;
+            options = _options;
+        }
+
+        if (codexCli is not null)
+        {
+            return await codexCli.ChatAsync(
+                    messages,
+                    tools,
+                    options.EffectiveMaxTokens(maxTokensOverride),
+                    forcedToolName,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         var providerRequestId = "llm_" + Guid.NewGuid().ToString("N")[..12];
         var routingCorrelationId = Activity.Current?.GetBaggageItem("routing_correlation_id") ?? string.Empty;
@@ -612,6 +657,9 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
 
     public LlmUsageSnapshot GetUsageSnapshot()
     {
+        if (GetCodexCliSnapshot() is { } codexCli)
+            return codexCli.GetUsageSnapshot();
+
         var options = GetOptionsSnapshot();
         var contextWindow = options.ContextWindowTokens > 0
             ? options.ContextWindowTokens
@@ -630,6 +678,9 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
     /// <inheritdoc />
     public async Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
     {
+        if (GetCodexCliSnapshot() is { } codexCli)
+            return await codexCli.GetModelNameAsync(cancellationToken).ConfigureAwait(false);
+
         try
         {
             var response = await _http.GetAsync(NormalizePath(GetOptionsSnapshot().ModelsPath), cancellationToken);
@@ -663,6 +714,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
 
     public void Dispose()
     {
+        GetCodexCliSnapshot()?.Dispose();
         _http.Dispose();
     }
 
@@ -814,6 +866,9 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
 
     public async Task<LlmWarmupResult> WarmupAsync(CancellationToken cancellationToken = default)
     {
+        if (GetCodexCliSnapshot() is { } codexCli)
+            return await codexCli.WarmupAsync(cancellationToken).ConfigureAwait(false);
+
         var options = GetOptionsSnapshot();
         if (!options.EnableStartupWarmup)
         {
@@ -890,6 +945,9 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
 
     public LlmRuntimeHealthSnapshot GetRuntimeHealthSnapshot()
     {
+        if (GetCodexCliSnapshot() is { } codexCli)
+            return codexCli.GetRuntimeHealthSnapshot();
+
         var options = GetOptionsSnapshot();
         return new LlmRuntimeHealthSnapshot
         {
@@ -1048,6 +1106,12 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
     {
         lock (_optionsGate)
             return _options;
+    }
+
+    private CodexCliLlmClient? GetCodexCliSnapshot()
+    {
+        lock (_optionsGate)
+            return _codexCli;
     }
 
     private void TrackUsage(TokenUsage? usage)

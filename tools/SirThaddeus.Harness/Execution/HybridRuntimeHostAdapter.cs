@@ -326,7 +326,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         {
             Llm = defaults.Llm with
             {
-                Provider = "lmstudio",
+                Provider = string.IsNullOrWhiteSpace(llm.Provider) ? "lmstudio" : llm.Provider,
                 ModelId = string.IsNullOrWhiteSpace(llm.Model) ? "auto" : llm.Model,
                 BaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? "http://127.0.0.1:1234/v1" : baseUrl,
                 ApiKey = null,
@@ -342,6 +342,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
                 ReusePrimaryForGatekeeperOnSharedEndpoint = llm.ReusePrimaryModelForGatekeeperOnSharedEndpoint,
                 EnableStartupWarmup = false,
                 EnableKeepWarm = false,
+                CodexCliPath = llm.CodexCliPath,
+                CodexReasoningEffort = llm.CodexReasoningEffort,
             },
             Files = (defaults.Files ?? throw new InvalidOperationException(
                 "Default file settings are unavailable.")) with
