@@ -25,6 +25,10 @@
 
 ### Measurement and diagnostics
 
+- The public research guide now explains the three scorecards, paired-control
+  loop, promotion gates, benchmark-integrity boundary, representative wins,
+  and honest capacity limits without requiring readers to traverse the full
+  experiment ledger.
 - Harness reruns reuse current builds, avoid duplicate pure-compute tool calls,
   and report warmup, reset, test-work, host, and harness-overhead timing.
 - Rejected self-consistency, shadow turn-planning, validation-skip, and unused

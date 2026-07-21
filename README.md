@@ -17,6 +17,8 @@
     &nbsp;·&nbsp;
     <a href="#measured-not-guessed">Benchmarks</a>
     &nbsp;·&nbsp;
+    <a href="#the-improvement-loop">Research Method</a>
+    &nbsp;·&nbsp;
     <a href="https://github.com/raydeStar/sir-thaddeus">Star the Project</a>
   </p>
 
@@ -47,6 +49,34 @@ Use a model on your machine and leave network tools off to keep the core experie
 Sir Thaddeus tests a specific claim: **a fixed small model can complete more useful everyday work when it is given well-designed deterministic capabilities, evidence, state, permissions, and verification.** Replacing it with a larger or newer model may be a sound deployment choice, but it is not evidence that the harness improved the original model.
 
 Optimization work therefore changes one generalized mechanism at a time, compares it with the same raw model and unchanged product, and keeps only repeatable gains. The active priorities, gates, and stop rules live in the [calibrated improvement plan](docs/CALIBRATED_IMPROVEMENT_PLAN.md); the [inference-method gap map](docs/research/INFERENCE_METHOD_GAP_MAP.md) ranks research ideas against measured Thaddeus failures; and the durable record of what worked, failed, or remains uncertain lives in the [research findings](docs/research/README.md).
+
+<a id="the-improvement-loop"></a>
+## The Improvement Loop
+
+This project is no longer developed by asking an AI to "make it better." Each
+behavior change is treated as a falsifiable experiment against a frozen
+baseline:
+
+```mermaid
+flowchart LR
+    H["One hypothesis"] --> T["Cheap reject-only checks"]
+    T --> D["Paired development run"]
+    D --> R["Exact repeat"]
+    R --> V["Disjoint validation"]
+    V --> P["Product, safety, and resource gates"]
+    P --> K["Merge the win or delete the code"]
+```
+
+Model capacity, harness capability, and product quality are scored separately.
+A calculator can improve a user's outcome without making the model better at
+closed-book math; a faster route is not a win if it causes unsafe actions; and
+a benchmark fluctuation is not evidence until the exact candidate repeats on
+unseen inputs.
+
+That distinction is the research contribution. Read
+[The Small-Model Improvement Method](docs/RESEARCH_METHOD.md) for the complete
+public protocol, representative findings, anti-benchmaxxing boundary, and a
+template for reproducing the work.
 
 <a id="control-is-the-feature"></a>
 ## Control Is the Feature
@@ -132,6 +162,24 @@ The runtime binds to `127.0.0.1` on an ephemeral port. A bearer token rotates ea
 
 "Agentic" is cheap copy. Sir Thaddeus ships the harness that can prove—or disprove—the claim.
 
+Representative results show both the value and the boundary of the approach:
+
+| Question | Result | What it means |
+| --- | ---: | --- |
+| Can existing capabilities improve ordinary verified outcomes for the same 1.2B model? | **4 / 20 raw → 15 / 20 Thaddeus** | The harness captured 13 of 15 gold-supported positive outcomes, but this is not a closed-book intelligence claim. |
+| Can a narrow file-path seam remove mechanical model work safely? | **5 / 16 → 12 / 16**, repeated | Seven paired wins, zero losses, full validity, fewer calls and lower latency. |
+| Can deterministic action policy improve Wiki reliability? | **4 / 18 → 13 / 18** | Nine wins, zero losses, and all deferred requests preserved state. |
+| Can a machine-clock utility improve speed without a model call? | positive p50 **211.5 ms → 5.5 ms** | Two correctness gains, one harmful route repair, and no observed loss. |
+| Did the harness raise stabilized MMLU-Pro? | **10 / 20 raw = 10 / 20 harness** | No reproducible capacity uplift; MMLU optimization is paused. |
+| Did more inference help? | voting **37.9% → 27.9%** | No. The slower mechanism was rejected and removed. |
+
+<details>
+<summary><strong>Open the full evidence table</strong></summary>
+
+The rows below include promoted results, diagnostic ceilings, rejected
+candidates, and inconclusive boundaries. They are intentionally not filtered
+to show only wins.
+
 | Probe | Baseline | Candidate or augmented result | Honest interpretation |
 | --- | ---: | ---: | --- |
 | 1.2B model, six math tasks | **0 / 6** without tools | **5 / 6** with `calculator` | The harness improved the user outcome; it did not change closed-book model capacity. |
@@ -155,6 +203,8 @@ The runtime binds to `127.0.0.1` on an ephemeral port. A bearer token rotates ea
 | 1.2B Q4, broader matched 20-task capability ablation | **4 / 20** with task capabilities withheld | **10 / 20** with existing capabilities available | Seven paired wins and one loss confirm net capability value, concentrated in calculator work at **4 / 4**. The frozen gate rejected the broader claim because it required eight wins and one deferred no-action request incorrectly created state. |
 | 1.2B Q4, fresh 32-task failure discovery | Diagnostic only; no candidate arm | **19 / 32** unchanged harness; **31 / 32** valid | Computation reached **4 / 4** and local files, Wiki creation, and no-action safety each reached **3 / 4**. Instruction contracts and multi-source synthesis each failed three cases, but both belong to closed mechanism families, so no oracle or product code ran. |
 | 1.2B Q4, fresh 12-task local document discovery | Diagnostic only; no candidate arm | **8 / 12** unchanged harness; **11 / 12** valid | CSV/RTF field extraction and row selection each reached **3 / 4**; table aggregation reached **2 / 4**. Ten document reads returned usable evidence, but the four misses split across semantic binding, tool commitment, path binding, and incomplete arithmetic, so no oracle or product code ran. |
+
+</details>
 
 The scorer grades actual values, not answer shape. A Docker canary aborts broken sandbox runs instead of blaming the model. Roughly **1,900 lines** of benchmark-specific shortcut solvers were removed so the suite exercises the real model and tool pipeline.
 

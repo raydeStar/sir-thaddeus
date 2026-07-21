@@ -1,10 +1,11 @@
 # Calibrated Improvement Plan
 
-**Status:** active research plan
+**Status:** maintenance-ready; harness-capability work may continue, while the
+MMLU capacity campaign is paused pending a materially different mechanism
 
-**Calibrated:** July 20, 2026
+**Calibrated:** July 21, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `8de27f9b`
+**Current production baseline:** `23c5f632`
 
 ## Decision
 
@@ -12,6 +13,12 @@ Sir Thaddeus has the right foundation. The next phase is not a broad
 orchestration rewrite. It is a sequence of small, falsifiable optimizations at
 existing seams, promoted only when they improve a declared scorecard without
 damaging the others.
+
+The project has passed MVP and does not require continuous architectural work.
+During maintenance periods, prioritize release health, documentation,
+discoverability, and external reproduction over creating another candidate.
+Resume behavioral experiments only when a fresh measured failure cluster or a
+materially different research mechanism supplies a falsifiable reason.
 
 The project will no longer treat a newer or larger comparison model as an
 improvement to the harness. Model comparisons remain useful as diagnostic
