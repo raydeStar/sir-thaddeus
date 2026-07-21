@@ -2,7 +2,7 @@
 
 **Evidence cutoff:** July 21, 2026
 
-**Production baseline:** `a1eaab94`; empty-state Wiki observation coverage was
+**Production baseline before the current promotion:** `a1eaab94`; empty-state Wiki observation coverage was
 repaired through product PR `#256`, AngleSharp was pinned to `1.5.2` through
 security PR `#259`, the July outcome evidence was reconciled in PR `#260`, and
 the Wiki default-location projection was promoted through PR `#261`; native
@@ -105,7 +105,7 @@ calls and latency while tying or losing to unchanged Thaddeus.
   direct current-date command omitted by the evaluator selector and was
   preserved as a disclosed adjudication rather than silently rescored. This is
   a narrow harness-capability and product-quality result, not MMLU or a general
-  language router.
+  language router. Promoted through product PR `#271`.
 - Deterministic Wiki-root temporal-deferral pruning reproduced exactly on a
   fresh 16-case development slice, improving `4/16` unchanged to `11/16` with
   seven paired wins and zero losses. Disjoint validation improved `4/18` to
