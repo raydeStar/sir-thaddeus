@@ -56,6 +56,14 @@ such as `now`, `today`, or `immediately`, future-purpose clauses, and temporal
 words inside root names remain eligible for ordinary creation. The policy is
 deterministic, adds no model call, and never schedules work for later.
 
+For an eligible immediate root creation with no user-owned location, the first
+model-visible `wiki_root_create` schema contains only the required root name.
+The configured Wiki library remains application-owned, while the actual MCP
+tool, permission boundary, and persisted result are unchanged. Requests that
+name a path, folder, directory, location, or drive retain the complete schema;
+deferred and non-action requests remain ineligible before this projection is
+considered.
+
 ## Attached local Wiki evidence
 
 When the user explicitly attaches an entire Wiki library, root, or folder, the

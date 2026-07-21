@@ -153,26 +153,22 @@ a generalized verifier abstraction would earn its cost.
 
 ## Selected next action
 
-The expanded answer-blind outcome census is complete. It reused 57 compatible
-fixed-model outcomes across five frozen cohorts without another model call.
-Verified computation scored `6/6` and verified state change `5/6`. Six numeric
-failure buckets met the count screen, but manual attribution found each already
-closed or heterogeneous. The attached-Wiki lead, for example, was two literal
-response-contract misses plus one semantic counting miss. Counts alone therefore
-authorize no oracle and no new fixed-model runtime mutation.
+The strongest retained candidate has now been recovered honestly on current
+master. The original Wiki-root default-location v2 was blocked by one deferred
+activation. Independently promoted temporal-deferral and non-action policies
+now make that request ineligible before schema projection. On fresh inputs, v3
+reproduced `8/12 -> 10/12` in development and exact repeat, then validated at
+`10/18 -> 14/18` with four wins, zero losses, full validity, correct activation,
+and fewer calls. Product PR `#261` carries the protected delivery; preserve its
+evaluator record before opening another mechanism.
 
-Pause router, prompt, retrieval, response-contract, path-binding, and generic
-postcondition candidates until fresh labeled outcomes expose a repeated,
-independently verifiable seam. The next investment is economical outcome
-accumulation at an under-sampled open product boundary, followed eventually by
-risk/coverage analysis, calibrated abstention, or disclosed specialist
-escalation. A new candidate still requires at least three aligned failures,
-answer-blind oracle headroom, and a mechanism materially different from the
-closed families. The public benchmark fit audit supports borrowing
-deterministic-state and insufficient-information archetypes, but no audited
-external system is a free, local, sub-ten-minute drop-in scorecard for the
-current capability surface. The 57-outcome census remains below the 300-outcome
-complementarity gate.
+After delivery, resume economical outcome accumulation at an under-sampled open
+product boundary. Keep router, prompt, retrieval, response-contract,
+path-binding, and generic postcondition candidates paused until fresh labeled
+outcomes expose a repeated independently verifiable seam. A new candidate still
+requires answer-blind headroom and a mechanism materially different from closed
+families. The 57-outcome census remains below the 300-outcome complementarity
+gate for specialist escalation.
 
 ## Research basis
 
