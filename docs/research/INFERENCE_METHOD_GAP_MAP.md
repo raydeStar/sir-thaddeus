@@ -1,8 +1,8 @@
 # Inference Method Gap Map
 
 **Reconciled:** July 21, 2026
-**Production baseline:** `2aa24bd7`
-**Evaluator baseline:** `1d09e232`
+**Production baseline:** `8de27f9b`
+**Evaluator baseline:** `eb74f189`
 
 This map ranks research mechanisms against Sir Thaddeus evidence. It does not
 replace the experiment ledger or promotion policy. Model capacity, fixed-model
@@ -23,8 +23,9 @@ headroom, an independently checkable score, and acceptable scope. Date
 arithmetic established strong result-evidence headroom, but a second disjoint
 slice showed that tool-only already selected on `6/8`: only two misses were
 omissions and three were wrong operation/argument bindings. Selection v2 was
-stopped before code because it could not meet its +3 causal gate. The remaining
-testable seam is a separate typed-argument oracle, not another router.
+stopped before code because it could not meet its +3 causal gate. A third
+typed-binding prerequisite then selected on only `4/6`, below its `5/6` gate.
+The gold arm did not run, and the date family is closed on current evidence.
 
 ## Reconciled gap analysis
 
@@ -47,7 +48,7 @@ testable seam is a separate typed-argument oracle, not another router.
 | Fresh representative outcome discovery | Diagnostic complete; no open candidate | V2 found no three-case cluster. V3 scored `19/32` strict and `31/32` valid. A later local document cohort scored `8/12` strict and `11/12` valid, but no category reached three aligned valid failures | High as an evaluation method | Finds current failure regions without committing to architecture | The document cohort used one 12-case invocation and 86.854 seconds | Strong for observed cases, not prevalence | Synthetic mixes can create misleading clusters | Keep accumulating outcomes; require both prevalence and a materially open seam |
 | XLSX cell-coordinate fidelity | Static defect observed; outcome gate rejected | The reader ignores cell references and can collapse absent middle cells, but a fresh 10-case cohort produced zero successful reads and therefore zero representation activations | High when XLSX evidence is reached | Preserve table semantics before model reasoning | Negligible deterministic parsing cost | Strong at the extracted-text layer; unproven for end outcomes | A correct low-level fix can still add no user value when tool selection fails upstream | Defer until three fresh successful XLSX reads expose aligned downstream misses |
 | Audited system-command selection | Existing path adequate; forced selection rejected | A fresh six-positive/four-control run passed all controls; `system_execute` was selected on `5/6` authorized requests and every selected call succeeded. Four strict misses split across one omission, one wrong command, and two response-contract failures | High on local desktop tasks | Execute allowlisted commands with explicit permission and observable output | One tool round plus completion handling | Strong for execution success; mixed for intent and rendering | Raw command output may contain sensitive machine details; forcing a tool cannot fix arguments or synthesis | Keep existing audited path; require three aligned fresh misses at one open layer before another candidate |
-| Deterministic date arithmetic | Result-evidence headroom passed; tool and selection candidates rejected/stopped | V1 gold reached `8/8`, but tool-only reached `2/8`. On disjoint v2, tool-only reached `3/8`, already selected on `6/8`, and exposed three wrong operation/argument bindings. Selection was stopped before implementation | High for explicit fixed-date requests | Exact calendar arithmetic once semantic arguments are correct | One tool round | Strong for tool result and strict final outcome | Lexical overreach, wrong operation, invented dates, response-contract drift | Permit only a separate fresh typed-argument oracle; selection-only is closed on current evidence |
+| Deterministic date arithmetic | Closed after three disjoint slices | V1 gold reached `8/8`, but tool-only reached `2/8`. V2 tool-only reached `3/8` with `6/8` selection. V3 reached `1/6` with `4/6` selection; three selected calls had wrong arguments and two recurrences omitted the tool | High for explicit fixed-date requests | Exact calendar arithmetic once the whole semantic contract is correct | One tool round plus any parser/selector overhead | Strong for executed result; weak for full intent | A bundled vertical feature can overfit authored fixtures and add broad complexity | Close; reopen only from ordinary labeled outcomes, not more date-specific fixtures |
 
 ## Verification audit
 
@@ -167,19 +168,18 @@ format-specific candidate. A fresh sparse-XLSX follow-up then scored `0/10`
 with zero successful reads. Its one-tool prompt was correctly assembled, so the
 conditional cell-coordinate oracle remained ineligible and did not run.
 
-Date selection is now closed on current evidence. On a fresh disjoint slice,
-tool-only already selected on `6/8`; only two misses were omissions, while
-three selected calls bound the wrong operation or arguments. The predeclared
-selection-only gain was therefore impossible and no selector code ran.
+Date specialization is closed on current evidence. V2 showed inconsistent
+selection and three argument-binding misses; the fresh v3 prerequisite then
+selected on only `4/6`, below its frozen binding-dominance gate. Gold and
+product code did not run. Do not bundle selection, parsing, rewriting, and
+response projection to optimize these authored fixtures.
 
-The next economical study may test a typed-argument oracle for explicit ISO
-date calculations on another disjoint slice. It must isolate semantic argument
-construction from tool selection and final-response projection, and must prove
-that correct typed calls produce strict outcomes before any product rewriter or
-parser is considered. If the oracle does not expose a broad correctable cluster,
-close the date family and return to under-sampled outcome discovery. The
-57-outcome census remains below the 300-outcome complementarity gate for
-specialist escalation.
+Return to economical outcome accumulation at an under-sampled, independently
+verifiable product boundary. Keep broad routing, prompt, retrieval,
+response-contract, path-binding, schema-only file creation, generic
+postcondition, and date-specific candidates paused until ordinary labeled
+outcomes expose a repeated open seam. The 57-outcome census remains below the
+300-outcome complementarity gate for specialist escalation.
 
 ## Research basis
 
