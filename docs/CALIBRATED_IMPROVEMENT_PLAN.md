@@ -4,7 +4,7 @@
 
 **Calibrated:** July 20, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `5e9447ea`
+**Current production baseline:** `53224fea`
 
 ## Decision
 
@@ -290,6 +290,17 @@ implementation family is closed. A future attempt requires a materially
 different resource-existence signal and a new suite, not another lexical
 detector tuned to the consumed case.
 
+The next additive local-file mutation also stopped at development. A V1
+allowed-root text-create tool reached every authorized tool-selection case and
+preserved every safety outcome, but created `0/5` exact requested artifacts.
+A fresh V2 schema replaced free-form path and content arguments with path
+components, line elements, and an explicit trailing-newline boolean. It again
+passed `5/5` safety outcomes but completed only `1/5` exact authorized files,
+below the frozen `4/5` gate. No unchanged control, repeat, or validation was
+spent. Both product branches were deleted. Do not reopen schema-only file
+creation without a materially different semantic-binding signal; structural
+validity and safe execution are not the remaining bottlenecks.
+
 ### Phase 4 - Open a separate learning-based capacity lane
 
 Objective: test the most plausible route to a material closed-book gain after
@@ -438,6 +449,7 @@ model success.
 | Completed | Expand the representative verified-outcome scorecard | Evaluation infrastructure | The fresh 20-task expansion confirmed large fixed-model harness value (`4/20` raw to `15/20` unchanged) but found no repeated residual category large enough to authorize another mechanism. Preserve the consumed evidence and select the next experiment only from a fresh causal seam. |
 | Completed | Fresh outcome discovery v2 | Harness capability diagnostic | A balanced 16-task triage scored `7/16` strict and `11/16` valid. Local-file extraction missed `0/2`, but its preauthored reserve passed `1/1` with `file_read`, leaving no qualifying three-case cluster and authorizing no oracle or product candidate. The staged 17-case screen used about 90 seconds of hot model time. |
 | Completed | Fresh outcome discovery v3 | Harness capability diagnostic | Two balanced 16-case invocations scored `19/32` strict and `31/32` valid. Computation reached `4/4`; local files, Wiki creation, and no-action safety each reached `3/4`. Instruction contracts and multi-source synthesis each failed `3/4`, but both map to already-closed mechanism families, so no oracle or product candidate was authorized. |
+| Closed | Scoped additive text-file creation v1-v2 | Harness capability | Both revisions preserved `5/5` safety outcomes. V1 produced `0/5` exact authorized artifacts; V2's typed path/line/newline schema produced `1/5`, below its frozen `4/5` gate. Schema shape alone did not solve semantic path and content binding, so both product branches were deleted and no repeat or holdout ran. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |

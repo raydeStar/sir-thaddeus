@@ -69,6 +69,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Contract verification user-role change | **Rejected; family paused** | Changing the verifier follow-up role produced no executable tool calls. |
 | Tool-semantic outcome baseline v1 | **Diagnostic accepted; no candidate** | Full menu scored `7/16` versus `3/16` oracle-pruned, `1/16` no-tools, and `3/16` raw. Full completed required tool paths on `8/10` positives and made zero forbidden calls. Oracle pruning had zero wins and four losses, so no routing, relevance, or pruning candidate was authorized. |
 | Provider-constrained structured output v2 | **Deferred for no headroom** | Unconstrained and constrained were both `10/10` structurally valid and `9/10` semantically exact. The identical semantic miss was not schema-repairable; no product code or validation run was justified. |
+| Scoped additive text-file creation v1-v2 | **Rejected; schema-only family closed** | V1 safely selected the additive tool but produced `0/5` exact authorized artifacts. V2 required path components, line elements, and an explicit trailing-newline boolean; it preserved `5/5` safety outcomes but reached only `1/5` authorized exact, below the frozen `4/5` gate. Remaining failures were semantic path/content binding and one missing call, not execution or permission defects. Both product branches were deleted; evaluator PRs `#131` and `#132`. |
 | Current-master tool-semantic refresh | **Diagnostic accepted** | After the promoted answer-only evidence projection, unchanged Thaddeus scored `9/16` with full validity versus `3/16` raw and `1/16` same-prompt direct. This is a local harness-outcome signal, not a general or MMLU uplift. |
 | Declared-capability route oracle | **Oracle passed; product path rejected** | An evaluator-only split reached `13/32` twice, four above both raw and harness. Substituting a compact product-invariant prompt reached `11/32`, below the frozen `12/32` and `+3` gate, so no production router was implemented. |
 | Structured tool-failure evidence oracle | **Rejected before product implementation** | Concise verified permission/unavailable evidence under the production prompt produced `0/3` strict with `3/3` validity. Missing error metadata was not the bottleneck; the closed literal-response family was not revived. |
@@ -182,6 +183,9 @@ Use these repository-relative locations in the sibling
 - Tool syntax and contract headroom:
   `experiments/verdicts/2026-07-16-tool-call-syntax-headroom-v1.md` and
   `2026-07-16-explicit-format-contract-headroom-v1.md`.
+- Scoped additive text-file creation:
+  `experiments/verdicts/2026-07-20-scoped-text-file-create-v1.md` and
+  `experiments/verdicts/2026-07-20-scoped-text-file-create-structured-v2.md`.
 - Tool-semantic attribution:
   `experiments/manifests/tool-semantic-outcome-baseline-v1.yaml` and
   `experiments/verdicts/2026-07-16-tool-semantic-outcome-baseline-v1.md`.
