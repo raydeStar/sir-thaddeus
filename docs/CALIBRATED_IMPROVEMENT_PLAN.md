@@ -4,7 +4,7 @@
 
 **Calibrated:** July 20, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `53224fea`
+**Current production baseline:** `41ac1abd`
 
 ## Decision
 
@@ -121,6 +121,29 @@ candidate could address only one case and therefore failed the predeclared
 three-case authorization gate. No product branch, repeat, or holdout ran. Raw
 `systeminfo` output contains local machine details and remains ignored; only
 answer-blind telemetry was published in evaluator PR `#134`.
+
+### July 21 deterministic date-arithmetic result
+
+Eight fresh fixed-date tasks established a large evidence ceiling: raw minimal
+scored `1/8`, unchanged Thaddeus scored `0/8`, and compact gold date evidence
+scored `8/8` across calendar differences, date offsets, calendar properties,
+and schedule/time arithmetic. This authorized one narrow read-only
+`date_calculate` candidate with strict ISO inputs and six explicit operations.
+
+The real production-equivalent candidate then scored only `2/8` strict
+positives while preserving `4/4` malformed, missing-input, hypothetical, and
+negated controls. Both selected positive calls executed correctly, but the
+model selected the tool on only `2/8` positives versus the frozen `7/8` gate.
+The result was below both the `6/8` promotion gate and the explicit `5/8` gray
+zone. No repeat or validation ran; the product code and branch were deleted.
+Evaluator PR `#135` preserves the oracle, candidate, hashes, and rejection.
+
+This is useful causal evidence: deterministic date results solve the outcome
+when supplied, and the implementation itself is correct when selected, but a
+newly advertised specialist tool is not broadly discoverable by this fixed
+1.2B model. Do not tune the consumed prompts or merge the tool alone. A future
+selection experiment must use fresh disjoint tasks, preserve no-action
+controls, and be materially narrower than global tool forcing.
 
 ## The claim we are testing
 
@@ -485,6 +508,7 @@ model success.
 | Closed | Scoped additive text-file creation v1-v2 | Harness capability | Both revisions preserved `5/5` safety outcomes. V1 produced `0/5` exact authorized artifacts; V2's typed path/line/newline schema produced `1/5`, below its frozen `4/5` gate. Schema shape alone did not solve semantic path and content binding, so both product branches were deleted and no repeat or holdout ran. |
 | Closed at baseline gate | XLSX column-fidelity headroom v1 | Harness capability diagnostic | Static inspection found that the reader can collapse physically absent cells, but a fresh 10-case run produced zero successful `file_read` results and `0/10` strict. The intended representation layer never activated, so the conditional gold arm and product candidate did not run. |
 | Closed at baseline gate | System-command outcome discovery v1 | Harness capability diagnostic | Unchanged Thaddeus scored `6/10` strict and `10/10` valid. Safety/no-action controls passed `4/4`; `system_execute` was selected on `5/6` authorized cases and all selected calls succeeded. Only one miss was tool-name selection, while the others were argument binding or final-response fidelity, so a forced-tool candidate was not authorized. |
+| Closed at development gate | Deterministic date arithmetic v1 | Harness capability | Compact gold evidence moved `1/8` raw and `0/8` unchanged to `8/8`, but the real read-only tool candidate reached only `2/8` positives with `4/4` controls. Both selected positive calls succeeded; selection coverage was only `2/8`, below the `7/8` gate. Product code was deleted and evaluator PR `#135` preserves the evidence. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |
