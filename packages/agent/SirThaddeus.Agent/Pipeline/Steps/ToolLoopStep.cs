@@ -116,6 +116,7 @@ public sealed class ToolLoopStep : ITurnStep
         // ends with the model's own successful computations disagreeing, force
         // exactly one reconciliation round before adopting a draft.
         var reconciliationNudges = 0;
+        var useDefaultWikiRootLocationContract = false;
 
         if (ShouldAddCalculatorSetupHint(context))
         {
@@ -130,6 +131,7 @@ public sealed class ToolLoopStep : ITurnStep
             forcedToolForNextRound = WikiRootCreateSelectionPolicy.TrySelect(
                 context.UserText,
                 context.ToolDefs);
+            useDefaultWikiRootLocationContract = !string.IsNullOrWhiteSpace(forcedToolForNextRound);
         }
 
         for (var round = 0; round < _maxRoundTrips; round++)
@@ -183,6 +185,20 @@ public sealed class ToolLoopStep : ITurnStep
             {
                 LogWikiRootTemporalDeferralActivation(context, activated: false);
                 LogWikiRootNonActionActivation(context, activated: false);
+            }
+            if (round == 0 && useDefaultWikiRootLocationContract && tools is not null)
+            {
+                var projectedTools = WikiRootCreateDefaultLocationContract.Project(
+                    context.UserText,
+                    forcedTool,
+                    tools);
+                var activated = !ReferenceEquals(projectedTools, tools);
+                tools = projectedTools;
+                LogWikiRootDefaultLocationActivation(context, activated);
+            }
+            else if (round == 0)
+            {
+                LogWikiRootDefaultLocationActivation(context, activated: false);
             }
             if (round == 0 && string.IsNullOrWhiteSpace(forcedTool) && tools is not null)
             {
@@ -549,6 +565,18 @@ public sealed class ToolLoopStep : ITurnStep
             "EXPERIMENT_ACTIVATION",
             $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
             "event=wiki_root_non_action_pruning " +
+            $"decision={(activated ? "activated" : "inactive")}");
+    }
+
+    private void LogWikiRootDefaultLocationActivation(TurnContext context, bool activated)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_root_default_location_contract " +
             $"decision={(activated ? "activated" : "inactive")}");
     }
 

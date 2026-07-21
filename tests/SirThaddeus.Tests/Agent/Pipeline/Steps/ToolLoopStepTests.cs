@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Agent.Pipeline.Steps;
@@ -976,6 +977,70 @@ public class ToolLoopStepTests
         Assert.Equal("wiki_root_create", llm.ForcedToolNames[0]);
     }
 
+    [Fact]
+    public async Task Explicit_wiki_root_creation_hides_application_owned_default_path()
+    {
+        var prompt = "Create a new Wiki Canvas root named Field Notes.";
+        var llm = new FakeLlm(LlmReply.Final("Ready."));
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, log: (eventName, message) => logs.Add((eventName, message)));
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs = [WikiRootCreateDefinition()],
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var definition = Assert.Single(Assert.Single(llm.ReceivedTools)!);
+        var schema = JsonSerializer.Serialize(definition.Function.Parameters);
+        Assert.Contains("\"name\"", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"path\"", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "optional path",
+            definition.Function.Description,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_root_default_location_contract", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("Create a Wiki Canvas root named Field Notes under folder Research.")]
+    [InlineData("Create a Wiki Canvas root named Field Notes at C:\\Wiki\\Research.")]
+    [InlineData("Create a Wiki Canvas root named Field Notes in location /srv/wiki/research.")]
+    public async Task Explicit_custom_location_retains_full_root_contract(string prompt)
+    {
+        var llm = new FakeLlm(LlmReply.Final("Ready."));
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, log: (eventName, message) => logs.Add((eventName, message)));
+        var ctx = NewContext() with
+        {
+            UserText = prompt,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(prompt)],
+            ToolDefs = [WikiRootCreateDefinition()],
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.Equal("wiki_root_create", llm.ForcedToolNames[0]);
+        var definition = Assert.Single(Assert.Single(llm.ReceivedTools)!);
+        var schema = JsonSerializer.Serialize(definition.Function.Parameters);
+        Assert.Contains("\"path\"", schema, StringComparison.Ordinal);
+        Assert.Contains(
+            "optional path",
+            definition.Function.Description,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_root_default_location_contract", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=inactive", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("How do I create a Wiki Canvas root?")]
     [InlineData("Explain how to set up a Wiki Canvas root.")]
@@ -1032,6 +1097,10 @@ public class ToolLoopStepTests
             entry.Event == "EXPERIMENT_ACTIVATION" &&
             entry.Message.Contains("event=wiki_root_non_action_pruning", StringComparison.Ordinal) &&
             entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_root_default_location_contract", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=inactive", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -1068,6 +1137,10 @@ public class ToolLoopStepTests
             entry.Event == "EXPERIMENT_ACTIVATION" &&
             entry.Message.Contains("event=wiki_root_temporal_deferral_pruning", StringComparison.Ordinal) &&
             entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_root_default_location_contract", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=inactive", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -1204,6 +1277,26 @@ public class ToolLoopStepTests
             Name = name,
             Description = "test tool",
             Parameters = new { },
+        },
+    };
+
+    private static ToolDefinition WikiRootCreateDefinition() => new()
+    {
+        Function = new FunctionDefinition
+        {
+            Name = "wiki_root_create",
+            Description = "Create a Wiki root. Optional path must stay inside the library.",
+            Parameters = new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["properties"] = new Dictionary<string, object>
+                {
+                    ["name"] = new Dictionary<string, object> { ["type"] = "string" },
+                    ["path"] = new Dictionary<string, object> { ["type"] = "string" },
+                },
+                ["required"] = new[] { "name" },
+                ["additionalProperties"] = false,
+            },
         },
     };
 
