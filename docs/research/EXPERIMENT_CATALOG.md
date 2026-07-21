@@ -36,6 +36,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Current-behavior outcome census v1 | Evaluation infrastructure | **Completed; no open mechanism cluster** | A zero-model-call answer-blind census reused 57 compatible frozen outcomes and measured `29/57` strict, `50/57` valid, verified computation `6/6`, and verified state change `5/6`. Six numeric failure buckets were already closed or heterogeneous after manual attribution. This is coverage evidence, not prevalence, MMLU uplift, or the 80% claim. Evaluator PRs `#123` and `#124`. |
 | Local document-reading outcome discovery v1 | Evaluation infrastructure | **Diagnostic complete; no open candidate** | A local-only 12-case CSV/RTF cohort scored `8/12` strict and `11/12` valid in 86.854 seconds. Field extraction and row selection each reached `3/4`; aggregation reached `2/4`. Ten reads returned usable evidence, but misses split across semantic binding, tool commitment, path binding, and incomplete arithmetic. No category met the frozen oracle gate, so no product code ran. Evaluator PR `#129`. |
 | Native document-reading outcome discovery v1 | Evaluation infrastructure | **Diagnostic complete; no open candidate** | Bounded binary harness fixtures enabled one 12-case PDF/DOCX/XLSX cohort after all files passed the production readers. Unchanged Thaddeus scored `6/12` strict and `10/12` valid in 83.035 seconds. Field/row/aggregation reached `3/4`, `2/4`, and `1/4`; the low `1/4` XLSX slice mixed two invalid path mutations with one semantic column error and was not a post-hoc gate. No category supplied three aligned valid failures, so no oracle or product behavior ran. Product PR `#263`; evaluator PR `#130`. |
+| XLSX column-fidelity headroom v1 | Evaluation infrastructure | **Rejected at baseline gate; no gold or product candidate** | Static inspection found that omitted XLSX cells can be collapsed because the reader ignores cell references. A fresh six-sparse/four-dense run nevertheless produced `0/10` strict, `7/10` valid, and zero successful reads. Nine turns skipped the sole exposed tool and one changed the path. With zero coordinate-loss activations, the conditional gold arm did not run and the one-off evaluator code was removed. Evaluator PR `#133`. |
 
 ## Model-capacity campaign
 
@@ -186,6 +187,9 @@ Use these repository-relative locations in the sibling
 - Scoped additive text-file creation:
   `experiments/verdicts/2026-07-20-scoped-text-file-create-v1.md` and
   `experiments/verdicts/2026-07-20-scoped-text-file-create-structured-v2.md`.
+- XLSX column-fidelity headroom:
+  `experiments/manifests/xlsx-column-fidelity-headroom-v1.yaml` and
+  `experiments/verdicts/2026-07-21-xlsx-column-fidelity-headroom-v1.md`.
 - Tool-semantic attribution:
   `experiments/manifests/tool-semantic-outcome-baseline-v1.yaml` and
   `experiments/verdicts/2026-07-16-tool-semantic-outcome-baseline-v1.md`.

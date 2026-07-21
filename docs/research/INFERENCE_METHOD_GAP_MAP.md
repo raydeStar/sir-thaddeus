@@ -1,8 +1,8 @@
 # Inference Method Gap Map
 
 **Reconciled:** July 21, 2026
-**Production baseline:** `53224fea`
-**Evaluator baseline:** `06b5f549`
+**Production baseline:** `974f1b03`
+**Evaluator baseline:** `8aef63c1`
 
 This map ranks research mechanisms against Sir Thaddeus evidence. It does not
 replace the experiment ledger or promotion policy. Model capacity, fixed-model
@@ -45,6 +45,7 @@ activation before scoring.
 | Broad conversational fast path/router rewrite | Rejected by measurement | Footman made zero LLM calls; optional helpers were 10% of ordinary-turn time; global validation/retry removal reduced quality | Medium | Limited measured upside | Engineering and regression cost | Product latency only | Quality, memory, safety, continuity | Do not reopen without a new measured blocker |
 | Capability-surface context headroom | Causally demonstrated; selector family closed | Repeated 8K attribution measured 8,455 estimated tool-definition tokens across 60 tools and a 12,097-token request budget; a one-read-tool oracle repeated with 4,302 tokens of headroom and passed the contract | High for small contexts | Prevent provider overflow and reduce irrelevant capability burden | Potentially lower prompt and permission cost | Strong for envelope size; weak for safe selection | Prior precedence was unsafe and conservative v3 increased calls | Keep as diagnostic evidence; require a materially different selector before reopening |
 | Fresh representative outcome discovery | Diagnostic complete; no open candidate | V2 found no three-case cluster. V3 scored `19/32` strict and `31/32` valid. A later local document cohort scored `8/12` strict and `11/12` valid, but no category reached three aligned valid failures | High as an evaluation method | Finds current failure regions without committing to architecture | The document cohort used one 12-case invocation and 86.854 seconds | Strong for observed cases, not prevalence | Synthetic mixes can create misleading clusters | Keep accumulating outcomes; require both prevalence and a materially open seam |
+| XLSX cell-coordinate fidelity | Static defect observed; outcome gate rejected | The reader ignores cell references and can collapse absent middle cells, but a fresh 10-case cohort produced zero successful reads and therefore zero representation activations | High when XLSX evidence is reached | Preserve table semantics before model reasoning | Negligible deterministic parsing cost | Strong at the extracted-text layer; unproven for end outcomes | A correct low-level fix can still add no user value when tool selection fails upstream | Defer until three fresh successful XLSX reads expose aligned downstream misses |
 
 ## Verification audit
 
@@ -160,7 +161,9 @@ reading, scored `8/12` strict with `11/12` valid and `6/12` strict with `10/12`
 valid. Neither cohort reached the frozen three-aligned-valid-failure gate. The
 native XLSX slice was only `1/4` strict, but its misses mixed invalid path
 mutations with semantic column selection, so it does not authorize a post-hoc
-format-specific candidate.
+format-specific candidate. A fresh sparse-XLSX follow-up then scored `0/10`
+with zero successful reads. Its one-tool prompt was correctly assembled, so the
+conditional cell-coordinate oracle remained ineligible and did not run.
 
 Continue economical outcome accumulation at another under-sampled open product
 boundary. Keep router, prompt, retrieval, response-contract,
