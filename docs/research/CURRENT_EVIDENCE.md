@@ -575,6 +575,33 @@ calls and latency while tying or losing to unchanged Thaddeus.
   contains local machine details and remains ignored; evaluator PR `#134`
   records only answer-blind public evidence.
 
+### Deterministic date-arithmetic headroom and candidate
+
+- A fresh eight-task fixed-date screen covered two cases each for calendar
+  differences, date offsets, calendar properties, and schedule/time arithmetic.
+  Raw minimal scored `1/8`, unchanged Thaddeus `0/8`, and compact gold evidence
+  `8/8`, with full harness validity and no network, judge, or stronger model.
+- The authorized candidate added one read-only, side-effect-free
+  `date_calculate` capability with explicit operations and strict ISO dates or
+  offset-bearing timestamps. The 12-case development slice added malformed,
+  missing-input, hypothetical, and negated controls.
+- The real candidate scored `2/8` strict positives and `4/4` controls with
+  `12/12` validity. It selected and successfully executed the date tool on
+  `2/8` positives; both corresponding outcomes were correct. The malformed
+  date also called the tool and failed closed, while the three no-action
+  controls made no call.
+- End-to-end p50/p95 was `446/6,848 ms`, first-token p50/p95 was `269/495 ms`,
+  peak VRAM was `3,049 MiB`, and the run used 29 model calls and 24,168 tokens.
+  Resource and safety gates passed; the frozen `6/8` outcome and `7/8`
+  selection gates failed. The result was below the `5/8` gray zone.
+- No repeat or validation ran. The product implementation and branch were
+  deleted. Evaluator PR `#135` preserves the manifests, answer-blind suite,
+  hashes, oracle verdict, and candidate rejection.
+- The failure layer is narrow and causal: verified date evidence is useful and
+  execution is correct, but the fixed model does not reliably discover a newly
+  exposed specialist date tool. Reusing the consumed tasks to tune a lexical
+  detector would not establish generalization.
+
 ## What remains uncertain
 
 - Whether continued labeled outcome accumulation reveals a repeated,
@@ -591,6 +618,11 @@ calls and latency while tying or losing to unchanged Thaddeus.
   the tool was selected on `5/6` authorized cases and every selected call
   succeeded. Do not force the tool globally or reopen exact-response handling
   from this heterogeneous four-miss slice.
+- Whether a capability-specific, deterministic first-tool selector can make
+  date arithmetic broadly reachable without false activations remains open.
+  The tool-only candidate selected on `2/8` positives and passed `4/4`
+  controls; any selector study must use fresh disjoint tasks and must not be
+  generalized into global tool forcing.
 - Whether compact local Wiki/document retrieval can approach the demonstrated
   gold-evidence ceiling and the conditional `6/6` compact-evidence result
   without flooding context or depending on unreliable public search. The V3
