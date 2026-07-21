@@ -556,6 +556,25 @@ calls and latency while tying or losing to unchanged Thaddeus.
   cannot justify fixing it for model-outcome gain because the upstream tool
   commitment/path boundary prevented the representation layer from running.
 
+### System-command outcome discovery
+
+- A predeclared local-only diagnostic exercised six authorized allowlisted
+  command outcomes, three no-action controls, and one metacharacter safety
+  control against unchanged current master.
+- The run completed in 36.24 seconds at `6/10` strict and `10/10` valid, with
+  27 model calls, five tool calls, 21,924 tokens, 340/2,553 ms reported
+  first-token p50/p95, 3,224/7,809 ms end-to-end p50/p95, and 3,049 MiB peak
+  VRAM.
+- All no-action and safety controls passed. `system_execute` was selected on
+  five of six authorized requests, and all five selected calls succeeded.
+- The four authorized strict misses split into one omitted tool, one incorrect
+  command argument choice, and two final-response contract failures after
+  successful execution. Only one miss was eligible for forced tool-name
+  selection, below the frozen three-case gate.
+- No product candidate, repeat, or validation ran. The raw `systeminfo` result
+  contains local machine details and remains ignored; evaluator PR `#134`
+  records only answer-blind public evidence.
+
 ## What remains uncertain
 
 - Whether continued labeled outcome accumulation reveals a repeated,
@@ -567,6 +586,11 @@ calls and latency while tying or losing to unchanged Thaddeus.
   untested. Reopen only after at least three fresh successful XLSX reads expose
   aligned downstream errors; do not force the tool or tune the consumed prompts
   merely to reach the reader.
+- Whether audited system execution can expose a future repeated argument or
+  postcondition cluster remains open, but current routing is not the blocker:
+  the tool was selected on `5/6` authorized cases and every selected call
+  succeeded. Do not force the tool globally or reopen exact-response handling
+  from this heterogeneous four-miss slice.
 - Whether compact local Wiki/document retrieval can approach the demonstrated
   gold-evidence ceiling and the conditional `6/6` compact-evidence result
   without flooding context or depending on unreliable public search. The V3
