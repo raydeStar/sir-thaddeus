@@ -56,7 +56,10 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
               "user_message": "Update the page.",
               "permission_decision": "once",
               "state_setup": {
-                "files": [{ "path": "notes/input.txt", "content": "local evidence" }],
+                "files": [
+                  { "path": "notes/input.txt", "content": "local evidence" },
+                  { "path": "docs/sample.bin", "content_base64": "AAECAw==" }
+                ],
                 "wiki_roots": [
                   {
                     "name": "Research",
@@ -81,7 +84,9 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         Assert.NotNull(test);
         Assert.Equal("once", test.PermissionDecision);
         Assert.Equal("Research", test.StateSetup.WikiRoots.Single().Name);
-        Assert.Equal("notes/input.txt", test.StateSetup.Files.Single().Path);
+        Assert.Equal("notes/input.txt", test.StateSetup.Files[0].Path);
+        Assert.Equal("docs/sample.bin", test.StateSetup.Files[1].Path);
+        Assert.Equal("AAECAw==", test.StateSetup.Files[1].ContentBase64);
         Assert.Equal("Plan", test.StateSetup.WikiRoots.Single().Pages.Single().Title);
         Assert.Equal("page", test.WikiContext!.Mode);
         Assert.Equal("Research", test.WikiContext.RootName);
@@ -177,6 +182,43 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
             Path.GetFullPath(_root),
             HybridRuntimeHostAdapter.ResolveHarnessFilePath(_root, "notes/input.txt"),
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void HarnessFileContent_DecodesTextAndBinaryFixtures()
+    {
+        var text = HarnessFileContent.Decode(new HarnessFileSetup
+        {
+            Path = "notes/input.txt",
+            Content = "local evidence"
+        });
+        var binary = HarnessFileContent.Decode(new HarnessFileSetup
+        {
+            Path = "docs/sample.bin",
+            ContentBase64 = "AAECAw=="
+        });
+
+        Assert.Equal("local evidence", System.Text.Encoding.UTF8.GetString(text));
+        Assert.Equal([0, 1, 2, 3], binary);
+    }
+
+    [Fact]
+    public void HarnessFileContent_RejectsAmbiguousOrInvalidBinaryFixtures()
+    {
+        var ambiguous = new HarnessFileSetup
+        {
+            Path = "docs/sample.bin",
+            Content = "text",
+            ContentBase64 = "AAECAw=="
+        };
+        var invalid = new HarnessFileSetup
+        {
+            Path = "docs/sample.bin",
+            ContentBase64 = "not base64"
+        };
+
+        Assert.Throws<InvalidOperationException>(() => HarnessFileContent.Decode(ambiguous));
+        Assert.Throws<InvalidOperationException>(() => HarnessFileContent.Decode(invalid));
     }
 
     [Fact]

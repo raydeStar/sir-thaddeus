@@ -99,6 +99,22 @@ public sealed class SuiteLoader
             throw new InvalidOperationException($"Missing user_message in suite test: {filePath}");
         if (test.MinScore < 0 || test.MinScore > 10)
             throw new InvalidOperationException($"min_score must be 0..10 in suite test: {filePath}");
+
+        foreach (var file in test.StateSetup.Files)
+        {
+            if (string.IsNullOrWhiteSpace(file.Path))
+                throw new InvalidOperationException($"state_setup file path is required: {filePath}");
+
+            try
+            {
+                _ = HarnessFileContent.Decode(file);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Invalid state_setup file fixture in suite test: {filePath}", ex);
+            }
+        }
     }
 
     private static string ResolveSuiteDirectory(string suitesRoot, string suiteName)

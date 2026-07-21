@@ -277,7 +277,8 @@ expected final state to the model.
 {
   "state_setup": {
     "files": [
-      { "path": "notes/brief.txt", "content": "local fixture" }
+      { "path": "notes/brief.txt", "content": "local fixture" },
+      { "path": "documents/report.pdf", "content_base64": "JVBERi0xLjQK..." }
     ],
     "wiki_roots": [
       {
@@ -317,6 +318,11 @@ capture. A nonempty list captures only the named roots.
 File paths must be relative and remain under the harness-created `files` root.
 Rooted paths and traversal are rejected. Only explicitly requested paths are
 captured, and file permissions expose only that disposable root to the runtime.
+Text fixtures use `content`; binary fixtures use `content_base64`. The two fields
+are mutually exclusive when `content` is non-empty, invalid Base64 fails during
+suite loading, and decoded fixture content is limited to 10 MiB per file. This
+is isolated harness setup only; it does not add a production upload or decoding
+path.
 
 ### Causal evaluation diagnostics
 

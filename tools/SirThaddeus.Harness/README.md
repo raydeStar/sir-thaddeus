@@ -53,6 +53,8 @@ One test file per suite entry:
 - Optional fields:
   - `category`
   - `rubric_profile`: `general`, `coding`, `health`, `agentTool`, or `ragGrounded`
+  - `state_setup.files[].content_base64`: bounded binary fixture bytes, mutually
+    exclusive with non-empty `content`
   - `expectations.require_json`
   - `expectations.required_json_fields`
   - `expectations.forbidden_phrases`

@@ -554,7 +554,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         {
             var path = ResolveHarnessFilePath(filesRoot, file.Path);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            await File.WriteAllTextAsync(path, file.Content, cancellationToken).ConfigureAwait(false);
+            var bytes = HarnessFileContent.Decode(file);
+            await File.WriteAllBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
         }
 
         if (setup.WikiRoots.Count == 0)
