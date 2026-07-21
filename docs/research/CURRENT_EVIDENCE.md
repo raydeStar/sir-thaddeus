@@ -602,6 +602,29 @@ calls and latency while tying or losing to unchanged Thaddeus.
   exposed specialist date tool. Reusing the consumed tasks to tune a lexical
   detector would not establish generalization.
 
+### Date-arithmetic deterministic selection prerequisite
+
+- A second bank used eight positives disjoint from v1 plus six malformed,
+  missing-input, hypothetical, negated, date-mention, and unsupported-date
+  controls. It was frozen before any selector implementation.
+- Raw minimal and unchanged Thaddeus each scored `0/8` positives with `8/8`
+  validity. Tool-only v1 scored `3/8` positives, `3/6` controls, and `14/14`
+  validity. It used 35 model calls, seven tool calls, 32,533 tokens,
+  `341/610 ms` first-token p50/p95, `612/6,610 ms` end-to-end p50/p95, and 3,049 MiB
+  peak VRAM.
+- The tool-only arm already selected `date_calculate` on `6/8` positives. Two
+  calls were omitted; three selected calls chose incorrect operations or
+  arguments for forward offset, backward offset, and recurrence. The three
+  strict control misses were response-contract failures without forbidden tool
+  activation.
+- Selection-only could causally address at most two outcomes, below the frozen
+  +3 gate, so no selector code or fourth arm ran. One initial zero-call
+  missing-restore artifact was classified as infrastructure failure and
+  replaced by the clean recovery. Evaluator PR `#136` preserves the verdict.
+- The next evidence question is typed semantic binding. It requires a separate
+  oracle and fresh disjoint tasks; the consumed v2 failures are diagnostic and
+  must not become lexical fixtures in runtime code.
+
 ## What remains uncertain
 
 - Whether continued labeled outcome accumulation reveals a repeated,
@@ -618,11 +641,11 @@ calls and latency while tying or losing to unchanged Thaddeus.
   the tool was selected on `5/6` authorized cases and every selected call
   succeeded. Do not force the tool globally or reopen exact-response handling
   from this heterogeneous four-miss slice.
-- Whether a capability-specific, deterministic first-tool selector can make
-  date arithmetic broadly reachable without false activations remains open.
-  The tool-only candidate selected on `2/8` positives and passed `4/4`
-  controls; any selector study must use fresh disjoint tasks and must not be
-  generalized into global tool forcing.
+- Whether deterministic typed argument construction can correct explicit ISO
+  date requests remains open. A disjoint tool-only slice selected on `6/8`, but
+  three positive misses used the wrong operation or arguments. Selection-only
+  is closed from that slice; argument construction needs its own oracle before
+  any product mutation.
 - Whether compact local Wiki/document retrieval can approach the demonstrated
   gold-evidence ceiling and the conditional `6/6` compact-evidence result
   without flooding context or depending on unreliable public search. The V3
