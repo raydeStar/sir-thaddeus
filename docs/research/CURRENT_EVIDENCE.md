@@ -2,10 +2,12 @@
 
 **Evidence cutoff:** July 21, 2026
 
-**Production baseline:** `fb36979c`; empty-state Wiki observation coverage was
+**Production baseline:** `53224fea`; empty-state Wiki observation coverage was
 repaired through product PR `#256`, AngleSharp was pinned to `1.5.2` through
 security PR `#259`, the July outcome evidence was reconciled in PR `#260`, and
-the Wiki default-location projection was promoted through PR `#261`
+the Wiki default-location projection was promoted through PR `#261`; native
+document evaluation support landed through PR `#263` and its evidence through
+PR `#264`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -240,6 +242,17 @@ calls and latency while tying or losing to unchanged Thaddeus.
   schema-valid extracted string. Keep the evaluator diagnostic; do not add
   `response_format` to production until a real contract shows at least three
   reproducible structural failures.
+- A separate additive text-file capability then tested whether a more semantic
+  schema could improve exact artifacts rather than JSON validity. V1 selected
+  the new tool on all five authorized requests and safely handled all five
+  negative or refusal outcomes, but produced `0/5` exact authorized files. V2
+  replaced free-form path and content strings with required path components,
+  line elements, and a trailing-newline boolean. It remained `5/5` safe and
+  produced one exact artifact, but failed the frozen gate at `1/5` authorized
+  exact, with one omitted extension, one over-segmented filename, one embedded-
+  newline rejection, and one missing call. Schema shape did not solve semantic
+  argument binding for the fixed 1.2B model. Both product implementations were
+  deleted; evaluator PRs `#131` and `#132` preserve the evidence.
 - On the original fresh 16-item local tool-semantic baseline, unchanged
   full-menu Thaddeus scored `7/16` versus `3/16` with oracle-pruned tools,
   `1/16` no-tools, and `3/16` raw. After the promoted answer-only evidence

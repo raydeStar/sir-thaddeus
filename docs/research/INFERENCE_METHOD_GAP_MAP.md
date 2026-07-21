@@ -1,8 +1,8 @@
 # Inference Method Gap Map
 
 **Reconciled:** July 21, 2026
-**Production baseline:** `fb36979c`
-**Evaluator baseline:** `e814f278`
+**Production baseline:** `53224fea`
+**Evaluator baseline:** `06b5f549`
 
 This map ranks research mechanisms against Sir Thaddeus evidence. It does not
 replace the experiment ledger or promotion policy. Model capacity, fixed-model
@@ -31,6 +31,7 @@ activation before scoring.
 | Method family | Status | Current evidence | 1B-8B applicability | Expected benefit | Added cost | Verification | Risk | Disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Deterministic tool/schema validation | Implemented | Tool arguments are parsed and checked before dispatch; both intake models produced `8/8` valid forced calls | High | Prevent malformed execution | Negligible | Strong for shape, not meaning | False confidence if called semantic proof | Keep |
+| Semantic tool-schema decomposition | Tested and rejected for file creation | V1 additive text creation produced `0/5` exact authorized artifacts. V2 decomposed path, lines, and trailing newline into required typed fields, retained `5/5` safety, but produced only `1/5` exact | High in principle | Reduce path and serialization ambiguity | Negligible after selection | Strong final-state verification | The model can populate valid fields with semantically wrong boundaries | Close schema-only family; require a different semantic-binding signal |
 | Provider-constrained JSON/grammar decoding | Missing in product; evaluator retained | Corrected v2: unconstrained and constrained were both `10/10` valid and `9/10` semantically exact; zero outcome gain | High when the model supports it | Guaranteed supported structure | Near-zero in the observed run | Strong for structure only | Provider coupling; schema-valid wrong values | Defer until a real contract has at least three structural failures |
 | External computation | Implemented selectively | Calculator/Python are useful when translation is correct; forced calculator scored `3/10` versus raw `8/10` | Medium-high | Exact arithmetic or execution | Tool call plus synthesis | Strong for executed result | Bad program/expression remains bad | Keep selective; do not force globally |
 | Capability-specific evidence/postconditions | Partial; one promoted | Answer-only tool-evidence projection repeated `10/12` versus `5/12`, then validated `12/16` versus `8/16` with zero negative activations | High | Converts proven tool evidence into correct final contracts | Removes one helper call when active | Strong within its narrow proof | Overprojection or stale evidence | Preferred product pattern after oracle headroom |
@@ -163,7 +164,8 @@ format-specific candidate.
 
 Continue economical outcome accumulation at another under-sampled open product
 boundary. Keep router, prompt, retrieval, response-contract,
-path-binding, and generic postcondition candidates paused until fresh labeled
+path-binding, schema-only file creation, and generic postcondition candidates
+paused until fresh labeled
 outcomes expose a repeated independently verifiable seam. A new candidate still
 requires answer-blind headroom and a mechanism materially different from closed
 families. The 57-outcome census remains below the 300-outcome complementarity
