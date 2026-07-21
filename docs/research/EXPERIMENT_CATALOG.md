@@ -1,6 +1,6 @@
 # Experiment Catalog
 
-This is a compact index of material Sir Thaddeus experiments through July 20,
+This is a compact index of material Sir Thaddeus experiments through July 21,
 2026. It records reusable conclusions, not hidden benchmark content. Exact
 manifests, commands, artifact hashes, and verdicts live in the sibling private
 `local-benchmark-runner` repository under `experiments/`.
@@ -31,6 +31,8 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Matched existing-capability ablation | Evaluation infrastructure | **Retained; reliability gate rejected** | With the same production pipeline in both arms, exposing existing tools and attachments improved `4/20` to `10/20`, with seven paired wins and one loss. Calculator work reached `4/4`; three broader capability categories reached only `1/4`, and one deferred no-action request changed state. The hard safety gate and eight-win floor rejected a new product candidate. Evaluator PR `#94`. |
 | Fresh outcome discovery v2 | Evaluation infrastructure | **Diagnostic complete; no candidate** | A 24-task source-audited bank yielded a balanced 16-task triage at `7/16` strict and `11/16` valid. Computation and verified state change each scored `2/2`; local-file extraction scored `0/2`, then its preauthored reserve passed `1/1` with `file_read`. No three-case cluster remained, so no oracle or product mutation ran. One empty-state observation defect was repaired separately in product PR `#256`. |
 | Fresh outcome discovery v3 | Evaluation infrastructure | **Diagnostic complete; no open candidate** | Two balanced 16-case invocations scored `19/32` strict and `31/32` valid with zero runtime errors. Computation scored `4/4`; local files, Wiki creation, and no-action safety each scored `3/4`. Instruction contracts and multi-source synthesis each failed `3/4`, but both belong to closed response-contract/evidence-synthesis families, so no oracle or product mutation ran. |
+| Read-only state inventory v1 | Evaluation infrastructure | **Diagnostic complete; no open candidate** | After rejecting one batched artifact for evaluator-state leakage, process-isolated recovery scored `2/8` strict and `7/8` valid with zero runtime errors. File and Wiki inventory each passed `1/4`; failures mapped to closed path-binding, tool-commitment, typed-ID, and sequence families. No oracle or product mutation ran. |
+| Current-behavior outcome census v1 | Evaluation infrastructure | **Completed; no open mechanism cluster** | A zero-model-call answer-blind census reused 57 compatible frozen outcomes and measured `29/57` strict, `50/57` valid, verified computation `6/6`, and verified state change `5/6`. Six numeric failure buckets were already closed or heterogeneous after manual attribution. This is coverage evidence, not prevalence, MMLU uplift, or the 80% claim. Evaluator PRs `#123` and `#124`. |
 
 ## Model-capacity campaign
 

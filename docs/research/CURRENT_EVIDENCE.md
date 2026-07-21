@@ -1,10 +1,10 @@
 # Current Evidence
 
-**Evidence cutoff:** July 20, 2026
+**Evidence cutoff:** July 21, 2026
 
-**Production baseline:** `af044548`; empty-state Wiki observation coverage was
-repaired through product PR `#256`, followed by evidence reconciliation in PR
-`#257`
+**Production baseline:** `dd0f26f`; empty-state Wiki observation coverage was
+repaired through product PR `#256`, evidence was reconciled in PR `#257`, and
+AngleSharp was pinned to `1.5.2` through security PR `#259`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -446,12 +446,43 @@ calls and latency while tying or losing to unchanged Thaddeus.
   result narrows the boundary honestly instead of using low scores to justify
   another prompt patch or benchmark-derived renderer.
 
+### Read-only inventory and cross-cohort census
+
+- An isolated eight-case read-only inventory diagnostic scored `2/8` strict
+  and `7/8` valid with zero runtime errors. File inventory passed `1/4`; Wiki
+  inventory passed `1/4`. The misses were wrong local-path binding, failure to
+  commit to a required read, Wiki root-name-versus-ID binding, and incomplete
+  multi-step Wiki traversal. Those mechanisms map to already closed path,
+  typed-interface, and sequence families, so no oracle or candidate ran.
+- The first batched inventory artifact was rejected as invalid infrastructure:
+  evaluator-created file and Wiki fixtures leaked between cases because the
+  production harness reset does not own those evaluator resources. The
+  evaluator now isolates this suite at one case per process; production
+  behavior did not change.
+- A zero-model-call answer-blind census then combined five compatible frozen
+  cohorts: 57 outcomes across three product SHA strata, all using the same LFM
+  1.2B Q4_K_M model, context, provider settings, and production prompt. It
+  measured `29/57` strict, `50/57` valid, one previously documented evaluator
+  runtime error, first-token p50/p95 of `394/1,821 ms`, end-to-end p50/p95 of
+  `1,726/6,556 ms`, and 3,099 MB peak VRAM.
+- Verified computation was `6/6` strict and verified state change was `5/6`.
+  Six numeric failure buckets met the three-failure screen, but manual
+  answer-blind attribution found no coherent open mechanism. The apparent
+  attached-Wiki cluster contained two already-closed literal response-contract
+  misses and one semantic counting miss. The remaining clusters belonged to
+  previously closed response-contract, evidence-synthesis, path-binding,
+  typed-interface, or tool-sequence families.
+- The 57 outcomes are coverage evidence only. They do not establish population
+  prevalence, satisfy the 300-outcome complementarity gate, or support the
+  final 80-percent product claim.
+
 ## What remains uncertain
 
 - Whether continued labeled outcome accumulation reveals a repeated,
   oracle-correctable failure region in a materially open mechanism family. The
-  32-task v3 cohort found two numeric clusters, but both were already closed;
-  neither synthetic cohort establishes prevalence weights.
+  combined 57-outcome census found six numeric clusters, but manual attribution
+  found each closed or heterogeneous; none of the synthetic cohorts establishes
+  prevalence weights.
 - Whether compact local Wiki/document retrieval can approach the demonstrated
   gold-evidence ceiling and the conditional `6/6` compact-evidence result
   without flooding context or depending on unreliable public search. The V3

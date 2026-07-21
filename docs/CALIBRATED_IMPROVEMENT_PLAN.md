@@ -42,6 +42,24 @@ successful `file_read`. No qualifying three-case cluster remained, so no oracle
 or product mutation ran. Invest next in economical labeled-outcome accumulation
 rather than another router, prompt, retrieval, or postcondition candidate.
 
+### July 21 read-only inventory and outcome-census result
+
+The isolated read-only inventory scored `2/8` strict and `7/8` valid. Its file
+and Wiki misses mapped to already closed path-binding, tool-commitment,
+typed-interface, and multi-step sequence families, so no oracle or candidate
+ran. A first batched artifact was rejected as invalid evaluator infrastructure;
+the recovery used one case per process and changed no production behavior.
+
+A zero-model-call answer-blind census then reused 57 compatible frozen outcomes
+across five cohorts. It measured `29/57` strict and `50/57` valid, while
+confirming verified computation at `6/6` and verified state change at `5/6`.
+Manual attribution found every numeric failure cluster already closed or
+heterogeneous. Do not convert aggregate counts into another router, prompt,
+literal-response, path-recovery, retrieval, or generic verification candidate.
+The next paid cohort must be predeclared at an under-sampled, independently
+verifiable, materially open product seam. These 57 outcomes are not prevalence
+evidence and do not satisfy the 300-outcome complementarity gate.
+
 ## The claim we are testing
 
 Sir Thaddeus is intended to demonstrate that a small local model can complete a
