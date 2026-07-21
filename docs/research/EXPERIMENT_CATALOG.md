@@ -37,6 +37,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Local document-reading outcome discovery v1 | Evaluation infrastructure | **Diagnostic complete; no open candidate** | A local-only 12-case CSV/RTF cohort scored `8/12` strict and `11/12` valid in 86.854 seconds. Field extraction and row selection each reached `3/4`; aggregation reached `2/4`. Ten reads returned usable evidence, but misses split across semantic binding, tool commitment, path binding, and incomplete arithmetic. No category met the frozen oracle gate, so no product code ran. Evaluator PR `#129`. |
 | Native document-reading outcome discovery v1 | Evaluation infrastructure | **Diagnostic complete; no open candidate** | Bounded binary harness fixtures enabled one 12-case PDF/DOCX/XLSX cohort after all files passed the production readers. Unchanged Thaddeus scored `6/12` strict and `10/12` valid in 83.035 seconds. Field/row/aggregation reached `3/4`, `2/4`, and `1/4`; the low `1/4` XLSX slice mixed two invalid path mutations with one semantic column error and was not a post-hoc gate. No category supplied three aligned valid failures, so no oracle or product behavior ran. Product PR `#263`; evaluator PR `#130`. |
 | XLSX column-fidelity headroom v1 | Evaluation infrastructure | **Rejected at baseline gate; no gold or product candidate** | Static inspection found that omitted XLSX cells can be collapsed because the reader ignores cell references. A fresh six-sparse/four-dense run nevertheless produced `0/10` strict, `7/10` valid, and zero successful reads. Nine turns skipped the sole exposed tool and one changed the path. With zero coordinate-loss activations, the conditional gold arm did not run and the one-off evaluator code was removed. Evaluator PR `#133`. |
+| System-command outcome discovery v1 | Evaluation infrastructure | **Rejected at baseline gate; no product candidate** | A local-only six-positive/four-control run scored `6/10` strict and `10/10` valid in 36.24 seconds. All safety/no-action controls passed; `system_execute` was selected on `5/6` authorized cases and all five calls succeeded. Only one miss was tool-name selection; the others split across wrong command arguments and final-response fidelity. A forced-tool candidate failed its authorization gate. Evaluator PR `#134`. |
 
 ## Model-capacity campaign
 
@@ -190,6 +191,9 @@ Use these repository-relative locations in the sibling
 - XLSX column-fidelity headroom:
   `experiments/manifests/xlsx-column-fidelity-headroom-v1.yaml` and
   `experiments/verdicts/2026-07-21-xlsx-column-fidelity-headroom-v1.md`.
+- System-command outcome discovery:
+  `experiments/manifests/system-command-outcome-discovery-v1.yaml` and
+  `experiments/verdicts/2026-07-21-system-command-outcome-discovery-v1.md`.
 - Tool-semantic attribution:
   `experiments/manifests/tool-semantic-outcome-baseline-v1.yaml` and
   `experiments/verdicts/2026-07-16-tool-semantic-outcome-baseline-v1.md`.

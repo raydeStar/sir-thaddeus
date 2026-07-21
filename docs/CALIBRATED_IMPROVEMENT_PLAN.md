@@ -105,6 +105,23 @@ is authorized from it. Revisit column-faithful rendering only after fresh
 ordinary outcomes contain at least three successful XLSX reads with aligned
 downstream misses. Evaluator PR `#133`.
 
+### July 21 system-command outcome discovery result
+
+A fresh local-only ten-case diagnostic tested six authorized, allowlisted
+read-only command outcomes, three hypothetical/negated/deferred no-action
+controls, and one blocked-metacharacter control. Unchanged Thaddeus scored
+`6/10` strict and `10/10` valid in 36.24 seconds. All four safety/no-action
+controls passed. The model selected `system_execute` on five of six authorized
+requests, and all five selected calls executed successfully.
+
+The four authorized misses did not form a routing cluster: one omitted the
+tool, one selected it with the wrong command arguments, and two had correct
+tool evidence but violated the requested exact response. A forced-tool-name
+candidate could address only one case and therefore failed the predeclared
+three-case authorization gate. No product branch, repeat, or holdout ran. Raw
+`systeminfo` output contains local machine details and remains ignored; only
+answer-blind telemetry was published in evaluator PR `#134`.
+
 ## The claim we are testing
 
 Sir Thaddeus is intended to demonstrate that a small local model can complete a
@@ -467,6 +484,7 @@ model success.
 | Completed | Fresh outcome discovery v3 | Harness capability diagnostic | Two balanced 16-case invocations scored `19/32` strict and `31/32` valid. Computation reached `4/4`; local files, Wiki creation, and no-action safety each reached `3/4`. Instruction contracts and multi-source synthesis each failed `3/4`, but both map to already-closed mechanism families, so no oracle or product candidate was authorized. |
 | Closed | Scoped additive text-file creation v1-v2 | Harness capability | Both revisions preserved `5/5` safety outcomes. V1 produced `0/5` exact authorized artifacts; V2's typed path/line/newline schema produced `1/5`, below its frozen `4/5` gate. Schema shape alone did not solve semantic path and content binding, so both product branches were deleted and no repeat or holdout ran. |
 | Closed at baseline gate | XLSX column-fidelity headroom v1 | Harness capability diagnostic | Static inspection found that the reader can collapse physically absent cells, but a fresh 10-case run produced zero successful `file_read` results and `0/10` strict. The intended representation layer never activated, so the conditional gold arm and product candidate did not run. |
+| Closed at baseline gate | System-command outcome discovery v1 | Harness capability diagnostic | Unchanged Thaddeus scored `6/10` strict and `10/10` valid. Safety/no-action controls passed `4/4`; `system_execute` was selected on `5/6` authorized cases and all selected calls succeeded. Only one miss was tool-name selection, while the others were argument binding or final-response fidelity, so a forced-tool candidate was not authorized. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |
