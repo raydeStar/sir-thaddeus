@@ -153,21 +153,26 @@ a generalized verifier abstraction would earn its cost.
 
 ## Selected next action
 
-The expanded fresh failure-cluster census is complete. V3 found two numeric
-three-of-four clusters, instruction contracts and multi-source synthesis, but
-both belong to mechanism families already closed by stronger activation,
-safety, or resource evidence. The count alone therefore authorizes no oracle
-and no new fixed-model runtime mutation.
+The expanded answer-blind outcome census is complete. It reused 57 compatible
+fixed-model outcomes across five frozen cohorts without another model call.
+Verified computation scored `6/6` and verified state change `5/6`. Six numeric
+failure buckets met the count screen, but manual attribution found each already
+closed or heterogeneous. The attached-Wiki lead, for example, was two literal
+response-contract misses plus one semantic counting miss. Counts alone therefore
+authorize no oracle and no new fixed-model runtime mutation.
 
-Pause router, prompt, retrieval, and postcondition candidates until fresh
-labeled outcomes expose a repeated independently verifiable seam. The next
-investment is economical outcome accumulation for risk/coverage analysis and,
-eventually, calibrated abstention or disclosed specialist escalation. A new
-candidate still requires at least three aligned failures, answer-blind oracle
-headroom, and a mechanism materially different from the closed families. The
-public benchmark fit audit supports borrowing deterministic-state and
-insufficient-information archetypes, but no audited external system is a free,
-local, sub-ten-minute drop-in scorecard for the current capability surface.
+Pause router, prompt, retrieval, response-contract, path-binding, and generic
+postcondition candidates until fresh labeled outcomes expose a repeated,
+independently verifiable seam. The next investment is economical outcome
+accumulation at an under-sampled open product boundary, followed eventually by
+risk/coverage analysis, calibrated abstention, or disclosed specialist
+escalation. A new candidate still requires at least three aligned failures,
+answer-blind oracle headroom, and a mechanism materially different from the
+closed families. The public benchmark fit audit supports borrowing
+deterministic-state and insufficient-information archetypes, but no audited
+external system is a free, local, sub-ten-minute drop-in scorecard for the
+current capability surface. The 57-outcome census remains below the 300-outcome
+complementarity gate.
 
 ## Research basis
 
