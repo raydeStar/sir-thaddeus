@@ -2,12 +2,12 @@
 
 **Evidence cutoff:** July 21, 2026
 
-**Production baseline:** `53224fea`; empty-state Wiki observation coverage was
+**Production baseline:** `974f1b03`; empty-state Wiki observation coverage was
 repaired through product PR `#256`, AngleSharp was pinned to `1.5.2` through
 security PR `#259`, the July outcome evidence was reconciled in PR `#260`, and
 the Wiki default-location projection was promoted through PR `#261`; native
 document evaluation support landed through PR `#263` and its evidence through
-PR `#264`
+PR `#264`, and structured file-creation findings through PR `#265`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -534,6 +534,28 @@ calls and latency while tying or losing to unchanged Thaddeus.
   supplied three aligned valid failures. No oracle, repeat, validation, or
   product candidate ran; evaluator PR `#130`.
 
+### XLSX column-fidelity headroom diagnostic
+
+- Static code inspection and the Open XML cell-reference contract identify a
+  real representation risk: `XlsxDocumentReader` joins only physically present
+  cells, so an absent middle cell can shift later values left in model-visible
+  text.
+- A predeclared ten-case diagnostic used six fresh sparse-cell workbooks and
+  four dense controls. The unchanged harness scored `0/10` strict and `7/10`
+  valid, with 24 model calls, one tool call, 15,253 input tokens, 1,122 output
+  tokens, 362/412 ms first-token p50/p95, 4,815/7,112 ms end-to-end p50/p95,
+  and 3,047 MiB peak VRAM.
+- No case produced a successful `file_read`. Nine turns skipped the sole exposed
+  tool; one hallucinated a different filename and received an access denial.
+  Full-composition diagnostics confirmed that the one-tool prompt was present.
+- The frozen gate required three valid sparse misses after successful reads and
+  coordinate-loss activation. It therefore failed at zero activations. The
+  conditional gold arm did not run, no product code changed, and the one-off
+  evaluator implementation was removed. Evaluator PR `#133`.
+- This result does not prove the reader is good. It proves only that this cohort
+  cannot justify fixing it for model-outcome gain because the upstream tool
+  commitment/path boundary prevented the representation layer from running.
+
 ## What remains uncertain
 
 - Whether continued labeled outcome accumulation reveals a repeated,
@@ -541,6 +563,10 @@ calls and latency while tying or losing to unchanged Thaddeus.
   combined 57-outcome census found six numeric clusters, but manual attribution
   found each closed or heterogeneous; none of the synthetic cohorts establishes
   prevalence weights.
+- Whether XLSX cell-coordinate preservation improves user outcomes remains
+  untested. Reopen only after at least three fresh successful XLSX reads expose
+  aligned downstream errors; do not force the tool or tune the consumed prompts
+  merely to reach the reader.
 - Whether compact local Wiki/document retrieval can approach the demonstrated
   gold-evidence ceiling and the conditional `6/6` compact-evidence result
   without flooding context or depending on unreliable public search. The V3

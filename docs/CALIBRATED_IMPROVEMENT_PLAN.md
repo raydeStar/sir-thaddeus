@@ -89,6 +89,22 @@ answer-entity omission, and one counting error. No predeclared category supplied
 three aligned valid failures, so no oracle, repeat, validation, or product
 candidate ran. Evaluator PR `#130`.
 
+### July 21 XLSX column-fidelity headroom result
+
+A fresh ten-case XLSX diagnostic stopped before its conditional gold arm. The
+production prompt exposed exactly one `file_read` tool on each isolated case,
+but the model produced no successful reads: nine turns made no tool call and one
+changed the requested filename before receiving an access denial. Strict score
+was `0/10`, validity was `7/10`, and the six sparse-cell positives had zero
+coordinate-loss activations because no workbook evidence reached the model.
+
+Static inspection still shows that the XLSX reader ignores cell references and
+can collapse absent middle cells, but this artifact did not test that layer. No
+reader fix, forced-tool arm, prompt mutation, gold run, repeat, or product branch
+is authorized from it. Revisit column-faithful rendering only after fresh
+ordinary outcomes contain at least three successful XLSX reads with aligned
+downstream misses. Evaluator PR `#133`.
+
 ## The claim we are testing
 
 Sir Thaddeus is intended to demonstrate that a small local model can complete a
@@ -450,6 +466,7 @@ model success.
 | Completed | Fresh outcome discovery v2 | Harness capability diagnostic | A balanced 16-task triage scored `7/16` strict and `11/16` valid. Local-file extraction missed `0/2`, but its preauthored reserve passed `1/1` with `file_read`, leaving no qualifying three-case cluster and authorizing no oracle or product candidate. The staged 17-case screen used about 90 seconds of hot model time. |
 | Completed | Fresh outcome discovery v3 | Harness capability diagnostic | Two balanced 16-case invocations scored `19/32` strict and `31/32` valid. Computation reached `4/4`; local files, Wiki creation, and no-action safety each reached `3/4`. Instruction contracts and multi-source synthesis each failed `3/4`, but both map to already-closed mechanism families, so no oracle or product candidate was authorized. |
 | Closed | Scoped additive text-file creation v1-v2 | Harness capability | Both revisions preserved `5/5` safety outcomes. V1 produced `0/5` exact authorized artifacts; V2's typed path/line/newline schema produced `1/5`, below its frozen `4/5` gate. Schema shape alone did not solve semantic path and content binding, so both product branches were deleted and no repeat or holdout ran. |
+| Closed at baseline gate | XLSX column-fidelity headroom v1 | Harness capability diagnostic | Static inspection found that the reader can collapse physically absent cells, but a fresh 10-case run produced zero successful `file_read` results and `0/10` strict. The intended representation layer never activated, so the conditional gold arm and product candidate did not run. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |
