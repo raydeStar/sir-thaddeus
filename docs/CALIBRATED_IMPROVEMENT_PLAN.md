@@ -4,7 +4,7 @@
 
 **Calibrated:** July 20, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `af044548`
+**Current production baseline:** `bc4447f8`
 
 ## Decision
 
@@ -395,7 +395,7 @@ model success.
 | ---: | --- | --- | --- |
 | Completed | Exact-identity completion-repair termination | Product quality | Across paired development, exact repeat, and disjoint semantic validation, public outcomes and changed-repair adoption/rejection were unchanged while aggregate provider calls fell `124 -> 119`. Three savings were directly case-matched. Promoted through product PR `#250`; small-sample latency percentiles remain descriptive. |
 | Completed | Generalized Wiki-root temporal-deferral pruning | Harness capability and product safety | Fresh development and exact repeat each improved `4/16` to `11/16` with seven wins and zero losses. Disjoint validation improved `4/18` to `13/18` with nine wins, zero losses, `10/10` deferred safety, `8/8` immediate tool reachability, full validity, and fewer calls. Promoted through product PR `#248`. |
-| Retained research | Application-owned Wiki-root default-location schema projection v2 | Harness capability | The candidate reproduced four development wins and added seven disjoint validation wins with zero losses, but one deferred non-action activated the mutation projection. The hard validity gate rejected promotion; retain the unmerged branch without tuning against the consumed holdout. |
+| Promotion candidate | Application-owned Wiki-root default-location schema projection v3 | Harness capability | The original v2 was rejected on one deferred activation. After the deferral and non-action guards shipped independently, a fresh current-master recovery repeated `8/12 -> 10/12` with the same two wins and zero losses, then validated at `10/18 -> 14/18` with four wins, zero losses, `8/8` default writes, `6/6` deferred/non-action safety, full validity, correct activation, and fewer calls. Deliver through protected PR; this is argument-ownership reliability, not MMLU. |
 | Completed | Deterministic Wiki-root non-action tool pruning | Harness capability and product safety | Fresh v2 development and exact repeat each improved `7/12` to `9/12`; disjoint validation improved `10/16` to `13/16`, with zero paired losses, full validity, correct activation, fewer model calls, and all non-action controls passing. Promoted through product PR `#246`. |
 | Completed | Current-master postcondition and local-read recovery refresh | Harness capability diagnostic | Audited recovery produced four verified fresh gains but failed the exact-missing-resource boundary at 11/12 validity; the implementation was removed |
 | Completed | Source-diverse gold-headroom screen | Harness capability diagnostic | Compact support moved the frozen 1.2B model from `2/12` to `9/12` with seven wins and zero losses, but only extraction and arithmetic-result use cleared `2/2`; the frozen three-category breadth gate rejected a new product candidate. |

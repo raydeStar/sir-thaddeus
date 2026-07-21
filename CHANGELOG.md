@@ -4,6 +4,10 @@
 
 ### Agent quality and routing
 
+- Immediate Wiki root creation now keeps the configured library location
+  application-owned, exposing only the requested root name to the model unless
+  the user explicitly supplies a custom location. Deferred and non-action
+  requests remain blocked before this projection can activate.
 - Explicit no-tool response contracts are detected from the request lead so
   quoted examples cannot silently escalate a direct-answer turn into research.
 - Direct-answer prompts with completed examples now focus the model on the
