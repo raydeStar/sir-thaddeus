@@ -4,7 +4,7 @@
 
 **Calibrated:** July 20, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `fb36979c`
+**Current production baseline:** `5e9447ea`
 
 ## Decision
 
@@ -71,6 +71,23 @@ No category met the frozen three-valid-failure gate, so no oracle, repeat,
 validation, or product mutation ran. Keep document reading as a measured
 capability boundary; do not build a parser, router, retry, or document-query
 tool from this heterogeneous slice.
+
+### July 21 native document-reading discovery result
+
+The reusable harness can now seed bounded binary fixtures inside its existing
+isolated file root; this is evaluation infrastructure, not a production upload
+or assistant behavior change. All twelve newly authored PDF, DOCX, and XLSX
+fixtures passed the real production readers before inference.
+
+The frozen unchanged-harness cohort then scored `6/12` strict and `10/12`
+valid in 83.035 seconds. Field extraction reached `3/4`, row selection `2/4`,
+and aggregation `1/4`; PDF/DOCX/XLSX scored `2/4`, `3/4`, and `1/4`
+respectively. The low XLSX slice is not a post-hoc oracle gate: its misses split
+between two invalid path mutations and one adjacent-column interpretation
+error. Across the full cohort, the other misses included one absent read, one
+answer-entity omission, and one counting error. No predeclared category supplied
+three aligned valid failures, so no oracle, repeat, validation, or product
+candidate ran. Evaluator PR `#130`.
 
 ## The claim we are testing
 
