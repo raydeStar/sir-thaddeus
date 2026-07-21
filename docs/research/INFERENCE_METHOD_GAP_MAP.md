@@ -1,8 +1,8 @@
 # Inference Method Gap Map
 
-**Reconciled:** July 20, 2026
-**Production baseline:** `af044548`
-**Evaluator baseline:** `bd3e2c89`
+**Reconciled:** July 21, 2026
+**Production baseline:** `fb36979c`
+**Evaluator baseline:** `e814f278`
 
 This map ranks research mechanisms against Sir Thaddeus evidence. It does not
 replace the experiment ledger or promotion policy. Model capacity, fixed-model
@@ -43,7 +43,7 @@ activation before scoring.
 | Multi-model/specialist routing | Deferred | No 300-outcome complementary failure map; changing models does not improve the fixed model | Potentially high | Escalation can improve system outcomes | VRAM and routing latency | Strong if disclosed and paired | Attribution confusion and operational complexity | Keep deferred |
 | Broad conversational fast path/router rewrite | Rejected by measurement | Footman made zero LLM calls; optional helpers were 10% of ordinary-turn time; global validation/retry removal reduced quality | Medium | Limited measured upside | Engineering and regression cost | Product latency only | Quality, memory, safety, continuity | Do not reopen without a new measured blocker |
 | Capability-surface context headroom | Causally demonstrated; selector family closed | Repeated 8K attribution measured 8,455 estimated tool-definition tokens across 60 tools and a 12,097-token request budget; a one-read-tool oracle repeated with 4,302 tokens of headroom and passed the contract | High for small contexts | Prevent provider overflow and reduce irrelevant capability burden | Potentially lower prompt and permission cost | Strong for envelope size; weak for safe selection | Prior precedence was unsafe and conservative v3 increased calls | Keep as diagnostic evidence; require a materially different selector before reopening |
-| Fresh representative outcome discovery | Diagnostic complete; no open candidate | V2 found no three-case cluster. V3 scored `19/32` strict and `31/32` valid; instruction contracts and multi-source synthesis each failed `3/4`, but both map to mechanism families already closed by stronger activation and safety evidence | High as an evaluation method | Finds current failure regions without committing to architecture | V3 used two 16-case invocations and about 101 seconds command time | Strong for observed cases, not prevalence | Synthetic mixes can create misleading clusters | Keep accumulating outcomes; require both prevalence and a materially open seam |
+| Fresh representative outcome discovery | Diagnostic complete; no open candidate | V2 found no three-case cluster. V3 scored `19/32` strict and `31/32` valid. A later local document cohort scored `8/12` strict and `11/12` valid, but no category reached three aligned valid failures | High as an evaluation method | Finds current failure regions without committing to architecture | The document cohort used one 12-case invocation and 86.854 seconds | Strong for observed cases, not prevalence | Synthetic mixes can create misleading clusters | Keep accumulating outcomes; require both prevalence and a materially open seam |
 
 ## Verification audit
 
@@ -153,17 +153,13 @@ a generalized verifier abstraction would earn its cost.
 
 ## Selected next action
 
-The strongest retained candidate has now been recovered honestly on current
-master. The original Wiki-root default-location v2 was blocked by one deferred
-activation. Independently promoted temporal-deferral and non-action policies
-now make that request ineligible before schema projection. On fresh inputs, v3
-reproduced `8/12 -> 10/12` in development and exact repeat, then validated at
-`10/18 -> 14/18` with four wins, zero losses, full validity, correct activation,
-and fewer calls. Product PR `#261` carries the protected delivery; preserve its
-evaluator record before opening another mechanism.
+Wiki-root default-location v3 is promoted and its record is preserved. The next
+under-sampled local boundary, CSV/RTF document reading, then scored `8/12`
+strict and `11/12` valid. No category reached the frozen three-valid-failure
+gate; its misses were heterogeneous and authorized no oracle or product code.
 
-After delivery, resume economical outcome accumulation at an under-sampled open
-product boundary. Keep router, prompt, retrieval, response-contract,
+Continue economical outcome accumulation at another under-sampled open product
+boundary. Keep router, prompt, retrieval, response-contract,
 path-binding, and generic postcondition candidates paused until fresh labeled
 outcomes expose a repeated independently verifiable seam. A new candidate still
 requires answer-blind headroom and a mechanism materially different from closed

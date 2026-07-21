@@ -4,7 +4,7 @@
 
 **Calibrated:** July 20, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `bc4447f8`
+**Current production baseline:** `fb36979c`
 
 ## Decision
 
@@ -59,6 +59,18 @@ literal-response, path-recovery, retrieval, or generic verification candidate.
 The next paid cohort must be predeclared at an under-sampled, independently
 verifiable, materially open product seam. These 57 outcomes are not prevalence
 evidence and do not satisfy the 300-outcome complementarity gate.
+
+### July 21 local document-reading discovery result
+
+A newly authored, local-only CSV/RTF cohort scored `8/12` strict and `11/12`
+valid in 86.854 seconds. Field extraction and row selection each reached `3/4`;
+table aggregation reached `2/4`. Ten `file_read` calls returned usable evidence,
+but the four misses split across semantic column binding, failure to commit to
+the read, an incorrect path, and incomplete arithmetic after a successful read.
+No category met the frozen three-valid-failure gate, so no oracle, repeat,
+validation, or product mutation ran. Keep document reading as a measured
+capability boundary; do not build a parser, router, retry, or document-query
+tool from this heterogeneous slice.
 
 ## The claim we are testing
 

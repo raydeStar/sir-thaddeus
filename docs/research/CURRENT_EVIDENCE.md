@@ -2,9 +2,10 @@
 
 **Evidence cutoff:** July 21, 2026
 
-**Production baseline:** `bc4447f8`; empty-state Wiki observation coverage was
+**Production baseline:** `fb36979c`; empty-state Wiki observation coverage was
 repaired through product PR `#256`, AngleSharp was pinned to `1.5.2` through
-security PR `#259`, and the July outcome evidence was reconciled in PR `#260`
+security PR `#259`, the July outcome evidence was reconciled in PR `#260`, and
+the Wiki default-location projection was promoted through PR `#261`
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -480,6 +481,24 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - The 57 outcomes are coverage evidence only. They do not establish population
   prevalence, satisfy the 300-outcome complementarity gate, or support the
   final 80-percent product claim.
+
+### Local document-reading outcome discovery
+
+- One fresh, local-only invocation evaluated 12 newly authored CSV and RTF
+  questions in 86.854 seconds. Unchanged Thaddeus scored `8/12` strict and
+  `11/12` valid with zero runtime errors.
+- Field extraction and row selection each reached `3/4`; table aggregation
+  reached `2/4`. The run used 35 model calls, 11 `file_read` calls, 33,673
+  tokens, 482/784 ms first-token p50/p95, 5,337/16,023 ms end-to-end p50/p95,
+  and 3,071 MB peak VRAM.
+- Ten document reads returned usable evidence. The four misses were one wrong
+  CSV column interpretation, one failure to call the reader, one transposed
+  path, and one unfinished average after a successful read. They are
+  heterogeneous and include already closed path/tool-commitment families.
+- No category met the predeclared three-valid-failure gate. No oracle, exact
+  repeat, validation, or product candidate ran. DocBench and Office
+  Comprehension Benchmark informed taxonomy only; no public task content was
+  copied or downloaded. Evaluator PR `#129`.
 
 ## What remains uncertain
 
