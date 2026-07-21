@@ -4,7 +4,7 @@
 
 **Calibrated:** July 20, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `2aa24bd7`
+**Current production baseline:** `8de27f9b`
 
 ## Decision
 
@@ -165,6 +165,28 @@ The current open seam is semantic typed-argument binding, not routing. Any
 follow-on must first prove that a deterministic argument oracle corrects a
 fresh disjoint cluster. It may not combine tool selection, argument rewriting,
 and final-response projection in one candidate.
+
+### July 21 typed date-argument oracle result
+
+The separate v3 prerequisite used six more disjoint positives explicitly
+requesting the date capability plus six boundary controls. Tool-only scored
+`1/6` positives and `3/6` controls with `12/12` validity. It selected
+`date_calculate` on `4/6` positives, below the frozen `5/6` requirement for
+declaring semantic binding dominant. Three selected failures did use the wrong
+operation or arguments, but both recurrence requests omitted the tool.
+
+The compact gold arm, repeat, and product rewriter therefore did not run. The
+invalid date failed closed and none of five no-action/unsupported controls made
+a forbidden call; three controls missed only exact response contracts. The
+one-off evaluator builder was removed and evaluator PR `#137` preserves the
+answer- and argument-blind record.
+
+Close the date family on current evidence. Across three disjoint slices, the
+dominant failure alternated among discovery, semantic binding, and response
+fidelity. A bundled selector/parser/rewriter/projector might raise a synthetic
+date score, but it is not the smallest independently justified harness
+mechanism. Reopen only from ordinary labeled outcomes, not more authored date
+fixtures.
 
 ## The claim we are testing
 
@@ -531,6 +553,7 @@ model success.
 | Closed at baseline gate | System-command outcome discovery v1 | Harness capability diagnostic | Unchanged Thaddeus scored `6/10` strict and `10/10` valid. Safety/no-action controls passed `4/4`; `system_execute` was selected on `5/6` authorized cases and all selected calls succeeded. Only one miss was tool-name selection, while the others were argument binding or final-response fidelity, so a forced-tool candidate was not authorized. |
 | Closed at development gate | Deterministic date arithmetic v1 | Harness capability | Compact gold evidence moved `1/8` raw and `0/8` unchanged to `8/8`, but the real read-only tool candidate reached only `2/8` positives with `4/4` controls. Both selected positive calls succeeded; selection coverage was only `2/8`, below the `7/8` gate. Product code was deleted and evaluator PR `#135` preserves the evidence. |
 | Stopped at prerequisite | Deterministic date first-tool selection v2 | Harness capability diagnostic | On a fresh disjoint slice, raw and unchanged scored `0/8`; tool-only scored `3/8` and already selected on `6/8`. Only two misses were omissions while three were wrong operation/argument bindings, so selection could not meet the frozen +3 causal gate. No selector code ran; evaluator PR `#136`. |
+| Rejected at prerequisite | Typed date-argument oracle v3 | Harness capability diagnostic | On a third disjoint slice, tool-only scored `1/6` positives and selected on `4/6`, below the frozen `5/6` binding-dominance gate. Three selected calls had wrong arguments, but two recurrence requests omitted the tool. Gold and product code did not run; the date family is closed. Evaluator PR `#137`. |
 | Deferred | Structured constrained decoding | Harness capability | The clean LFM 1.2B diagnostic tied at `10/10` valid and `9/10` semantically exact, so no current product headroom exists |
 | Deferred | Verifier-guided candidate selection | Harness capability | Requires a sound external verifier and a repeated domain-specific failure cluster; general voting already lost |
 | Deferred | Calibrated abstention | Product quality | Requires a frozen labeled outcome set and risk/coverage reporting |

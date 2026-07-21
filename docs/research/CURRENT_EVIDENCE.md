@@ -625,6 +625,26 @@ calls and latency while tying or losing to unchanged Thaddeus.
   oracle and fresh disjoint tasks; the consumed v2 failures are diagnostic and
   must not become lexical fixtures in runtime code.
 
+### Typed date-argument oracle prerequisite
+
+- A third disjoint bank isolated two forward offsets, two backward offsets, two
+  recurrences, and six malformed/ambiguous/missing/hypothetical/negated/
+  unsupported controls. No product mutation preceded the baseline.
+- Tool-only scored `1/6` positives, `3/6` controls, and `12/12` valid. It used
+  32 model calls, five tool calls, 29,530 tokens, `376/567 ms` first-token
+  p50/p95, `762/4,593 ms` end-to-end p50/p95, and 3,049 MiB peak VRAM.
+- Positive selection reached only `4/6`, below the frozen `5/6` prerequisite.
+  Three selected calls bound the wrong operation or arguments; both recurrence
+  requests omitted the tool. Typed binding therefore was not reliably dominant.
+- The invalid date failed closed. The five no-action/unsupported controls made
+  zero forbidden calls, although three missed exact response contracts.
+- Gold, repeat, and product code did not run. The one-off executable evaluator
+  code was removed after freezing the public selection. Evaluator PR `#137`
+  preserves the manifest, hashes, and verdict.
+- Across v1-v3, selection moved from `2/8` to `6/8` to `4/6`, while strict
+  positives moved `2/8`, `3/8`, and `1/6`. No stable narrow date layer remained.
+  Close this family until ordinary labeled outcomes independently reopen it.
+
 ## What remains uncertain
 
 - Whether continued labeled outcome accumulation reveals a repeated,
@@ -641,11 +661,10 @@ calls and latency while tying or losing to unchanged Thaddeus.
   the tool was selected on `5/6` authorized cases and every selected call
   succeeded. Do not force the tool globally or reopen exact-response handling
   from this heterogeneous four-miss slice.
-- Whether deterministic typed argument construction can correct explicit ISO
-  date requests remains open. A disjoint tool-only slice selected on `6/8`, but
-  three positive misses used the wrong operation or arguments. Selection-only
-  is closed from that slice; argument construction needs its own oracle before
-  any product mutation.
+- Date specialization is closed on current evidence. Three disjoint slices did
+  not establish one dominant layer across discovery, semantic arguments, and
+  response fidelity. Do not add a bundled date parser/router/projector merely
+  to lift these authored fixtures.
 - Whether compact local Wiki/document retrieval can approach the demonstrated
   gold-evidence ceiling and the conditional `6/6` compact-evidence result
   without flooding context or depending on unreliable public search. The V3
