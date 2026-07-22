@@ -259,6 +259,7 @@ CONVERSATION_AND_TOOL_DATA:
             startInfo.ArgumentList.Add("--skip-git-repo-check");
             startInfo.ArgumentList.Add("--color");
             startInfo.ArgumentList.Add("never");
+            startInfo.ArgumentList.Add("--json");
             startInfo.ArgumentList.Add("--model");
             startInfo.ArgumentList.Add(invocation.Model);
             startInfo.ArgumentList.Add("-c");
@@ -286,9 +287,16 @@ CONVERSATION_AND_TOOL_DATA:
             }
 
             var stderr = await stderrTask.ConfigureAwait(false);
-            _ = await stdoutTask.ConfigureAwait(false);
+            var stdout = await stdoutTask.ConfigureAwait(false);
             if (process.ExitCode != 0)
                 throw new HttpRequestException($"Codex CLI exited with code {process.ExitCode}: {TrimDiagnostic(stderr)}");
+            var forbiddenTransportEvents = FindForbiddenTransportEvents(stdout);
+            if (forbiddenTransportEvents.Count > 0)
+            {
+                throw new HttpRequestException(
+                    "Codex CLI attempted transport-level tool use: "
+                    + string.Join(", ", forbiddenTransportEvents));
+            }
 
             var response = await File.ReadAllTextAsync(outputPath, cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(response))
@@ -311,6 +319,39 @@ CONVERSATION_AND_TOOL_DATA:
         return normalized is "none" or "minimal" or "low" or "medium" or "high" or "xhigh"
             ? normalized
             : "high";
+    }
+
+    internal static IReadOnlyList<string> FindForbiddenTransportEvents(string jsonl)
+    {
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var line in (jsonl ?? string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                var root = document.RootElement;
+                var eventType = root.TryGetProperty("type", out var eventTypeValue)
+                    ? eventTypeValue.GetString() ?? string.Empty
+                    : string.Empty;
+                var itemType = root.TryGetProperty("item", out var item)
+                    && item.ValueKind == JsonValueKind.Object
+                    && item.TryGetProperty("type", out var itemTypeValue)
+                    ? itemTypeValue.GetString() ?? string.Empty
+                    : string.Empty;
+                var combined = $"{eventType}:{itemType}".ToLowerInvariant();
+                if (new[] { "command", "mcp", "web_search", "tool_call", "file_" }
+                    .Any(combined.Contains))
+                {
+                    found.Add(combined);
+                }
+            }
+            catch (JsonException)
+            {
+                // Non-JSON diagnostics are ignored; the final response still
+                // must satisfy the separate strict output schema.
+            }
+        }
+        return found.OrderBy(value => value, StringComparer.Ordinal).ToArray();
     }
 
     private static long EstimateTokens(string text) => Math.Max(1, text.Length / 4);

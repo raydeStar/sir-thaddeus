@@ -109,6 +109,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         var resetStopwatch = Stopwatch.StartNew();
         await ApplyHarnessResetAsync(test, cancellationToken).ConfigureAwait(false);
         await ApplyStateSetupAsync(test.StateSetup, cancellationToken).ConfigureAwait(false);
+        var preflightState = await CaptureObservedStateAsync(test.Observations, cancellationToken)
+            .ConfigureAwait(false);
         resetStopwatch.Stop();
         var resetSeconds = resetStopwatch.Elapsed.TotalSeconds;
 
@@ -134,7 +136,17 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         var trace = AuditTraceBuilder.BuildFromAuditFile(auditFile, auditCaptureStart);
         var (toolCalls, toolTurns, steps) = ToolEvidenceTraceEnricher.Enrich(trace, fullToolEvidence);
 
-        var finalSteps = steps.ToList();
+        var finalSteps = new List<TraceStep>
+        {
+            new()
+            {
+                StepIndex = 1,
+                StepType = "state_preflight",
+                StartedAt = DateTimeOffset.UtcNow,
+                Content = preflightState?.GetRawText() ?? "null"
+            }
+        };
+        finalSteps.AddRange(steps.Select((step, index) => step with { StepIndex = index + 2 }));
         finalSteps.Add(new TraceStep
         {
             StepIndex = finalSteps.Count + 1,

@@ -5,6 +5,19 @@ namespace SirThaddeus.Tests;
 public sealed class CodexCliLlmClientTests
 {
     [Fact]
+    public void Transport_event_filter_rejects_internal_tools_but_allows_model_messages()
+    {
+        var jsonl = string.Join('\n',
+            "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\"}}",
+            "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\"}}");
+
+        var events = CodexCliLlmClient.FindForbiddenTransportEvents(jsonl);
+
+        Assert.Single(events);
+        Assert.Contains("command_execution", events[0]);
+    }
+
+    [Fact]
     public async Task ChatAsync_ParsesFinalEnvelope_WithoutGivingCodexToolAuthority()
     {
         CodexCliLlmClient.CodexCliInvocation? captured = null;

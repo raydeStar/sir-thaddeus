@@ -126,9 +126,31 @@ Keep the model, quantization, context, sampling, prompt composer, provider, and
 item set frozen. Compare these arms when applicable:
 
 1. `raw`: minimal evaluator prompt and one model call;
-2. `same_prompt_direct`: the shared production prompt and one no-tools call;
-3. `harness_full`: unchanged production-equivalent orchestration;
-4. candidate: one declared mechanism differs.
+2. `production_prompt_no_tools`: the shared production prompt and one no-tools
+   call. Historical artifacts call this `same_prompt_direct`; never silently
+   reinterpret those results as tool-enabled;
+3. `same_prompt_tools_direct`: the shared production prompt and the same
+   allowlisted tools, using only an evaluation-owned model/tool loop with no
+   routing, retrieval discipline, retry/repair, synthesis, or verification;
+4. `harness_full`: unchanged production-equivalent orchestration;
+5. candidate or ablation: exactly one declared mechanism differs.
+
+The equal-tools arm is the primary architecture control. Full-harness versus
+raw remains useful product evidence, but it does not isolate orchestration from
+tool availability.
+
+The equal-tools runner is also a state boundary, not merely a prompt variant.
+It runs one case per process with evaluator-owned file, Wiki, memory, and audit
+paths; applies only fabricated case state; verifies the pre-turn snapshot; and
+records the post-turn snapshot plus every tool result. A failed preflight is an
+infrastructure error and cannot be scored as a model miss. Expected answers
+remain in the sibling evaluator and are never included in model messages.
+
+For hosted Luna-style runs, Codex CLI is an explicitly labeled transport rather
+than a direct model API. It ignores user config and repository rules, executes
+in an empty read-only temporary directory, and fails if the CLI event stream
+shows transport-level command, MCP, web-search, or file-tool use. Sir
+Thaddeus tool calls remain separate, allowlisted, audited records.
 
 For augmented tasks, show closed-book and tool-enabled results in separate
 columns. An oracle route, oracle tool, or gold-evidence arm can identify a model
@@ -148,8 +170,8 @@ To add or customize a benchmark:
 3. Record provider, model, prompt, tool, config, and repository hashes.
 4. Use deterministic scoring or independently observed final state where
    possible.
-5. Run raw, same-prompt direct, unchanged harness, and candidate controls on the
-   same items.
+5. Run raw, production-prompt/no-tools, same-prompt/equal-tools, unchanged
+   harness, and candidate controls on the same items.
 6. Rerun a promising candidate exactly before consuming validation.
 7. Reuse a frozen control pack only when all compatibility hashes match and a
    small unchanged-harness sentinel shows no drift.

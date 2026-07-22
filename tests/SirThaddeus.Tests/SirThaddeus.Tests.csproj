@@ -45,6 +45,7 @@
     <ProjectReference Include="..\..\packages\startup-diagnostics\SirThaddeus.StartupDiagnostics\SirThaddeus.StartupDiagnostics.csproj" />
     <ProjectReference Include="..\..\apps\mcp-server\SirThaddeus.McpServer\SirThaddeus.McpServer.csproj" />
     <ProjectReference Include="..\..\tools\SirThaddeus.Harness\SirThaddeus.Harness.csproj" />
+    <ProjectReference Include="..\..\tools\SirThaddeus.DirectEval\SirThaddeus.DirectEval.csproj" />
   </ItemGroup>
 
 

@@ -173,7 +173,7 @@ Representative results show both the value and the boundary of the approach:
 | Did the harness raise stabilized MMLU-Pro? | **10 / 20 raw = 10 / 20 harness** | No reproducible capacity uplift; MMLU optimization is paused. |
 | Did more inference help? | voting **37.9% → 27.9%** | No. The slower mechanism was rejected and removed. |
 
-### Local AI benchmark: LFM, Gemma, and Luna with tools
+### AI agent benchmark: LFM, Gemma, and Luna with tools
 
 Which local LLM is most useful after you add permissioned tools, local files,
 Wiki state, and direct verification? We ran the same frozen 32-task outcome
@@ -188,12 +188,16 @@ post-action state—not an LLM judge or a plausible-looking plan.
 | Gemma 4 26B-A4B Q4_K_S | 30 / 56 | **8 / 32 → 25 / 32** | Identical | The strongest local all-rounder in this run: repeatable tool outcomes and materially better closed-book capacity. |
 | Luna, high reasoning | 48 / 56 | **10 / 32 → 27 / 32**; **11 / 32 → 23 / 32** | Directionally repeated | Highest raw capacity and a significant harness lift, with much higher hosted latency and more outcome drift. |
 
-For the three local deployments, the raw-versus-harness gains were paired and
-directly scored: LFM 1.2B **13 wins / 2 losses** per repeat (two-sided exact
-McNemar *p* = .00739), LFM 8B-A1B **20 / 2** (*p* = .00012), and Gemma
-26B-A4B **18 / 1** (*p* = .000076). Luna also improved in both runs (**19 / 2**
-and **15 / 3**), but it was less stable between repeats. All accepted runs had
-zero case-level runtime errors.
+These are preserved **development-bank** results, not a 32-independent-sample
+research claim. Several rows are mutations or fixture-sharing relatives, so
+the effective unit is the semantic family; the earlier case-level McNemar
+values are withdrawn from headline use. The suite also compares no-tools raw
+models with a tool-enabled product, and the historical `same_prompt_direct`
+arm used the production prompt **without tools**. It therefore does not yet
+isolate architecture from tool availability. The new
+`same_prompt_tools_direct` control and a private 25-family sealed bank are the
+required confirmation path before a stronger public generalization claim.
+All accepted historical runs had zero case-level runtime errors.
 
 The deployment takeaway is practical: choose **Gemma 4 26B-A4B** when you want
 the best balanced local model in this comparison; choose **LFM 8B-A1B** when
