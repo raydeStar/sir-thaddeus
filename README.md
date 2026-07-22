@@ -173,6 +173,44 @@ Representative results show both the value and the boundary of the approach:
 | Did the harness raise stabilized MMLU-Pro? | **10 / 20 raw = 10 / 20 harness** | No reproducible capacity uplift; MMLU optimization is paused. |
 | Did more inference help? | voting **37.9% → 27.9%** | No. The slower mechanism was rejected and removed. |
 
+### Local AI benchmark: LFM, Gemma, and Luna with tools
+
+Which local LLM is most useful after you add permissioned tools, local files,
+Wiki state, and direct verification? We ran the same frozen 32-task outcome
+suite both as **raw model-only prompts** and through the unchanged Sir Thaddeus
+harness. The scorer checks exact values, extracted local evidence, and observed
+post-action state—not an LLM judge or a plausible-looking plan.
+
+| Model deployment | Raw model capacity (MMLU validation) | Raw → harness outcomes | Exact repeat | Practical read |
+| --- | ---: | ---: | --- | --- |
+| LFM 2.5 1.2B Q4_K_M | 14 / 56 | **7 / 32 → 18 / 32** | Identical | A small local model gained 11 verified outcomes; the guarded run used one case per process after an earlier host freeze. |
+| LFM 2.5 8B-A1B Q4_K_M | 1 / 56 | **6 / 32 → 24 / 32** | Identical | Excellent harnessed completion, but this strict multiple-choice control exposed severe raw format-validity problems. |
+| Gemma 4 26B-A4B Q4_K_S | 30 / 56 | **8 / 32 → 25 / 32** | Identical | The strongest local all-rounder in this run: repeatable tool outcomes and materially better closed-book capacity. |
+| Luna, high reasoning | 48 / 56 | **10 / 32 → 27 / 32**; **11 / 32 → 23 / 32** | Directionally repeated | Highest raw capacity and a significant harness lift, with much higher hosted latency and more outcome drift. |
+
+For the three local deployments, the raw-versus-harness gains were paired and
+directly scored: LFM 1.2B **13 wins / 2 losses** per repeat (two-sided exact
+McNemar *p* = .00739), LFM 8B-A1B **20 / 2** (*p* = .00012), and Gemma
+26B-A4B **18 / 1** (*p* = .000076). Luna also improved in both runs (**19 / 2**
+and **15 / 3**), but it was less stable between repeats. All accepted runs had
+zero case-level runtime errors.
+
+The deployment takeaway is practical: choose **Gemma 4 26B-A4B** when you want
+the best balanced local model in this comparison; choose **LFM 8B-A1B** when
+the harness is the primary interface and its raw-format weakness is acceptable;
+and use **Luna** when its stronger closed-book reasoning is worth a much slower
+hosted path. The harness improves verified user outcomes—it does **not** raise
+the underlying model's MMLU score or turn a local benchmark into a public model
+leaderboard. Quantization, hosted sampling, local hardware, and provider cost
+remain deployment-specific.
+
+Full reproducibility details—frozen suite fingerprints, raw outputs, traces,
+latency, VRAM, exact-repeat artifacts, and exclusions—are explained in
+[Benchmarking](docs/BENCHMARKING.md) and preserved in the local experiment
+manifest and raw artifacts. Run
+[`dev/model-intake.ps1`](dev/model-intake.ps1) to evaluate a model on your own
+machine with Sir Thaddeus's production baseline.
+
 <details>
 <summary><strong>Open the full evidence table</strong></summary>
 
