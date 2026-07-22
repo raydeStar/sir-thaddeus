@@ -53,6 +53,7 @@ internal static class Program
                 effectiveLocation.GetResolvedLabel(),
                 effectiveLocation.GetResolvedTimezone(),
                 settings.Weather.GetNormalizedUnitSystem());
+            var configuredSystemPromptSha256 = HashText(settings.Llm.SystemPrompt);
 
             RuntimeMcpClientHandle? mcpHandle = null;
             JsonLineAuditLogger? audit = null;
@@ -189,6 +190,7 @@ internal static class Program
                 Temperature = settings.Llm.Temperature,
                 PersonalityId = settings.ActivePersonalityId,
                 PersonalitySha256 = personality.Snapshot.ProfileHash,
+                ConfiguredSystemPromptSha256 = configuredSystemPromptSha256,
                 SettingsSha256 = HashFile(SettingsManager.GetSettingsPath()),
                 Profile = toolsDirect ? "same_prompt_tools_direct" : "production_prompt_no_tools",
                 Results = results
@@ -252,6 +254,7 @@ internal sealed record DirectEvalBatchResult
     public double Temperature { get; init; }
     public required string PersonalityId { get; init; }
     public required string PersonalitySha256 { get; init; }
+    public required string ConfiguredSystemPromptSha256 { get; init; }
     public required string SettingsSha256 { get; init; }
     public required string Profile { get; init; }
     public List<DirectEvalItemResult> Results { get; init; } = [];

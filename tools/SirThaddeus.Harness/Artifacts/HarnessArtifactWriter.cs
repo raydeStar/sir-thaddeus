@@ -1,11 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using SirThaddeus.Agent;
 using SirThaddeus.Config;
 using SirThaddeus.Harness.Cli;
 using SirThaddeus.Harness.Models;
 using SirThaddeus.Harness.Tracing;
 using SirThaddeus.PersonalityEngine.Profiles;
+using SirThaddeus.PersonalityEngine;
+using SirThaddeus.LlmClient;
 
 namespace SirThaddeus.Harness.Artifacts;
 
@@ -59,6 +62,7 @@ public sealed class HarnessArtifactWriter
         CancellationToken cancellationToken)
     {
         var personalityHash = ComputeActivePersonalityHash(settings);
+        var productionSystemPromptHash = ComputeProductionSystemPromptHash(settings, test.UserMessage);
 
         var payload = new
         {
@@ -91,6 +95,7 @@ public sealed class HarnessArtifactWriter
             config_hashes = new
             {
                 system_prompt = ComputeHash(settings.Llm.SystemPrompt),
+                production_system_prompt = productionSystemPromptHash,
                 personality = personalityHash,
                 router = ComputeFileHash(Path.Combine("packages", "agent", "SirThaddeus.Agent", "Routing", "DefaultRouter.cs")),
                 policy = ComputeFileHash(Path.Combine("packages", "agent", "SirThaddeus.Agent", "PolicyGate.cs"))
@@ -200,6 +205,31 @@ public sealed class HarnessArtifactWriter
             store.EnsureBuiltInsInstalled(profilesDirectory);
             var active = store.LoadActive(profilesDirectory, settings.ActivePersonalityId);
             return active.Hash;
+        }
+        catch
+        {
+            return "unavailable";
+        }
+    }
+
+    private static string ComputeProductionSystemPromptHash(AppSettings settings, string userMessage)
+    {
+        try
+        {
+            var profilesDirectory = SettingsManager.ResolvePersonalityProfilesDirectory(settings);
+            var personality = new PersonalityRuntime(settings.ActivePersonalityId, profilesDirectory);
+            var location = settings.GetEffectiveUserLocation(settings.ActiveProfileId);
+            var basePrompt = ProductionPromptComposer.ComposeBaseSystemPrompt(
+                settings.Llm.SystemPrompt,
+                DateTimeOffset.Now,
+                location.GetResolvedLabel(),
+                location.GetResolvedTimezone(),
+                settings.Weather.GetNormalizedUnitSystem());
+            var messages = ProductionPromptComposer.ApplyPersonality(
+                [ChatMessage.System(basePrompt), ChatMessage.User(userMessage)],
+                personality,
+                userMessage);
+            return ComputeHash(messages.First(message => message.Role == "system").Content);
         }
         catch
         {
