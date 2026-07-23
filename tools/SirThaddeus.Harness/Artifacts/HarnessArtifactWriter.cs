@@ -81,6 +81,7 @@ public sealed class HarnessArtifactWriter
                 user_message = test.UserMessage,
                 allowed_tools = test.AllowedTools,
                 state_setup = test.StateSetup,
+                preflight_expected_state = test.PreflightExpectedState,
                 observations = test.Observations,
                 min_score = test.MinScore
             },

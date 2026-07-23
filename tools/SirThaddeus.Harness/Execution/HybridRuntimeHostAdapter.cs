@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -111,8 +112,46 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         await ApplyStateSetupAsync(test.StateSetup, cancellationToken).ConfigureAwait(false);
         var preflightState = await CaptureObservedStateAsync(test.Observations, cancellationToken)
             .ConfigureAwait(false);
+        var preflightTimestamp = DateTimeOffset.UtcNow;
+        var preflightPassed = MatchesExpectedState(preflightState, test.PreflightExpectedState);
+        var preflightTelemetry = BuildStatePreflightTelemetry(
+            preflightState,
+            preflightPassed,
+            preflightTimestamp);
         resetStopwatch.Stop();
         var resetSeconds = resetStopwatch.Elapsed.TotalSeconds;
+
+        var preflightStep = new TraceStep
+        {
+            StepIndex = 1,
+            StepType = "state_preflight",
+            StartedAt = preflightTimestamp,
+            Content = JsonSerializer.Serialize(preflightTelemetry, JsonOptions)
+        };
+        if (!preflightPassed)
+        {
+            totalStopwatch.Stop();
+            return new HostExecutionResult
+            {
+                Response = new AgentResponse
+                {
+                    Text = string.Empty,
+                    Success = false,
+                    Error = "infrastructure_failure: post-reset state did not match evaluator expectation",
+                    ToolCallsMade = [],
+                    LlmRoundTrips = 0,
+                    TokenUsage = new AgentTokenUsage()
+                },
+                Steps = [preflightStep],
+                ToolTurns = [],
+                ObservedState = preflightState,
+                Timing = new HarnessTiming(
+                    RuntimeWarmupSeconds: warmupSeconds,
+                    ResetSeconds: resetSeconds,
+                    TestWorkSeconds: 0,
+                    TotalSeconds: totalStopwatch.Elapsed.TotalSeconds)
+            };
+        }
 
         // Capture the audit-file mark so we only count tool calls from this
         // turn — the file accumulates across the whole harness run.
@@ -138,13 +177,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
 
         var finalSteps = new List<TraceStep>
         {
-            new()
-            {
-                StepIndex = 1,
-                StepType = "state_preflight",
-                StartedAt = DateTimeOffset.UtcNow,
-                Content = preflightState?.GetRawText() ?? "null"
-            }
+            preflightStep
         };
         finalSteps.AddRange(steps.Select((step, index) => step with { StepIndex = index + 2 }));
         finalSteps.Add(new TraceStep
@@ -738,6 +771,62 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .ToHashSet(StringComparer.Ordinal);
         return (wikiRequests.Length > 0, rootNames);
+    }
+
+    internal static bool MatchesExpectedState(JsonElement? observed, JsonElement? expected)
+    {
+        if (expected is null)
+            return true;
+        if (observed is null)
+            return expected.Value.ValueKind == JsonValueKind.Null;
+        return ContainsExpected(observed.Value, expected.Value);
+    }
+
+    private static bool ContainsExpected(JsonElement observed, JsonElement expected)
+    {
+        if (expected.ValueKind != observed.ValueKind)
+            return false;
+        if (expected.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in expected.EnumerateObject())
+            {
+                if (!observed.TryGetProperty(property.Name, out var actual) ||
+                    !ContainsExpected(actual, property.Value))
+                    return false;
+            }
+            return true;
+        }
+        if (expected.ValueKind == JsonValueKind.Array)
+        {
+            var expectedItems = expected.EnumerateArray().ToArray();
+            var observedItems = observed.EnumerateArray().ToArray();
+            return expectedItems.Length == observedItems.Length &&
+                   expectedItems.Zip(observedItems)
+                       .All(pair => ContainsExpected(pair.Second, pair.First));
+        }
+        return JsonElement.DeepEquals(observed, expected);
+    }
+
+    private static object BuildStatePreflightTelemetry(
+        JsonElement? observed,
+        bool passed,
+        DateTimeOffset timestamp)
+    {
+        var observedJson = observed?.GetRawText() ?? "null";
+        return new
+        {
+            observedInitialState = observed,
+            observedInitialStateSha256 = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(observedJson))).ToLowerInvariant(),
+            resetAction = "runtime_reset_then_apply_evaluator_state",
+            resetTaken = true,
+            postResetVerification = new
+            {
+                passed,
+                comparison = "expected_subset"
+            },
+            timestampUtc = timestamp
+        };
     }
 
     private string ResolveFilesRoot()

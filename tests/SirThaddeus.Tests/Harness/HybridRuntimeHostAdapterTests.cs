@@ -14,6 +14,24 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void Preflight_state_allows_observed_generated_fields_but_rejects_dirty_state()
+    {
+        using var observed = JsonDocument.Parse(
+            """{"wiki":{"roots":[{"name":"Aster Archive","pages":[]}]}}""");
+        using var expected = JsonDocument.Parse(
+            """{"wiki":{"roots":[{"name":"Aster Archive"}]}}""");
+        using var dirty = JsonDocument.Parse(
+            """{"wiki":{"roots":[{"name":"Wrong Archive","pages":[]}]}}""");
+
+        Assert.True(HybridRuntimeHostAdapter.MatchesExpectedState(
+            observed.RootElement,
+            expected.RootElement));
+        Assert.False(HybridRuntimeHostAdapter.MatchesExpectedState(
+            dirty.RootElement,
+            expected.RootElement));
+    }
+
+    [Fact]
     public void WriteHarnessSettingsFile_PreservesFrozenModelParameters()
     {
         Directory.CreateDirectory(_root);
