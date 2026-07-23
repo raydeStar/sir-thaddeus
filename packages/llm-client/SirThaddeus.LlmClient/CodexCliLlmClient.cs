@@ -126,10 +126,25 @@ public sealed class CodexCliLlmClient : ILlmClient, ILlmUsageTelemetry, ILlmRunt
                 NormalizeReasoningEffort(_options.CodexReasoningEffort),
                 prompt), cancellationToken).ConfigureAwait(false);
 
-            var response = ParseResponse(raw, forcedToolName);
+            var promptTokenEstimate = EstimateTokens(prompt);
+            var completionTokenEstimate = EstimateTokens(raw);
+            var promptTokens = checked((int)Math.Min(int.MaxValue, promptTokenEstimate));
+            var completionTokens = checked((int)Math.Min(int.MaxValue, completionTokenEstimate));
+            var totalTokens = checked((int)Math.Min(
+                int.MaxValue,
+                promptTokenEstimate + completionTokenEstimate));
+            var response = ParseResponse(raw, forcedToolName) with
+            {
+                Usage = new TokenUsage
+                {
+                    PromptTokens = promptTokens,
+                    CompletionTokens = completionTokens,
+                    TotalTokens = totalTokens
+                }
+            };
             Interlocked.Increment(ref _requestCount);
-            Interlocked.Add(ref _promptTokens, EstimateTokens(prompt));
-            Interlocked.Add(ref _completionTokens, EstimateTokens(raw));
+            Interlocked.Add(ref _promptTokens, promptTokens);
+            Interlocked.Add(ref _completionTokens, completionTokens);
             _lastError = null;
             return response;
         }

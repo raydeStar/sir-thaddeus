@@ -1,4 +1,5 @@
 using SirThaddeus.LlmClient;
+using Microsoft.Extensions.Logging;
 
 namespace SirThaddeus.Tests;
 
@@ -37,6 +38,12 @@ public sealed class CodexCliLlmClientTests
         Assert.Contains("Sir Thaddeus owns validation, permissions, execution", captured!.Prompt);
         Assert.Contains("workspace access", captured.Prompt);
         Assert.Contains("simulate, or claim to have executed any tool", captured.Prompt);
+        Assert.NotNull(response.Usage);
+        Assert.True(response.Usage.PromptTokens > 0);
+        Assert.True(response.Usage.CompletionTokens > 0);
+        Assert.Equal(
+            response.Usage.PromptTokens + response.Usage.CompletionTokens,
+            response.Usage.TotalTokens);
     }
 
     [Fact]
@@ -79,5 +86,57 @@ public sealed class CodexCliLlmClientTests
             [ChatMessage.User("find a florist")],
             tools: null,
             forcedToolName: "places_lookup"));
+    }
+
+    [Fact]
+    public async Task LmStudioWrapper_ReportsCodexUsageAndProviderTiming()
+    {
+        var logs = new List<string>();
+        var logger = new CaptureLogger<LmStudioClient>(logs);
+        var options = new LlmClientOptions
+        {
+            Provider = "codex-cli",
+            Model = "gpt-5.6-luna",
+            ContextWindowTokens = 8192
+        };
+        using var client = new LmStudioClient(
+            options,
+            httpClient: null,
+            logger,
+            configured => new CodexCliLlmClient(
+                configured,
+                (_, _) => Task.FromResult(
+                    "{\"kind\":\"final\",\"content\":\"Measured.\",\"tool_calls\":[]}")));
+
+        var before = client.GetUsageSnapshot();
+        var response = await client.ChatAsync([ChatMessage.User("measure this")]);
+        var after = client.GetUsageSnapshot();
+
+        Assert.True(response.IsComplete);
+        Assert.Equal(1, after.RequestCount - before.RequestCount);
+        Assert.True(after.PromptTokens > before.PromptTokens);
+        Assert.True(after.CompletionTokens > before.CompletionTokens);
+        Assert.Contains(logs, message => message.Contains("llm.request_started", StringComparison.Ordinal));
+        Assert.Contains(logs, message => message.Contains("llm.request_completed", StringComparison.Ordinal));
+
+        client.UpdateOptions(options with { CodexReasoningEffort = "low" });
+        await client.ChatAsync([ChatMessage.User("measure the replacement")]);
+
+        Assert.Equal(2, client.GetUsageSnapshot().RequestCount - before.RequestCount);
+    }
+
+    private sealed class CaptureLogger<T>(List<string> messages) : ILogger<T>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            messages.Add(formatter(state, exception));
     }
 }
