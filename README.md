@@ -175,7 +175,37 @@ Representative results show both the value and the boundary of the approach:
 
 ### AI agent benchmark: LFM, Gemma, and Luna with tools
 
-Which local LLM is most useful after you add permissioned tools, local files,
+#### Current sealed 100-case result
+
+Can an AI agent harness improve both small local LLMs and a frontier-class
+hosted model? On a private, human-reviewed bank of 100 fabricated tasks grouped
+into 25 semantic families, the answer was **yes at the case level for all four
+models**. The stricter family-level result was clearest for Gemma 4 26B-A4B.
+
+| Model | Raw cases | Same prompt, no tools | Full harness | Strict families: no tools → harness |
+| --- | ---: | ---: | ---: | ---: |
+| LFM 2.5 1.2B Q4_K_M | 15 / 100 both repeats | 13 / 100 both | **33 / 100 both** | 0 / 25 → **2 / 25** both |
+| LFM 2.5 8B-A1B Q4_K_M | 24 / 100 both | 22 / 100 both | **47 / 100; 46 / 100** | 4 / 25 → **6 / 25** both |
+| Gemma 4 26B-A4B Q4_K_M | 23 / 100 both | 17 / 100 both | **58 / 100 both** | 1 / 25 → **12 / 25; 11 / 25** |
+| Luna, high reasoning | 22 / 100 both | 23 / 100; 22 / 100 | **55 / 100; 65 / 100** | 5 / 25 → **9 / 25; 12 / 25** |
+
+Gemma's strict family lift was significant in both repeats (`p=0.00098` and
+`p=0.00195`). Luna's direction repeated, but its full-harness pass vector
+agreed on only 84 of 100 cases and its hosted harness path took roughly an hour
+per arm. The LFM models showed strong paired case lift but only small,
+underpowered strict-family deltas.
+
+This is **repeat-tested engineering evidence, not a model leaderboard or a
+closed-book intelligence claim**. The formal analyzer is not yet
+publication-ready: full-harness initial-state preflight telemetry, semantic
+fallback judgments, two recurring Luna direct-tools SQLite setup failures, and
+per-family failure autopsies remain incomplete. Read the
+[full sealed-bank methodology, statistics, speed, VRAM, exclusions, and audit limits](docs/research/SEALED_2026S3_HARNESS_EVIDENCE.md).
+
+#### Historical 32-case development context
+
+Before the sealed campaign, we asked which local LLM looked most useful after
+adding permissioned tools, local files,
 Wiki state, and direct verification? We ran the same frozen 32-task outcome
 suite both as **raw model-only prompts** and through the unchanged Sir Thaddeus
 harness. The scorer checks exact values, extracted local evidence, and observed
@@ -194,16 +224,17 @@ the effective unit is the semantic family; the earlier case-level McNemar
 values are withdrawn from headline use. The suite also compares no-tools raw
 models with a tool-enabled product, and the historical `same_prompt_direct`
 arm used the production prompt **without tools**. It therefore does not yet
-isolate architecture from tool availability. The new
-`same_prompt_tools_direct` control and a private 25-family sealed bank are the
-required confirmation path before a stronger public generalization claim.
+isolate architecture from tool availability. The sealed 25-family campaign
+above includes the missing `same_prompt_tools_direct` control and supersedes
+these development-bank rows for current conclusions.
 All accepted historical runs had zero case-level runtime errors.
 
-The deployment takeaway is practical: choose **Gemma 4 26B-A4B** when you want
+The historical deployment takeaway was practical: choose **Gemma 4 26B-A4B** when you want
 the best balanced local model in this comparison; choose **LFM 8B-A1B** when
 the harness is the primary interface and its raw-format weakness is acceptable;
 and use **Luna** when its stronger closed-book reasoning is worth a much slower
-hosted path. The harness improves verified user outcomes—it does **not** raise
+hosted path. The current sealed result above now provides the stronger basis
+for that choice. The harness improves verified user outcomes—it does **not** raise
 the underlying model's MMLU score or turn a local benchmark into a public model
 leaderboard. Quantization, hosted sampling, local hardware, and provider cost
 remain deployment-specific.

@@ -1,6 +1,6 @@
 # Current Evidence
 
-**Evidence cutoff:** July 21, 2026
+**Evidence cutoff:** July 22, 2026
 
 **Production baseline before the current promotion:** `a1eaab94`; empty-state Wiki observation coverage was
 repaired through product PR `#256`, AngleSharp was pinned to `1.5.2` through
@@ -25,6 +25,21 @@ closed-book capacity of a fixed small model. Those mechanisms have often added
 calls and latency while tying or losing to unchanged Thaddeus.
 
 ## What is working
+
+### Sealed cross-model harness evidence
+
+- A private, human-reviewed 100-case bank grouped into 25 semantic families
+  compared raw, identical production prompt without tools, direct tools, and
+  the unchanged full harness across LFM 1.2B, LFM 8B-A1B, Gemma 4 26B-A4B, and
+  hosted Luna. Every accepted arm was repeated exactly.
+- Full-harness case completion exceeded the same-prompt no-tools control for
+  every model in both repeats. Gemma also produced a statistically clear
+  strict-family lift in both repeats: `1/25 -> 12/25` and `1/25 -> 11/25`.
+- The result is strong engineering evidence, not a closed-book capacity claim
+  or publication-ready proof. Missing initial-state preflight telemetry,
+  incomplete semantic fallback judgments and failure autopsies, two recurring
+  Luna direct-tools setup failures, and Luna run-to-run drift remain explicit
+  limitations. See [SEALED_2026S3_HARNESS_EVIDENCE.md](SEALED_2026S3_HARNESS_EVIDENCE.md).
 
 ### Production and evaluation foundation
 
