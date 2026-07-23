@@ -40,9 +40,61 @@ public sealed class DirectEvalStateTests : IDisposable
             CancellationToken.None));
     }
 
+    [Fact]
+    public async Task Applies_exact_ambiguous_delete_preflight_and_tears_down_cleanly()
+    {
+        var client = new RecordingWikiMcpClient();
+        var state = new DirectEvalState(client, _root);
+        var setup = new DirectStateSetup
+        {
+            WikiRoots =
+            [
+                new DirectWikiRootSetup { Name = "Old Brindle Archive East" },
+                new DirectWikiRootSetup { Name = "Old Brindle Archive West" }
+            ]
+        };
+
+        await state.ApplyAsync(setup, CancellationToken.None);
+
+        Assert.Equal(
+            ["Old Brindle Archive East", "Old Brindle Archive West"],
+            client.CreatedRoots);
+        Assert.True(Directory.Exists(_root));
+
+        Dispose();
+
+        Assert.False(Directory.Exists(_root));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
             Directory.Delete(_root, recursive: true);
+    }
+
+    private sealed class RecordingWikiMcpClient : SirThaddeus.Agent.IMcpToolClient
+    {
+        public List<string> CreatedRoots { get; } = [];
+
+        public Task<string> CallToolAsync(
+            string name,
+            string argumentsJson,
+            CancellationToken cancellationToken)
+        {
+            Assert.Equal("wiki_root_create", name);
+            using var arguments = System.Text.Json.JsonDocument.Parse(argumentsJson);
+            var rootName = arguments.RootElement.GetProperty("name").GetString()!;
+            CreatedRoots.Add(rootName);
+            var id = $"root_{CreatedRoots.Count}";
+            return Task.FromResult(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                ok = true,
+                root = new { id }
+            }));
+        }
+
+        public Task<IReadOnlyList<SirThaddeus.Agent.McpToolInfo>> ListToolsAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<SirThaddeus.Agent.McpToolInfo>>([]);
     }
 }

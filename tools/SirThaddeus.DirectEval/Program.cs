@@ -31,6 +31,10 @@ internal static class Program
             var outputPath = RequirePath(args, "--output");
             var toolsDirect = args.Any(value =>
                 string.Equals(value, "--tools-direct", StringComparison.OrdinalIgnoreCase));
+            var preflightOnly = args.Any(value =>
+                string.Equals(value, "--preflight-only", StringComparison.OrdinalIgnoreCase));
+            if (preflightOnly && !toolsDirect)
+                throw new ArgumentException("--preflight-only requires --tools-direct.");
             var request = JsonSerializer.Deserialize<DirectEvalBatchRequest>(
                 await File.ReadAllTextAsync(inputPath).ConfigureAwait(false),
                 JsonOptions) ?? throw new InvalidDataException("Direct-eval input is empty.");
@@ -94,6 +98,7 @@ internal static class Program
                         item.Prompt);
                     var promptBuildMs = Stopwatch.GetElapsedTime(promptStarted).TotalMilliseconds;
                     var callStarted = Stopwatch.GetTimestamp();
+                    var statePreflightCompleted = false;
                     try
                     {
                         if (toolsDirect)
@@ -110,6 +115,24 @@ internal static class Program
                             if (!preflightPassed)
                                 throw new InvalidDataException(
                                     "The isolated state preflight did not match the evaluator-owned expectation.");
+                            statePreflightCompleted = true;
+                            if (preflightOnly)
+                            {
+                                results.Add(new DirectEvalItemResult
+                                {
+                                    Id = item.Id,
+                                    PromptBuildMs = promptBuildMs,
+                                    LatencyMs = Stopwatch.GetElapsedTime(callStarted).TotalMilliseconds,
+                                    CallCount = 0,
+                                    StatePreflight = new DirectStatePreflight(
+                                        "process_isolation", preflightPassed, preflightState),
+                                    ObservedState = preflightState,
+                                    SystemPromptSha256 = HashText(
+                                        messages.First(message => message.Role == "system").Content ?? string.Empty),
+                                    MessagesSha256 = HashText(JsonSerializer.Serialize(messages, JsonOptions))
+                                });
+                                continue;
+                            }
                             var loop = new DirectToolLoop(llm, mcpHandle!.Client);
                             var response = await loop.ExecuteAsync(
                                 messages,
@@ -170,6 +193,9 @@ internal static class Program
                             PromptBuildMs = promptBuildMs,
                             LatencyMs = Stopwatch.GetElapsedTime(callStarted).TotalMilliseconds,
                             CallCount = 1,
+                            FailureKind = toolsDirect && !statePreflightCompleted
+                                ? "infrastructure_failure"
+                                : null,
                             RuntimeError = $"{ex.GetType().Name}: {ex.Message}"
                         });
                     }
@@ -275,6 +301,7 @@ internal sealed record DirectEvalItemResult
     public Dictionary<string, object>? ObservedState { get; init; }
     public string? SystemPromptSha256 { get; init; }
     public string? MessagesSha256 { get; init; }
+    public string? FailureKind { get; init; }
     public string? RuntimeError { get; init; }
 }
 
