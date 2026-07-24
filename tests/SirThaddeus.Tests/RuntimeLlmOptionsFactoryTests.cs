@@ -6,6 +6,28 @@ namespace SirThaddeus.Tests;
 public sealed class RuntimeLlmOptionsFactoryTests
 {
     [Fact]
+    public void BuildPrimary_PreservesCodexCliConfiguration()
+    {
+        var settings = new AppSettings
+        {
+            Llm = new LlmSettings
+            {
+                Provider = "codex-cli",
+                Model = "gpt-5.6-luna",
+                CodexCliPath = "C:\\Tools\\codex.exe",
+                CodexReasoningEffort = "high"
+            }
+        };
+
+        var options = RuntimeLlmOptionsFactory.BuildPrimary(settings);
+
+        Assert.Equal("codex-cli", options.Provider);
+        Assert.Equal("gpt-5.6-luna", options.Model);
+        Assert.Equal("C:\\Tools\\codex.exe", options.CodexCliPath);
+        Assert.Equal("high", options.CodexReasoningEffort);
+    }
+
+    [Fact]
     public void BuildGatekeeper_UsesDedicatedModel_OnSharedEndpointEvenWhenReuseFlagSet()
     {
         var settings = new AppSettings

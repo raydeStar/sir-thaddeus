@@ -211,6 +211,22 @@ public class AssistantRouterTests : IDisposable
         Assert.False(policy.AllowsHelperLlm);
     }
 
+    [Fact]
+    public void ResolveGatekeeperPolicy_CodexCli_UsesHeuristicsWithoutHelperCalls()
+    {
+        var llm = LlmWithGatekeeper(
+            primaryModel: "gpt-5.6-luna",
+            gatekeeperModel: "small-footman-model") with
+        {
+            Provider = "codex-cli"
+        };
+
+        var policy = AssistantRouter.ResolveGatekeeperPolicy(llm);
+
+        Assert.Equal(AssistantRouter.GatekeeperPolicyMode.HeuristicOnly, policy.Mode);
+        Assert.False(policy.AllowsHelperLlm);
+    }
+
     private static LlmSettings LlmWithGatekeeper(
         string primaryModel,
         string gatekeeperModel,

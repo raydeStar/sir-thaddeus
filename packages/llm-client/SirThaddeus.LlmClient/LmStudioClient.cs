@@ -45,16 +45,32 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
     private DateTimeOffset? _lastWarmupAt;
     private DateTimeOffset? _lastRequestAt;
     private readonly AsyncLocal<LlmTaskKind> _requestTaskKind = new();
+    private readonly Func<LlmClientOptions, CodexCliLlmClient> _codexClientFactory;
+    private CodexCliLlmClient? _codexCli;
 
     public LmStudioClient(
         LlmClientOptions options,
         HttpClient? httpClient = null,
         ILogger<LmStudioClient>? logger = null)
+        : this(options, httpClient, logger, static configured => new CodexCliLlmClient(configured))
+    {
+    }
+
+    internal LmStudioClient(
+        LlmClientOptions options,
+        HttpClient? httpClient,
+        ILogger<LmStudioClient>? logger,
+        Func<LlmClientOptions, CodexCliLlmClient> codexClientFactory)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? NullLogger<LmStudioClient>.Instance;
+        _codexClientFactory = codexClientFactory
+            ?? throw new ArgumentNullException(nameof(codexClientFactory));
         _http = httpClient ?? new HttpClient();
-        _http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/'));
+        if (!LlmProvider.IsCodexCli(options.Provider))
+            _http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/'));
+        else
+            _codexCli = _codexClientFactory(options);
 
         // ── Sir Thaddeus notes: A butler must exhibit patience! ───
         // Local GPUs require time to sweep their VRAM floors. 
@@ -86,6 +102,28 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         lock (_optionsGate)
         {
             _options = options;
+
+            if (LlmProvider.IsCodexCli(options.Provider))
+            {
+                var oldCodex = _codexCli;
+                _codexCli = _codexClientFactory(options);
+                _requestGate = GetEndpointGate(options);
+                _confirmedLoadedModels.Clear();
+                Task.Run(() =>
+                {
+                    try { oldCodex?.Dispose(); }
+                    catch { /* best effort */ }
+                });
+                return;
+            }
+
+            var previousCodex = _codexCli;
+            _codexCli = null;
+            Task.Run(() =>
+            {
+                try { previousCodex?.Dispose(); }
+                catch { /* best effort */ }
+            });
 
             var targetBase = options.BaseUrl.TrimEnd('/');
             if (!string.IsNullOrWhiteSpace(targetBase))
@@ -225,6 +263,27 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
         ArgumentNullException.ThrowIfNull(messages);
         requestContext ??= new LlmRequestContext();
 
+        CodexCliLlmClient? codexCli;
+        LlmClientOptions options;
+        lock (_optionsGate)
+        {
+            codexCli = _codexCli;
+            options = _options;
+        }
+
+        if (codexCli is not null)
+        {
+            return await ChatCodexWithTelemetryAsync(
+                codexCli,
+                options,
+                messages,
+                tools,
+                maxTokensOverride,
+                forcedToolName,
+                requestContext,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         var providerRequestId = "llm_" + Guid.NewGuid().ToString("N")[..12];
         var routingCorrelationId = Activity.Current?.GetBaggageItem("routing_correlation_id") ?? string.Empty;
         var threadId = Activity.Current?.GetBaggageItem("thread_id") ?? string.Empty;
@@ -319,6 +378,88 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
                 _lastTaskKind,
                 _lastRequestWasBackground,
                 GetOptionsSnapshot().Model,
+                _lastEstimatedInputTokens,
+                _lastRequestedOutputTokens,
+                _lastQueueWaitMs,
+                _lastRequestDurationMs,
+                false);
+        }
+    }
+
+    private async Task<LlmResponse> ChatCodexWithTelemetryAsync(
+        CodexCliLlmClient codexCli,
+        LlmClientOptions options,
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        int? maxTokensOverride,
+        string? forcedToolName,
+        LlmRequestContext requestContext,
+        CancellationToken cancellationToken)
+    {
+        var providerRequestId = "llm_" + Guid.NewGuid().ToString("N")[..12];
+        var routingCorrelationId = Activity.Current?.GetBaggageItem("routing_correlation_id") ?? string.Empty;
+        var threadId = Activity.Current?.GetBaggageItem("thread_id") ?? string.Empty;
+        var turnId = Activity.Current?.GetBaggageItem("turn_id") ?? string.Empty;
+        var estimatedTokens = EstimateTokens(messages);
+        var requestedOutputTokens = options.EffectiveMaxTokens(maxTokensOverride);
+        var requestStarted = Stopwatch.GetTimestamp();
+        var requestStartedAt = DateTimeOffset.UtcNow;
+
+        _logger.LogInformation(
+            "llm.queue_enter providerRequestId={ProviderRequestId} correlationId={CorrelationId} threadId={ThreadId} turnId={TurnId} task={TaskKind} background={Background}",
+            providerRequestId,
+            routingCorrelationId,
+            threadId,
+            turnId,
+            requestContext.TaskKind,
+            requestContext.Priority == LlmRequestPriority.Background);
+        _logger.LogInformation(
+            "llm.request_started providerRequestId={ProviderRequestId} correlationId={CorrelationId} threadId={ThreadId} turnId={TurnId} queueWaitMs={QueueWaitMs} firstTokenObservable={FirstTokenObservable}",
+            providerRequestId,
+            routingCorrelationId,
+            threadId,
+            turnId,
+            0,
+            false);
+        TrackRequestStart(requestContext, estimatedTokens, requestedOutputTokens, 0, requestStartedAt);
+
+        try
+        {
+            using var requestCts = CreateRequestCancellationTokenSource(cancellationToken);
+            var response = await codexCli.ChatAsync(
+                    messages,
+                    tools,
+                    requestedOutputTokens,
+                    forcedToolName,
+                    requestCts.Token)
+                .ConfigureAwait(false);
+
+            Interlocked.Increment(ref _requestCount);
+            TrackUsage(response.Usage);
+            if (response.Usage is { PromptTokens: > 0 } usage)
+                _lastEstimatedInputTokens = usage.PromptTokens;
+            _lastReachable = true;
+            _lastError = null;
+            return response;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _lastReachable = false;
+            _lastError = ex.Message;
+            throw;
+        }
+        finally
+        {
+            _lastRequestDurationMs = (long)Math.Round(Stopwatch.GetElapsedTime(requestStarted).TotalMilliseconds);
+            _logger.LogInformation(
+                "llm.request_completed providerRequestId={ProviderRequestId} correlationId={CorrelationId} threadId={ThreadId} turnId={TurnId} task={TaskKind} background={Background} model={Model} estimatedInputTokens={InputTokens} requestedOutputTokens={OutputTokens} queueWaitMs={QueueWaitMs} durationMs={DurationMs} firstTokenObservable={FirstTokenObservable}",
+                providerRequestId,
+                routingCorrelationId,
+                threadId,
+                turnId,
+                _lastTaskKind,
+                _lastRequestWasBackground,
+                options.Model,
                 _lastEstimatedInputTokens,
                 _lastRequestedOutputTokens,
                 _lastQueueWaitMs,
@@ -630,6 +771,9 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
     /// <inheritdoc />
     public async Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
     {
+        if (GetCodexCliSnapshot() is { } codexCli)
+            return await codexCli.GetModelNameAsync(cancellationToken).ConfigureAwait(false);
+
         try
         {
             var response = await _http.GetAsync(NormalizePath(GetOptionsSnapshot().ModelsPath), cancellationToken);
@@ -663,6 +807,7 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
 
     public void Dispose()
     {
+        GetCodexCliSnapshot()?.Dispose();
         _http.Dispose();
     }
 
@@ -814,6 +959,9 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
 
     public async Task<LlmWarmupResult> WarmupAsync(CancellationToken cancellationToken = default)
     {
+        if (GetCodexCliSnapshot() is { } codexCli)
+            return await codexCli.WarmupAsync(cancellationToken).ConfigureAwait(false);
+
         var options = GetOptionsSnapshot();
         if (!options.EnableStartupWarmup)
         {
@@ -890,6 +1038,9 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
 
     public LlmRuntimeHealthSnapshot GetRuntimeHealthSnapshot()
     {
+        if (GetCodexCliSnapshot() is { } codexCli)
+            return codexCli.GetRuntimeHealthSnapshot();
+
         var options = GetOptionsSnapshot();
         return new LlmRuntimeHealthSnapshot
         {
@@ -1048,6 +1199,12 @@ public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntime
     {
         lock (_optionsGate)
             return _options;
+    }
+
+    private CodexCliLlmClient? GetCodexCliSnapshot()
+    {
+        lock (_optionsGate)
+            return _codexCli;
     }
 
     private void TrackUsage(TokenUsage? usage)

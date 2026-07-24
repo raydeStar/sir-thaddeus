@@ -14,6 +14,24 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void Preflight_state_allows_observed_generated_fields_but_rejects_dirty_state()
+    {
+        using var observed = JsonDocument.Parse(
+            """{"wiki":{"roots":[{"name":"Aster Archive","pages":[]}]}}""");
+        using var expected = JsonDocument.Parse(
+            """{"wiki":{"roots":[{"name":"Aster Archive"}]}}""");
+        using var dirty = JsonDocument.Parse(
+            """{"wiki":{"roots":[{"name":"Wrong Archive","pages":[]}]}}""");
+
+        Assert.True(HybridRuntimeHostAdapter.MatchesExpectedState(
+            observed.RootElement,
+            expected.RootElement));
+        Assert.False(HybridRuntimeHostAdapter.MatchesExpectedState(
+            dirty.RootElement,
+            expected.RootElement));
+    }
+
+    [Fact]
     public void WriteHarnessSettingsFile_PreservesFrozenModelParameters()
     {
         Directory.CreateDirectory(_root);
@@ -21,11 +39,14 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         {
             Llm = new LlmSettings
             {
+                Provider = "codex-cli",
                 BaseUrl = "http://127.0.0.1:1234",
                 Model = "test-model",
                 MaxTokens = 321,
                 ContextWindowTokens = 8192,
                 Temperature = 0.125,
+                CodexCliPath = @"C:\tools\codex.exe",
+                CodexReasoningEffort = "xhigh",
             },
             Mcp = new McpSettings
             {
@@ -39,10 +60,13 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         using var document = JsonDocument.Parse(
             File.ReadAllText(Path.Combine(_root, "runtime-settings.json")));
         var llm = document.RootElement.GetProperty("llm");
+        Assert.Equal("codex-cli", llm.GetProperty("provider").GetString());
         Assert.Equal("test-model", llm.GetProperty("modelId").GetString());
         Assert.Equal(321, llm.GetProperty("maxTokens").GetInt32());
         Assert.Equal(8192, llm.GetProperty("contextWindowTokens").GetInt32());
         Assert.Equal(0.125, llm.GetProperty("temperature").GetDouble());
+        Assert.Equal(@"C:\tools\codex.exe", llm.GetProperty("codexCliPath").GetString());
+        Assert.Equal("xhigh", llm.GetProperty("codexReasoningEffort").GetString());
         var permissions = document.RootElement.GetProperty("permissions");
         Assert.Equal("always", permissions.GetProperty("files").GetString());
     }

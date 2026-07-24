@@ -11,9 +11,12 @@ public static class RuntimeLlmOptionsFactory
 
         return new LlmClientOptions
         {
+            Provider = settings.Llm.Provider,
             BaseUrl = settings.Llm.BaseUrl,
             ChatCompletionPath = settings.Llm.ChatCompletionPath,
             Model = settings.Llm.Model,
+            CodexCliPath = settings.Llm.CodexCliPath,
+            CodexReasoningEffort = settings.Llm.CodexReasoningEffort,
             PreloadModelKey = settings.Llm.PreloadModelKey,
             EnableStartupWarmup = settings.Llm.EnableStartupWarmup,
             EnableKeepWarm = settings.Llm.EnableKeepWarm,
@@ -45,8 +48,11 @@ public static class RuntimeLlmOptionsFactory
 
         return new LlmClientOptions
         {
+            Provider = settings.Llm.Provider,
             BaseUrl = gatekeeperUrl,
             Model = gatekeeperModel,
+            CodexCliPath = settings.Llm.CodexCliPath,
+            CodexReasoningEffort = settings.Llm.CodexReasoningEffort,
             EnableStartupWarmup = false,
             EnableKeepWarm = false,
             MaxConcurrentLlmRequests = settings.Llm.MaxConcurrentLlmRequests,

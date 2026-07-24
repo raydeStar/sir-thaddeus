@@ -235,7 +235,10 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
     //     (AuditedMcpToolClient), not inside the tool loop.
     //   - No propose_automation interceptor (CLI never emits it).
     //   - No automation-args rewriter (automation runs are UI-only).
-    var footmanRouter = new FastLlmFootmanRouter(gatekeeperLlm);
+    var useHeuristicGatekeeper = LlmProvider.IsCodexCli(currentSettings.Llm.Provider);
+    IFootmanRouter footmanRouter = useHeuristicGatekeeper
+        ? new HeuristicFootmanRouter()
+        : new FastLlmFootmanRouter(gatekeeperLlm);
     var sink = new StdoutChatEventSink(showDeltas: false);
 
     // Build a fresh PersonalityRuntime per orchestrator instance — matches
@@ -277,7 +280,10 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
     IMemoryContextProvider? memoryProvider = null;
     if (toolsAvailable && currentSettings.Memory.Enabled)
     {
-        var intentClassifier = new SmartIntentClassifier(gatekeeperLlm, audit);
+        var intentClassifier = new SmartIntentClassifier(
+            gatekeeperLlm,
+            audit,
+            allowLlmFallback: !useHeuristicGatekeeper);
         memoryProvider = new MemoryContextProvider(agentMcp, audit, intentClassifier);
     }
 

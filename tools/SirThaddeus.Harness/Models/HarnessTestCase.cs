@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using YamlDotNet.Serialization;
 
@@ -81,6 +82,10 @@ public sealed record HarnessTestCase
     [JsonPropertyName("state_setup")]
     [YamlMember(Alias = "state_setup")]
     public HarnessStateSetup StateSetup { get; init; } = new();
+
+    [JsonPropertyName("preflight_expected_state")]
+    [YamlMember(Alias = "preflight_expected_state")]
+    public JsonElement? PreflightExpectedState { get; init; }
 
     [JsonPropertyName("wiki_context")]
     [YamlMember(Alias = "wiki_context")]

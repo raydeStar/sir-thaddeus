@@ -1,8 +1,11 @@
 {
   "productProfileId": "baseline",
   "llm": {
+    "provider": "lmstudio",
     "baseUrl": "http://localhost:1234",
     "model": "replace-with-loaded-model-id",
+    "codexCliPath": "",
+    "codexReasoningEffort": "high",
     "gatekeeperBaseUrl": "",
     "gatekeeperModelId": "liquid/lfm2.5-1.2b",
     "reusePrimaryModelForGatekeeperOnSharedEndpoint": false,

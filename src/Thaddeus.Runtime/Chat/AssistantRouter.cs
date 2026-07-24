@@ -154,7 +154,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         return doc =>
         {
             var llm = doc.Llm;
-            var fp = $"{llm.BaseUrl}|{llm.ModelId}|{llm.ApiKey}|{llm.MaxTokens}|{llm.ContextWindowTokens}|{llm.Temperature}";
+            var fp = $"{llm.Provider}|{llm.BaseUrl}|{llm.ModelId}|{llm.ApiKey}|{llm.MaxTokens}|{llm.ContextWindowTokens}|{llm.Temperature}|{llm.CodexCliPath}|{llm.CodexReasoningEffort}";
             var gatekeeperPolicy = ResolveGatekeeperPolicy(llm);
             var gfp = gatekeeperPolicy.Fingerprint;
             lock (cacheLock)
@@ -296,6 +296,9 @@ public sealed class AssistantRouter : IAssistant, IDisposable
 
     internal static GatekeeperPolicy ResolveGatekeeperPolicy(LlmSettings llm)
     {
+        if (LlmProvider.IsCodexCli(llm.Provider))
+            return GatekeeperPolicy.HeuristicOnly(llm, llm.BaseUrl ?? string.Empty);
+
         if (!llm.GatekeeperEnabled || string.IsNullOrWhiteSpace(llm.GatekeeperModelId))
             return GatekeeperPolicy.Off(llm);
 
@@ -327,8 +330,11 @@ public sealed class AssistantRouter : IAssistant, IDisposable
     {
         return new LlmClientOptions
         {
+            Provider = llm.Provider,
             BaseUrl = llm.BaseUrl!,
             Model = llm.ModelId,
+            CodexCliPath = llm.CodexCliPath,
+            CodexReasoningEffort = llm.CodexReasoningEffort,
             MaxTokens = llm.MaxTokens,
             ContextWindowTokens = llm.ContextWindowTokens,
             Temperature = llm.Temperature,
@@ -408,6 +414,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         {
             var fingerprint = string.Join('|',
                 mode,
+                llm.Provider ?? string.Empty,
                 llm.BaseUrl ?? string.Empty,
                 llm.ModelId ?? string.Empty,
                 baseUrl ?? string.Empty,

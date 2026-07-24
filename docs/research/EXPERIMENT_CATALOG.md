@@ -1,6 +1,6 @@
 # Experiment Catalog
 
-This is a compact index of material Sir Thaddeus experiments through July 21,
+This is a compact index of material Sir Thaddeus experiments through July 22,
 2026. It records reusable conclusions, not hidden benchmark content. Exact
 manifests, commands, artifact hashes, and verdicts live in the sibling private
 `local-benchmark-runner` repository under `experiments/`.
@@ -9,6 +9,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 
 | Campaign | Lane | Disposition | Reusable conclusion |
 | --- | --- | --- | --- |
+| Sealed 2026-S3 four-arm cross-model campaign | Harness capability | **Engineering lift supported; research claim inconclusive** | On a private human-reviewed 25-family/100-case bank, the full harness beat the identical production prompt without tools at case level for LFM 1.2B, LFM 8B-A1B, Gemma 4 26B-A4B, and Luna in both repeats. Gemma's strict-family lift repeated at `1/25 -> 12/25` and `1/25 -> 11/25`; formal publication remains blocked by evidence-field and autopsy gaps. |
 | Current local date/time utility v1 | Harness capability and product quality | **Promoted through product PR `#271`** | Answer-blind unseen development coverage improved `5/30 -> 8/30` with mechanical false activations `1 -> 0`. Exact product repeat preserved six correct date outcomes, added two correct local-time outcomes, repaired one location-scoped wrong-clock route, and showed no paired behavior loss while calls fell `22 -> 8` and positive first-visible p50 improved `211.5 ms -> 5.5 ms`. Final public confirmation retained direction; its one mechanical false label was adjudicated as an eligible current-date command without changing or rerunning code, selector, scorer, threshold, or holdout. This is not MMLU. |
 | Wiki-root default-location schema projection v3 | Harness capability | **Promoted through product PR `#261`** | On current master, the shipped deferral and non-action guards remove the sole v2 activation failure. Fresh development and exact repeat each improved `8/12 -> 10/12` with two wins and zero losses; disjoint validation improved `10/18 -> 14/18` with four wins, zero losses, `8/8` default writes, `6/6` deferred/non-action safety, full validity, correct activation, and calls reduced `60 -> 53`. The application owns its configured Wiki location while explicit custom locations retain the full schema. |
 | Wiki-root temporal-deferral pruning | Harness capability and product safety | **Promoted through product PR `#248`** | A root-scoped deterministic policy reproduced `4/16 -> 11/16` in development and exact repeat with seven wins and zero losses. Disjoint validation improved `4/18 -> 13/18` with nine wins, zero losses, `10/10` deferred safety, `8/8` immediate root-tool reachability, full validity, and fewer calls. This improves mutation precision, not MMLU. |

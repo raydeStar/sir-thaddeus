@@ -36,7 +36,12 @@
 
 <p align="center"><em>Your model. Your memory. Your permission.</em></p>
 
-**Sir Thaddeus is an open-source, local-first AI assistant for Windows.** Connect [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/), or another OpenAI-compatible endpoint, then give your model a private workspace: threaded chat, permissioned tools, durable memory, a Markdown wiki, routines, sources, traces, and an emergency stop.
+**Sir Thaddeus is an open-source, local-first AI assistant and local LLM agent
+workspace for Windows.** Connect [LM Studio](https://lmstudio.ai/),
+[Ollama](https://ollama.com/), or another OpenAI-compatible endpoint, then
+give your model a private workspace: threaded chat, permissioned MCP tools,
+durable memory, a Markdown wiki, routines, sources, traces, and an emergency
+stop.
 
 Use a model on your machine and leave network tools off to keep the core experience offline. Turn on web access or a hosted endpoint only when *you* decide the job needs it.
 
@@ -172,6 +177,50 @@ Representative results show both the value and the boundary of the approach:
 | Can a machine-clock utility improve speed without a model call? | positive p50 **211.5 ms → 5.5 ms** | Two correctness gains, one harmful route repair, and no observed loss. |
 | Did the harness raise stabilized MMLU-Pro? | **10 / 20 raw = 10 / 20 harness** | No reproducible capacity uplift; MMLU optimization is paused. |
 | Did more inference help? | voting **37.9% → 27.9%** | No. The slower mechanism was rejected and removed. |
+
+### Local LLM and AI agent harness benchmark
+
+Can a tool-using AI agent harness improve small local models, a larger
+mixture-of-experts model, and a frontier-class hosted model? The current
+confirmation used a private, human-reviewed bank of 100 fabricated tasks in 25
+semantic families, four controlled arms, and two complete repeats. Primary
+scoring was deterministic or based on independently observed final state—not
+an LLM judge.
+
+| Fixed model | Raw | Production prompt, no tools | Direct tools | Full harness | Strict families: no tools → full |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| LFM 2.5 1.2B Q4_K_M | 15/100 | 12/100 | 30/100 | **32/100** | 1/25 → **1/25** |
+| LFM 2.5 8B-A1B Q4_K_M | 24/100 | 22/100 | 42/100 | **48/100; 49/100** | 3/25 → **9/25** both |
+| Gemma 4 26B-A4B Q4_K_M | 23/100 | 5/100; 8/100 | 43/100; 46/100 | **56/100 both** | 0/25 → **10/25** both |
+| Luna, low reasoning | 22/100; 21/100 | 24/100; 23/100 | 55/100; 58/100 | **66/100; 58/100** | 5/25 → **12/25; 9/25** |
+
+The strict primary result was supported in both repeats for **LFM 8B**
+(`p=0.03125`) and **Gemma 26B-A4B** (`p=0.001953`). Luna improved in both
+repeats but remained variable; the first was significant and the second was
+not. LFM 1.2B gained 20 individual outcomes without gaining a complete 4-of-4
+family, exposing the floor where tools help but model capacity still limits
+consistency.
+
+The direct-tools arm answers the obvious objection that any model with tools
+should beat one without them. Tools explain much of the lift, while Gemma
+shows the clearest additional gain from production orchestration and
+verification: 43 and 46 cases with direct tools versus 56/100 in both
+full-harness repeats.
+
+This is **repeat-tested engineering evidence, not a model leaderboard or an
+intelligence claim**. The formal analyzer still marks the campaign
+`publish_ready: false` because evidence-schema attestations and causal failure
+autopsies remain incomplete. The deterministic totals are useful; “hole-proof
+research proof” would overstate them.
+
+Read the
+[complete local LLM agent harness benchmark report](docs/research/SEALED_2026S3_HARNESS_EVIDENCE.md)
+for the methodology, statistics, all arms, repeat stability, latency, tokens,
+VRAM, host-restart handling, audit gaps, historical context, and reproduction
+commands in one document.
+
+Run [`dev/model-intake.ps1`](dev/model-intake.ps1) to evaluate a model on your
+own machine against Sir Thaddeus's production baseline.
 
 <details>
 <summary><strong>Open the full evidence table</strong></summary>
