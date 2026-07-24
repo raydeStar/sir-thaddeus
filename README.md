@@ -36,7 +36,12 @@
 
 <p align="center"><em>Your model. Your memory. Your permission.</em></p>
 
-**Sir Thaddeus is an open-source, local-first AI assistant for Windows.** Connect [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/), or another OpenAI-compatible endpoint, then give your model a private workspace: threaded chat, permissioned tools, durable memory, a Markdown wiki, routines, sources, traces, and an emergency stop.
+**Sir Thaddeus is an open-source, local-first AI assistant and local LLM agent
+workspace for Windows.** Connect [LM Studio](https://lmstudio.ai/),
+[Ollama](https://ollama.com/), or another OpenAI-compatible endpoint, then
+give your model a private workspace: threaded chat, permissioned MCP tools,
+durable memory, a Markdown wiki, routines, sources, traces, and an emergency
+stop.
 
 Use a model on your machine and leave network tools off to keep the core experience offline. Turn on web access or a hosted endpoint only when *you* decide the job needs it.
 
@@ -173,78 +178,49 @@ Representative results show both the value and the boundary of the approach:
 | Did the harness raise stabilized MMLU-Pro? | **10 / 20 raw = 10 / 20 harness** | No reproducible capacity uplift; MMLU optimization is paused. |
 | Did more inference help? | voting **37.9% → 27.9%** | No. The slower mechanism was rejected and removed. |
 
-### AI agent benchmark: LFM, Gemma, and Luna with tools
+### Local LLM and AI agent harness benchmark
 
-#### Current sealed 100-case result
+Can a tool-using AI agent harness improve small local models, a larger
+mixture-of-experts model, and a frontier-class hosted model? The current
+confirmation used a private, human-reviewed bank of 100 fabricated tasks in 25
+semantic families, four controlled arms, and two complete repeats. Primary
+scoring was deterministic or based on independently observed final state—not
+an LLM judge.
 
-Can an AI agent harness improve both small local LLMs and a frontier-class
-hosted model? On a private, human-reviewed bank of 100 fabricated tasks grouped
-into 25 semantic families, the answer was **yes at the case level for all four
-models**. The stricter family-level result was clearest for Gemma 4 26B-A4B.
+| Fixed model | Raw | Production prompt, no tools | Direct tools | Full harness | Strict families: no tools → full |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| LFM 2.5 1.2B Q4_K_M | 15/100 | 12/100 | 30/100 | **32/100** | 1/25 → **1/25** |
+| LFM 2.5 8B-A1B Q4_K_M | 24/100 | 22/100 | 42/100 | **48/100; 49/100** | 3/25 → **9/25** both |
+| Gemma 4 26B-A4B Q4_K_M | 23/100 | 5/100; 8/100 | 43/100; 46/100 | **56/100 both** | 0/25 → **10/25** both |
+| Luna, low reasoning | 22/100; 21/100 | 24/100; 23/100 | 55/100; 58/100 | **66/100; 58/100** | 5/25 → **12/25; 9/25** |
 
-| Model | Raw cases | Same prompt, no tools | Full harness | Strict families: no tools → harness |
-| --- | ---: | ---: | ---: | ---: |
-| LFM 2.5 1.2B Q4_K_M | 15 / 100 both repeats | 13 / 100 both | **33 / 100 both** | 0 / 25 → **2 / 25** both |
-| LFM 2.5 8B-A1B Q4_K_M | 24 / 100 both | 22 / 100 both | **47 / 100; 46 / 100** | 4 / 25 → **6 / 25** both |
-| Gemma 4 26B-A4B Q4_K_M | 23 / 100 both | 17 / 100 both | **58 / 100 both** | 1 / 25 → **12 / 25; 11 / 25** |
-| Luna, high reasoning | 22 / 100 both | 23 / 100; 22 / 100 | **55 / 100; 65 / 100** | 5 / 25 → **9 / 25; 12 / 25** |
+The strict primary result was supported in both repeats for **LFM 8B**
+(`p=0.03125`) and **Gemma 26B-A4B** (`p=0.001953`). Luna improved in both
+repeats but remained variable; the first was significant and the second was
+not. LFM 1.2B gained 20 individual outcomes without gaining a complete 4-of-4
+family, exposing the floor where tools help but model capacity still limits
+consistency.
 
-Gemma's strict family lift was significant in both repeats (`p=0.00098` and
-`p=0.00195`). Luna's direction repeated, but its full-harness pass vector
-agreed on only 84 of 100 cases and its hosted harness path took roughly an hour
-per arm. The LFM models showed strong paired case lift but only small,
-underpowered strict-family deltas.
+The direct-tools arm answers the obvious objection that any model with tools
+should beat one without them. Tools explain much of the lift, while Gemma
+shows the clearest additional gain from production orchestration and
+verification: 43 and 46 cases with direct tools versus 56/100 in both
+full-harness repeats.
 
-This is **repeat-tested engineering evidence, not a model leaderboard or a
-closed-book intelligence claim**. The formal analyzer is not yet
-publication-ready: full-harness initial-state preflight telemetry, semantic
-fallback judgments, two recurring Luna direct-tools SQLite setup failures, and
-per-family failure autopsies remain incomplete. Read the
-[full sealed-bank methodology, statistics, speed, VRAM, exclusions, and audit limits](docs/research/SEALED_2026S3_HARNESS_EVIDENCE.md).
+This is **repeat-tested engineering evidence, not a model leaderboard or an
+intelligence claim**. The formal analyzer still marks the campaign
+`publish_ready: false` because evidence-schema attestations and causal failure
+autopsies remain incomplete. The deterministic totals are useful; “hole-proof
+research proof” would overstate them.
 
-#### Historical 32-case development context
+Read the
+[complete local LLM agent harness benchmark report](docs/research/SEALED_2026S3_HARNESS_EVIDENCE.md)
+for the methodology, statistics, all arms, repeat stability, latency, tokens,
+VRAM, host-restart handling, audit gaps, historical context, and reproduction
+commands in one document.
 
-Before the sealed campaign, we asked which local LLM looked most useful after
-adding permissioned tools, local files,
-Wiki state, and direct verification? We ran the same frozen 32-task outcome
-suite both as **raw model-only prompts** and through the unchanged Sir Thaddeus
-harness. The scorer checks exact values, extracted local evidence, and observed
-post-action state—not an LLM judge or a plausible-looking plan.
-
-| Model deployment | Raw model capacity (MMLU validation) | Raw → harness outcomes | Exact repeat | Practical read |
-| --- | ---: | ---: | --- | --- |
-| LFM 2.5 1.2B Q4_K_M | 14 / 56 | **7 / 32 → 18 / 32** | Identical | A small local model gained 11 verified outcomes; the guarded run used one case per process after an earlier host freeze. |
-| LFM 2.5 8B-A1B Q4_K_M | 1 / 56 | **6 / 32 → 24 / 32** | Identical | Excellent harnessed completion, but this strict multiple-choice control exposed severe raw format-validity problems. |
-| Gemma 4 26B-A4B Q4_K_S | 30 / 56 | **8 / 32 → 25 / 32** | Identical | The strongest local all-rounder in this run: repeatable tool outcomes and materially better closed-book capacity. |
-| Luna, high reasoning | 48 / 56 | **10 / 32 → 27 / 32**; **11 / 32 → 23 / 32** | Directionally repeated | Highest raw capacity and a significant harness lift, with much higher hosted latency and more outcome drift. |
-
-These are preserved **development-bank** results, not a 32-independent-sample
-research claim. Several rows are mutations or fixture-sharing relatives, so
-the effective unit is the semantic family; the earlier case-level McNemar
-values are withdrawn from headline use. The suite also compares no-tools raw
-models with a tool-enabled product, and the historical `same_prompt_direct`
-arm used the production prompt **without tools**. It therefore does not yet
-isolate architecture from tool availability. The sealed 25-family campaign
-above includes the missing `same_prompt_tools_direct` control and supersedes
-these development-bank rows for current conclusions.
-All accepted historical runs had zero case-level runtime errors.
-
-The historical deployment takeaway was practical: choose **Gemma 4 26B-A4B** when you want
-the best balanced local model in this comparison; choose **LFM 8B-A1B** when
-the harness is the primary interface and its raw-format weakness is acceptable;
-and use **Luna** when its stronger closed-book reasoning is worth a much slower
-hosted path. The current sealed result above now provides the stronger basis
-for that choice. The harness improves verified user outcomes—it does **not** raise
-the underlying model's MMLU score or turn a local benchmark into a public model
-leaderboard. Quantization, hosted sampling, local hardware, and provider cost
-remain deployment-specific.
-
-Full reproducibility details—frozen suite fingerprints, raw outputs, traces,
-latency, VRAM, exact-repeat artifacts, and exclusions—are explained in
-[Benchmarking](docs/BENCHMARKING.md) and preserved in the local experiment
-manifest and raw artifacts. Run
-[`dev/model-intake.ps1`](dev/model-intake.ps1) to evaluate a model on your own
-machine with Sir Thaddeus's production baseline.
+Run [`dev/model-intake.ps1`](dev/model-intake.ps1) to evaluate a model on your
+own machine against Sir Thaddeus's production baseline.
 
 <details>
 <summary><strong>Open the full evidence table</strong></summary>

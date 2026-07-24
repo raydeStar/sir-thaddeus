@@ -22,8 +22,9 @@ folder is the deeper living record rather than the project pitch.
    explains why the rationale-distillation campaign is paused and defines the
    evaluator, scale, ceiling, and stop gates required before it resumes.
 5. [SEALED_2026S3_HARNESS_EVIDENCE.md](SEALED_2026S3_HARNESS_EVIDENCE.md)
-   reports the human-reviewed 100-case raw, same-prompt, direct-tools, and full
-   harness campaign across LFM 1.2B, LFM 8B-A1B, Gemma 26B-A4B, and Luna.
+   is the single canonical report for the human-reviewed 100-case raw,
+   same-prompt, direct-tools, and full-harness campaign across LFM 1.2B,
+   LFM 8B-A1B, Gemma 26B-A4B, and Luna.
 6. [../CALIBRATED_IMPROVEMENT_PLAN.md](../CALIBRATED_IMPROVEMENT_PLAN.md)
    defines the current forward plan and stop rules.
 7. [../EXPERIMENTATION.md](../EXPERIMENTATION.md) defines the experiment
