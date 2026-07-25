@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sir Thaddeus — Modern Workbench prototype</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070b11;
+      --shell: #0b111a;
+      --panel: #0f1722;
+      --raised: #141e2b;
+      --hover: #192535;
+      --line: #263346;
+      --line-soft: #1b2736;
+      --ink: #f1f4f7;
+      --muted: #9aa8b9;
+      --subtle: #66758a;
+      --brass: #d8a84f;
+      --brass-soft: rgba(216, 168, 79, .13);
+      --green: #58d5a5;
+      --blue: #78a7ff;
+      --warn: #f1b85b;
+      --danger: #f07d8a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .35);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; overflow: hidden; background: var(--bg); color: var(--ink); }
+    button, textarea { font: inherit; }
+    button { color: inherit; }
+    .app { height: 100%; display: grid; grid-template-rows: 48px minmax(0, 1fr); }
+    .labbar {
+      display: flex; align-items: center; gap: 12px; padding: 0 16px;
+      border-bottom: 1px solid var(--line); background: rgba(7, 11, 17, .95);
+    }
+    .lab-title { display: flex; align-items: center; gap: 9px; min-width: 220px; font-size: 12px; color: var(--muted); }
+    .mark {
+      width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid var(--brass);
+      border-radius: 50%; color: var(--brass); font: 700 9px/1 Georgia, serif; box-shadow: 0 0 24px rgba(216,168,79,.12);
+    }
+    .concepts { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--shell); }
+    .concept {
+      border: 0; border-radius: 7px; padding: 6px 12px; background: transparent; color: var(--muted);
+      font-size: 11px; cursor: pointer; transition: .16s ease;
+    }
+    .concept:hover { color: var(--ink); background: var(--hover); }
+    .concept[aria-pressed="true"] { color: var(--ink); background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); }
+    .recommend { color: var(--brass); margin-left: 4px; }
+    .lab-note { margin-left: auto; font-size: 11px; color: var(--subtle); }
+    .shell { min-height: 0; display: grid; grid-template-columns: 252px minmax(520px, 1fr) 390px; background: var(--bg); }
+    .sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line-soft); background: var(--shell); }
+    .brand { display: flex; align-items: center; gap: 10px; height: 54px; padding: 0 16px; border-bottom: 1px solid var(--line-soft); }
+    .brand strong { font: 600 14px/1 Georgia, serif; letter-spacing: .02em; }
+    .brand small { display: block; margin-top: 3px; font-size: 9px; color: var(--subtle); text-transform: uppercase; letter-spacing: .16em; }
+    .side-actions { padding: 12px; display: grid; gap: 8px; }
+    .new-chat, .search {
+      height: 38px; border-radius: 10px; border: 1px solid var(--line); display: flex; align-items: center; gap: 9px;
+      padding: 0 11px; background: var(--panel); color: var(--muted); font-size: 12px; text-align: left; cursor: pointer;
+    }
+    .new-chat { color: var(--ink); border-color: rgba(216,168,79,.3); background: var(--brass-soft); }
+    .key { margin-left: auto; padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--subtle); font-size: 9px; }
+    .side-scroll { min-height: 0; overflow: auto; padding: 4px 8px 18px; }
+    .section-label {
+      display: flex; align-items: center; justify-content: space-between; padding: 13px 8px 6px;
+      color: var(--subtle); font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+    }
+    .workspace-row, .thread-row, .system-row {
+      width: 100%; border: 0; border-radius: 9px; display: flex; align-items: center; gap: 9px; padding: 8px 9px;
+      color: var(--muted); background: transparent; font-size: 12px; text-align: left; cursor: pointer;
+    }
+    .workspace-row:hover, .thread-row:hover, .system-row:hover { background: var(--hover); color: var(--ink); }
+    .workspace-row.active { color: var(--ink); background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); }
+    .workspace-dot { width: 8px; height: 8px; border-radius: 3px; background: var(--brass); box-shadow: 0 0 0 4px var(--brass-soft); }
+    .thread-row { padding-left: 27px; }
+    .thread-row.active { color: var(--ink); }
+    .thread-row span:last-child { margin-left: auto; color: var(--subtle); font-size: 9px; }
+    .sidebar-foot { margin-top: auto; border-top: 1px solid var(--line-soft); padding: 8px; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+    .conversation { position: relative; min-width: 0; display: grid; grid-template-rows: 54px minmax(0, 1fr) auto; background: var(--bg); }
+    .conversation-head {
+      display: flex; align-items: center; gap: 10px; padding: 0 22px; border-bottom: 1px solid var(--line-soft); background: rgba(7,11,17,.82); backdrop-filter: blur(12px);
+    }
+    .conversation-head h1 { margin: 0; font-size: 13px; font-weight: 600; }
+    .conversation-head p { margin: 2px 0 0; font-size: 10px; color: var(--subtle); }
+    .head-actions { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+    .pill, .icon-btn {
+      border: 1px solid var(--line); background: var(--panel); border-radius: 999px; color: var(--muted); cursor: pointer;
+    }
+    .pill { padding: 6px 10px; font-size: 10px; }
+    .pill.live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--green); }
+    .icon-btn { width: 30px; height: 30px; display: grid; place-items: center; }
+    .messages { min-height: 0; overflow: auto; padding: 34px max(28px, calc((100% - 680px)/2)) 160px; scroll-behavior: smooth; }
+    .message { margin: 0 0 28px; font-size: 13.5px; line-height: 1.65; }
+    .message.user { display: flex; justify-content: flex-end; }
+    .user-bubble { max-width: 76%; padding: 11px 15px; border-radius: 18px 18px 5px 18px; background: var(--raised); border: 1px solid var(--line-soft); }
+    .assistant { position: relative; padding-left: 30px; }
+    .assistant::before {
+      content: "ST"; position: absolute; left: 0; top: 1px; width: 21px; height: 21px; display: grid; place-items: center;
+      border: 1px solid rgba(216,168,79,.5); border-radius: 50%; color: var(--brass); font: 700 7px/1 Georgia, serif;
+    }
+    .assistant h2 { margin: 0 0 7px; font-size: 15px; font-weight: 600; }
+    .assistant p { margin: 0 0 10px; color: #d7dee7; }
+    .plan {
+      margin: 14px 0 22px 30px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); overflow: hidden;
+    }
+    .plan-summary { width: 100%; border: 0; display: flex; align-items: center; gap: 11px; padding: 12px 14px; background: transparent; text-align: left; cursor: pointer; }
+    .spinner { width: 18px; height: 18px; border: 2px solid var(--line); border-top-color: var(--brass); border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .plan-copy strong { display: block; font-size: 12px; }
+    .plan-copy span { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .plan-summary .chevron { margin-left: auto; color: var(--subtle); transition: transform .2s; }
+    .plan.open .chevron { transform: rotate(180deg); }
+    .plan-detail { display: none; padding: 0 14px 13px 43px; }
+    .plan.open .plan-detail { display: grid; gap: 8px; }
+    .step { display: flex; gap: 9px; color: var(--muted); font-size: 11px; }
+    .step.done { color: var(--ink); }
+    .step .check { width: 15px; color: var(--green); }
+    .steer { margin-top: 3px; display: flex; gap: 7px; }
+    .permission {
+      margin: 15px 0 24px 30px; padding: 14px; border: 1px solid rgba(241,184,91,.35); border-left: 3px solid var(--warn);
+      border-radius: 11px; background: linear-gradient(100deg, rgba(241,184,91,.09), var(--panel) 42%);
+    }
+    .permission.resolved { border-color: rgba(88,213,165,.32); border-left-color: var(--green); background: linear-gradient(100deg, rgba(88,213,165,.08), var(--panel) 42%); }
+    .permission-head { display: flex; gap: 10px; }
+    .permission-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: rgba(241,184,91,.12); color: var(--warn); }
+    .permission h3 { margin: 0; font-size: 12px; }
+    .permission p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .scope { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.2); font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; color: #cbd5df; }
+    .permission-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 11px; }
+    .btn { border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; background: var(--raised); color: var(--ink); font-size: 10px; cursor: pointer; }
+    .btn:hover { border-color: #42536b; }
+    .btn.primary { border-color: rgba(216,168,79,.5); background: var(--brass); color: #19140a; font-weight: 700; }
+    .btn.danger { color: var(--danger); }
+    .receipt { margin: 13px 0 0; display: flex; flex-wrap: wrap; gap: 6px; }
+    .receipt .pill { cursor: default; background: transparent; }
+    .source { color: var(--blue); }
+    .composer-wrap {
+      position: absolute; left: 0; right: 0; bottom: 0; padding: 42px max(24px, calc((100% - 700px)/2)) 18px;
+      background: linear-gradient(transparent, var(--bg) 38%);
+    }
+    .composer { border: 1px solid #334258; border-radius: 17px; background: rgba(15,23,34,.97); box-shadow: var(--shadow); }
+    .composer textarea { width: 100%; min-height: 64px; max-height: 140px; resize: none; border: 0; outline: 0; padding: 14px 15px 4px; background: transparent; color: var(--ink); font-size: 13px; }
+    .composer textarea::placeholder { color: var(--subtle); }
+    .composer-foot { display: flex; align-items: center; gap: 7px; padding: 8px; }
+    .context-chip { border: 0; border-radius: 7px; padding: 6px 8px; background: var(--hover); color: var(--muted); font-size: 9px; }
+    .send { margin-left: auto; width: 31px; height: 31px; border: 0; border-radius: 9px; background: var(--brass); color: #161108; font-weight: 800; cursor: pointer; }
+    .workbench { min-width: 0; display: grid; grid-template-rows: 54px auto minmax(0,1fr) 46px; border-left: 1px solid var(--line); background: var(--shell); transition: .2s ease; }
+    .workbench.hidden { display: none; }
+    .workbench-head { display: flex; align-items: center; gap: 9px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); }
+    .file-icon { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 8px; background: var(--brass-soft); color: var(--brass); font-size: 12px; }
+    .workbench-head strong { display: block; font-size: 11px; }
+    .workbench-head span { display: block; margin-top: 2px; color: var(--subtle); font-size: 9px; }
+    .close-workbench { margin-left: auto; }
+    .tabs { display: flex; gap: 16px; padding: 0 15px; border-bottom: 1px solid var(--line-soft); }
+    .tab { position: relative; border: 0; padding: 11px 0 9px; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
+    .tab.active { color: var(--ink); }
+    .tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--brass); }
+    .doc { min-height: 0; overflow: auto; padding: 28px 30px 40px; }
+    .doc h1 { margin: 0 0 6px; font: 600 25px/1.18 Georgia, serif; letter-spacing: -.02em; }
+    .doc .meta { color: var(--subtle); font-size: 9px; }
+    .doc h2 { margin: 26px 0 8px; font-size: 13px; }
+    .doc p, .doc li { color: #c7d0da; font-size: 11.5px; line-height: 1.65; }
+    .doc ul { padding-left: 18px; }
+    .doc blockquote { margin: 18px 0; padding: 11px 13px; border-left: 2px solid var(--brass); background: var(--brass-soft); color: #e5d4b1; font-size: 11px; }
+    .editor { width: 100%; height: 100%; min-height: 430px; resize: none; border: 0; outline: 0; background: transparent; color: #d6dee8; font: 11px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .history-list { display: grid; gap: 10px; }
+    .version { padding: 11px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--panel); }
+    .version strong { font-size: 11px; }
+    .version p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+    .workbench-foot { display: flex; align-items: center; gap: 7px; padding: 0 14px; border-top: 1px solid var(--line-soft); color: var(--subtle); font-size: 9px; }
+    .saved { color: var(--green); }
+    .option-a .shell { grid-template-columns: 210px minmax(520px, 1fr); }
+    .option-a .workbench { display: none; }
+    .option-a .workspace-only { display: none; }
+    .option-a .sidebar .section-label:first-of-type::before { content: "RECENTS"; font-size: 9px; }
+    .option-a .sidebar .section-label:first-of-type { font-size: 0; }
+    .option-c .shell { grid-template-columns: 72px minmax(440px, .92fr) minmax(420px, 1.08fr); }
+    .option-c .sidebar { align-items: center; }
+    .option-c .brand { width: 100%; justify-content: center; padding: 0; }
+    .option-c .brand > div:last-child, .option-c .side-actions .search span, .option-c .side-actions .new-chat span, .option-c .key,
+    .option-c .side-scroll, .option-c .sidebar-foot span:last-child { display: none; }
+    .option-c .side-actions { padding: 10px; }
+    .option-c .new-chat, .option-c .search { width: 40px; padding: 0; justify-content: center; }
+    .option-c .sidebar-foot { width: 100%; display: flex; justify-content: center; }
+    .option-c .workbench { display: grid !important; }
+    .mobile-backdrop { display: none; }
+    @media (max-width: 1100px) {
+      .shell { grid-template-columns: 72px minmax(460px, 1fr) 360px; }
+      .sidebar { align-items: center; }
+      .brand { width: 100%; justify-content: center; padding: 0; }
+      .brand > div:last-child, .side-actions .search span, .side-actions .new-chat span, .key, .side-scroll, .sidebar-foot span:last-child { display: none; }
+      .side-actions { padding: 10px; }
+      .new-chat, .search { width: 40px; padding: 0; justify-content: center; }
+      .sidebar-foot { width: 100%; display: flex; justify-content: center; }
+    }
+    @media (max-width: 820px) {
+      body { overflow: auto; }
+      .app { min-height: 100%; height: auto; }
+      .labbar { position: sticky; top: 0; z-index: 5; overflow-x: auto; }
+      .lab-title, .lab-note { display: none; }
+      .shell, .option-a .shell, .option-c .shell { min-height: calc(100vh - 48px); grid-template-columns: 58px minmax(0,1fr); }
+      .conversation { min-height: calc(100vh - 48px); }
+      .workbench, .option-c .workbench { position: fixed; inset: 48px 0 0 58px; z-index: 4; display: grid; }
+      .workbench.hidden { display: none !important; }
+      .messages { padding-left: 20px; padding-right: 20px; }
+      .composer-wrap { padding-left: 14px; padding-right: 14px; }
+      .plan, .permission { margin-left: 0; }
+    }
+  </style>
+</head>
+<body class="option-b">
+  <div class="app">
+    <header class="labbar">
+      <div class="lab-title"><span class="mark">ST</span> Modern Workbench research prototype</div>
+      <div class="concepts" role="group" aria-label="Design direction">
+        <button class="concept" data-option="a" aria-pressed="false">A · Conversation</button>
+        <button class="concept" data-option="b" aria-pressed="true">B · Workspace <span class="recommend">recommended</span></button>
+        <button class="concept" data-option="c" aria-pressed="false">C · Artifact</button>
+      </div>
+      <div class="lab-note">Same scenario, three information architectures</div>
+    </header>
+
+    <div class="shell">
+      <aside class="sidebar" aria-label="Workspace navigation">
+        <div class="brand"><span class="mark">ST</span><div><strong>Sir Thaddeus</strong><small>Local workbench</small></div></div>
+        <div class="side-actions">
+          <button class="new-chat"><b>＋</b><span>New conversation</span><span class="key">Ctrl N</span></button>
+          <button class="search"><b>⌕</b><span>Search everything</span><span class="key">Ctrl K</span></button>
+        </div>
+        <div class="side-scroll">
+          <div class="section-label workspace-only"><span>Workspaces</span><span>＋</span></div>
+          <button class="workspace-row active workspace-only"><span class="workspace-dot"></span><span>Aster launch</span></button>
+          <button class="workspace-row workspace-only"><span class="workspace-dot" style="background:#78a7ff"></span><span>Personal research</span></button>
+          <button class="workspace-row workspace-only"><span class="workspace-dot" style="background:#58d5a5"></span><span>Household</span></button>
+          <div class="section-label"><span>Recent</span><span>•••</span></div>
+          <button class="thread-row active">Release readiness <span>now</span></button>
+          <button class="thread-row">Benchmark questions <span>2h</span></button>
+          <button class="thread-row">Local model setup <span>Tue</span></button>
+          <div class="section-label workspace-only"><span>Knowledge</span><span>3</span></div>
+          <button class="system-row workspace-only">▧ Aster audit</button>
+          <button class="system-row workspace-only">▧ Release checklist</button>
+          <button class="system-row workspace-only">▧ Benchmark report</button>
+          <div class="section-label"><span>Tools</span></div>
+          <button class="system-row">▤ Wiki & files</button>
+          <button class="system-row">↻ Routines</button>
+          <button class="system-row">⚙ System</button>
+        </div>
+        <div class="sidebar-foot"><button class="system-row"><span class="status-dot"></span><span>Ready · local</span></button></div>
+      </aside>
+
+      <main class="conversation">
+        <header class="conversation-head">
+          <div>
+            <h1>Release readiness</h1>
+            <p class="workspace-only">Aster launch · 3 knowledge sources</p>
+          </div>
+          <div class="head-actions">
+            <button class="pill live">Working</button>
+            <button class="pill" id="open-workbench">Open brief</button>
+            <button class="icon-btn" title="Conversation actions">•••</button>
+          </div>
+        </header>
+
+        <div class="messages" id="messages">
+          <div class="message user"><div class="user-bubble">Check the remaining release risks, fix what you safely can, and put the final recommendation into our Aster release brief.</div></div>
+
+          <section class="plan open" id="plan">
+            <button class="plan-summary" id="plan-toggle" aria-expanded="true">
+              <span class="spinner"></span>
+              <span class="plan-copy"><strong>Checking release readiness</strong><span>4 of 5 steps · 1m 42s · you can keep chatting</span></span>
+              <span class="chevron">⌄</span>
+            </button>
+            <div class="plan-detail">
+              <div class="step done"><span class="check">✓</span><span>Reviewed the benchmark evidence ledger</span></div>
+              <div class="step done"><span class="check">✓</span><span>Verified the sealed-bank hash</span></div>
+              <div class="step done"><span class="check">✓</span><span>Ran the standalone live quickstart</span></div>
+              <div class="step"><span class="check">→</span><span>Updating the Aster release brief</span></div>
+              <div class="step"><span class="check">○</span><span>Final consistency check</span></div>
+              <div class="steer"><button class="btn">Add instruction</button><button class="btn danger">Stop</button></div>
+            </div>
+          </section>
+
+          <section class="permission" id="permission">
+            <div class="permission-head">
+              <span class="permission-icon">✎</span>
+              <div><h3>Allow one edit to the release brief?</h3><p>Thaddeus is paused before changing the local Wiki page. Nothing else is included.</p></div>
+            </div>
+            <div class="scope">Wiki page: Aster launch / Release brief<br>Change: replace “Pending verification” with the verified result</div>
+            <div class="permission-actions">
+              <button class="btn danger" data-decision="Denied">Deny</button>
+              <button class="btn" data-decision="Allowed once">Allow once</button>
+              <button class="btn primary" data-decision="Allowed for this workspace">Allow in Aster launch</button>
+            </div>
+          </section>
+
+          <article class="message assistant">
+            <h2>The release is ready for a controlled publish.</h2>
+            <p>I found and corrected one evidence-ledger contradiction, then rebuilt the candidate at the original sealed-bank hash. The live endpoint smoke completed without infrastructure failures.</p>
+            <p>The remaining decisions are human-owned: public commit identity and the license copyright line.</p>
+            <div class="receipt">
+              <span class="pill">✓ 4 verifications</span>
+              <span class="pill source">▧ 3 sources</span>
+              <span class="pill">✎ 1 Wiki edit</span>
+              <button class="pill" id="receipt-toggle">Why this answer?</button>
+            </div>
+            <div id="receipt-detail" hidden style="margin-top:10px;color:var(--muted);font-size:11px">
+              Used the release manifest, sealed-bank verifier, candidate release check, and live demo report. No network-backed source changed local state.
+            </div>
+          </article>
+        </div>
+
+        <div class="composer-wrap">
+          <div class="composer">
+            <textarea aria-label="Message Sir Thaddeus" placeholder="Message Sir Thaddeus…"></textarea>
+            <div class="composer-foot">
+              <button class="icon-btn" title="Add context">＋</button>
+              <button class="context-chip workspace-only">Aster launch</button>
+              <button class="context-chip">Wiki context: 3 sources</button>
+              <button class="context-chip">Offline</button>
+              <button class="icon-btn" title="Voice">⌁</button>
+              <button class="send" title="Send">↑</button>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="workbench hidden" id="workbench" aria-label="Release brief workbench">
+        <header class="workbench-head">
+          <span class="file-icon">▧</span>
+          <div><strong>Release brief</strong><span>Wiki · Aster launch · saved</span></div>
+          <button class="icon-btn close-workbench" id="close-workbench" title="Close workbench">×</button>
+        </header>
+        <nav class="tabs" aria-label="Workbench view">
+          <button class="tab active" data-tab="preview" aria-selected="true">Preview</button>
+          <button class="tab" data-tab="edit" aria-selected="false">Edit</button>
+          <button class="tab" data-tab="history" aria-selected="false">History</button>
+        </nav>
+        <div class="doc" id="doc">
+          <section data-panel="preview">
+            <h1>Aster release brief</h1>
+            <div class="meta">Updated moments ago by Sir Thaddeus</div>
+            <blockquote>Recommendation: proceed with a controlled publish after confirming the public commit identity and license line.</blockquote>
+            <h2>Evidence closed</h2>
+            <ul><li>LFM confirmation recorded as a completed mixed verdict.</li><li>Sealed bank reverified at its original SHA-256.</li><li>Public candidate rebuilt with zero release-check findings.</li><li>Live raw and full-harness demo completed without infrastructure failures.</li></ul>
+            <h2>Human decisions</h2>
+            <p>Confirm the author identity attached to the squashed public commit and replace the stock Apache copyright placeholder if desired.</p>
+          </section>
+          <section data-panel="edit" hidden>
+            <textarea class="editor"># Aster release brief
+
+> Recommendation: proceed with a controlled publish after confirming the public commit identity and license line.
+
+## Evidence closed
+
+- LFM confirmation recorded as a completed mixed verdict.
+- Sealed bank reverified at its original SHA-256.
+- Public candidate rebuilt with zero release-check findings.
+- Live raw and full-harness demo completed without infrastructure failures.
+
+## Human decisions
+
+Confirm the author identity and license copyright line.</textarea>
+          </section>
+          <section data-panel="history" hidden>
+            <div class="history-list">
+              <div class="version"><strong>Current · moments ago</strong><p>Added verified live quickstart and corrected LFM campaign status.</p></div>
+              <div class="version"><strong>Version 3 · 2 hours ago</strong><p>Consolidated release methodology and open decisions.</p></div>
+              <div class="version"><strong>Version 2 · yesterday</strong><p>Added Gemma and Luna confirmation results.</p></div>
+              <div class="version"><strong>Original · Jul 21</strong><p>Created from the benchmark campaign report.</p></div>
+            </div>
+          </section>
+        </div>
+        <footer class="workbench-foot"><span class="saved">● Saved locally</span><span>·</span><span>Markdown Wiki page</span><button class="btn" style="margin-left:auto;padding:5px 8px">Show changes</button></footer>
+      </aside>
+    </div>
+  </div>
+  <script>
+    const body = document.body;
+    const workbench = document.getElementById('workbench');
+    const conceptButtons = [...document.querySelectorAll('.concept')];
+    function setOption(option) {
+      body.className = `option-${option}`;
+      conceptButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.option === option)));
+      if (option === 'a') workbench.classList.add('hidden');
+      if (option === 'c') workbench.classList.remove('hidden');
+      if (option === 'b' && window.innerWidth > 820) workbench.classList.remove('hidden');
+    }
+    setOption('b');
+    conceptButtons.forEach((button) => button.addEventListener('click', () => setOption(button.dataset.option)));
+    document.getElementById('plan-toggle').addEventListener('click', () => {
+      const plan = document.getElementById('plan');
+      plan.classList.toggle('open');
+      document.getElementById('plan-toggle').setAttribute('aria-expanded', String(plan.classList.contains('open')));
+    });
+    document.querySelectorAll('[data-decision]').forEach((button) => button.addEventListener('click', () => {
+      const card = document.getElementById('permission');
+      card.classList.add('resolved');
+      card.innerHTML = `<div class="permission-head"><span class="permission-icon" style="color:var(--green);background:rgba(88,213,165,.1)">✓</span><div><h3>${button.dataset.decision}</h3><p>The decision is attached to this action and recorded in the work receipt.</p></div></div>`;
+    }));
+    document.getElementById('receipt-toggle').addEventListener('click', () => {
+      const detail = document.getElementById('receipt-detail');
+      detail.hidden = !detail.hidden;
+    });
+    document.getElementById('open-workbench').addEventListener('click', () => workbench.classList.remove('hidden'));
+    document.getElementById('close-workbench').addEventListener('click', () => workbench.classList.add('hidden'));
+    document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach((candidate) => {
+        const selected = candidate === tab;
+        candidate.classList.toggle('active', selected);
+        candidate.setAttribute('aria-selected', String(selected));
+      });
+      document.querySelectorAll('[data-panel]').forEach((panel) => panel.hidden = panel.dataset.panel !== tab.dataset.tab);
+    }));
+  </script>
+</body>
+</html>
