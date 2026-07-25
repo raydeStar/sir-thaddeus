@@ -30,6 +30,17 @@ folder is the deeper living record rather than the project pitch.
 7. [../EXPERIMENTATION.md](../EXPERIMENTATION.md) defines the experiment
    protocol; [../BENCHMARKING.md](../BENCHMARKING.md) defines the scorecards.
 
+## Product-quality research
+
+[MODERN_WORKBENCH_UX_RESEARCH.md](MODERN_WORKBENCH_UX_RESEARCH.md) audits the
+current desktop experience against official OpenAI and Anthropic interaction
+patterns, compares three Sir Thaddeus concepts, and recommends a
+workspace-backed conversation with an optional right-side workbench. Its
+dependency-free interactive prototype is in
+[`../prototypes/modern-workbench/index.html`](../prototypes/modern-workbench/index.html).
+This is product-quality research, not evidence that model or harness capability
+improved.
+
 ## Source of truth
 
 This folder is an answer-blind summary. The sibling private
