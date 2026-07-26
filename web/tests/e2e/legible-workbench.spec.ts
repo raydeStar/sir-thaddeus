@@ -434,7 +434,9 @@ test.describe('legible workbench UX', () => {
     await expect(receipt).toContainText('3 current sources');
     await expect(receipt).toContainText('read only');
     await expect(receipt).toContainText('Tool result only');
-    await expect(receipt).toContainText('Source-backed evidence · 80%');
+    // Evidence tier, not a percentage: the old "· 80%" rendered a fixed
+    // per-tier constant as though it were a measured confidence.
+    await expect(receipt).toContainText('Evidence: Source-backed');
     await receipt.getByRole('button', { name: 'Mark outcome accurate' }).click();
     await expect(receipt.getByRole('button', { name: 'Mark outcome accurate' })).toHaveAttribute('aria-pressed', 'true');
     await expect.poll(async () => {

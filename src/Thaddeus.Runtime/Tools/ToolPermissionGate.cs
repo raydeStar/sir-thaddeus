@@ -91,6 +91,28 @@ public sealed class ToolPermissionGate
     }
 
     /// <summary>
+    /// Snapshot of the session grants currently in force, as concrete scope
+    /// strings. The shell shows this as ambient posture, so it must reflect the
+    /// gate's real caches rather than a client-side tally: a browser refresh
+    /// loses the UI's own record of what it approved, and a boundary indicator
+    /// that silently under-reports live grants is worse than none.
+    /// </summary>
+    public IReadOnlyList<string> ListSessionGrants()
+    {
+        var grants = new List<string>();
+        foreach (var (group, allowed) in _sessionAllow)
+        {
+            if (allowed) grants.Add($"{group} · all tools");
+        }
+        foreach (var (tool, allowed) in _sessionAllowTool)
+        {
+            if (allowed) grants.Add(tool);
+        }
+        grants.Sort(StringComparer.OrdinalIgnoreCase);
+        return grants;
+    }
+
+    /// <summary>
     /// Drops every cached "Session" approval — both group- and tool-scoped.
     /// Used by the harness reset endpoint between tests so a prior test's
     /// granted group or tool never auto-approves the next test's tool calls.

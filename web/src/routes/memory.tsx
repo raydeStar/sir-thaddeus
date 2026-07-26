@@ -64,6 +64,93 @@ type FactDraft = {
   object: string;
 };
 
+/**
+ * Plain-language view of what the assistant currently believes.
+ *
+ * This is a faithful rendering of the stored rows — subject/predicate/object
+ * joined into sentences — NOT a model-written précis. A generated summary could
+ * quietly restate a fact into something the user never said, which is precisely
+ * the failure mode a memory-transparency surface exists to prevent. Everything
+ * here is editable through the detailed sections below.
+ */
+function MemorySummaryCard({ facts, pinned }: { facts: FactDto[]; pinned: NuggetDto[] }) {
+  const [open, setOpen] = useState(true);
+  const sentences = useMemo(() => buildMemorySentences(facts, pinned), [facts, pinned]);
+
+  if (sentences.length === 0) return null;
+
+  return (
+    <section className="surface p-4" data-testid="memory-summary">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-ink">In plain language</h2>
+          <p className="mt-0.5 text-xs text-ink-muted">
+            Exactly what is stored, read back as sentences. Nothing here is paraphrased by the model.
+          </p>
+        </div>
+        <button
+          type="button"
+          className={MEMORY_SECONDARY_BUTTON_CLASSNAME}
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          data-testid="memory-summary-toggle"
+        >
+          {open ? 'Hide' : 'Show'}
+        </button>
+      </div>
+
+      {open ? (
+        <ul className="mt-3 space-y-1.5" data-testid="memory-summary-list">
+          {sentences.map((sentence) => (
+            <li key={sentence.key} className="flex gap-2 text-sm leading-6 text-ink">
+              <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-accent" aria-hidden />
+              <span className="min-w-0">
+                {sentence.text}
+                {sentence.pinnedAlways ? (
+                  <span className="ml-1.5 align-middle text-[10px] uppercase tracking-wide text-ink-subtle">
+                    always loaded
+                  </span>
+                ) : null}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Joins stored triples and pinned notes into readable sentences. Pinned notes
+ * are already user-authored prose, so they pass through verbatim.
+ */
+function buildMemorySentences(
+  facts: FactDto[],
+  pinned: NuggetDto[],
+): Array<{ key: string; text: string; pinnedAlways: boolean }> {
+  const out: Array<{ key: string; text: string; pinnedAlways: boolean }> = [];
+
+  for (const nugget of pinned) {
+    const text = nugget.text.trim();
+    if (text) out.push({ key: `nugget-${nugget.id}`, text, pinnedAlways: true });
+  }
+
+  for (const fact of facts) {
+    const subject = fact.subject.trim();
+    const predicate = fact.predicate.trim().replace(/[_-]+/g, ' ');
+    const object = fact.object.trim();
+    if (!subject || !predicate || !object) continue;
+    const readable = `${subject} ${predicate} ${object}`.replace(/\s+/g, ' ');
+    out.push({
+      key: `fact-${fact.id}`,
+      text: readable.endsWith('.') ? readable : `${readable}.`,
+      pinnedAlways: false,
+    });
+  }
+
+  return out;
+}
+
 function MemoryAuditRoute() {
   const navigate = useNavigate();
   const [overview, setOverview] = useState<MemoryOverviewResponse | null>(null);
@@ -470,6 +557,9 @@ function MemoryAuditRoute() {
           {overview ? (
             <OverviewCard overview={overview} />
           ) : null}
+
+          <MemorySummaryCard facts={facts ?? []} pinned={pinnedNuggets} />
+
 
           {overview?.profile ? (
             <ProfileSection profile={overview.profile} />

@@ -168,7 +168,7 @@ public static class AuditInsightsApi
                     feedback.Length,
                     feedback.Length,
                     "measured",
-                    "Agreement between the receipt's displayed evidence confidence and user-confirmed outcome.")
+                    "Agreement between the receipt's evidence-tier prior and the user-confirmed outcome.")
                 : new AssistantInsightMetric(
                     "trust-calibration",
                     "Trust calibration",
@@ -176,7 +176,7 @@ public static class AuditInsightsApi
                     0,
                     0,
                     "insufficient-data",
-                    "Needs a displayed evidence-confidence and user outcome pair; no proxy is substituted."),
+                    "Needs an evidence-tier prior and user outcome pair; no proxy is substituted."),
             Rate("escalation-frequency", "Escalation frequency", escalations, outcomes.Length,
                 "Plan approvals plus tool permission decisions divided by terminal runs."),
             Rate("approval-fatigue", "Approval fatigue signal", fastOrBroad, permissions.Length,

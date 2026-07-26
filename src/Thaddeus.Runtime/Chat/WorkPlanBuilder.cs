@@ -29,6 +29,18 @@ public static partial class WorkPlanBuilder
         "delete", "remove", "move", "rename", "wiki", "report", "brief", "document",
     ];
 
+    /// <summary>
+    /// Verbs that transform gathered context into an answer. Paired with a
+    /// context signal these describe a genuinely multi-step turn ("read the
+    /// screen, then synthesize"), which is what makes plan-first oversight
+    /// worth showing even though no durable output is produced.
+    /// </summary>
+    private static readonly string[] SynthesisSignals =
+    [
+        "summarize", "summarise", "analyze", "analyse", "compare", "explain",
+        "review", "draft", "outline", "critique", "translate", "extract",
+    ];
+
     private static readonly string[] HighRiskSignals =
     [
         "delete", "remove", "overwrite", "publish", "send", "execute", "run command",
@@ -57,8 +69,15 @@ public static partial class WorkPlanBuilder
         var explicitSequence = SequenceSignal().IsMatch(normalized);
         var compoundOutcome = (hasContext || hasResearch) && hasOutput;
         var longStructuredAsk = normalized.Length >= 220 && actionCount >= 2;
+        // Gathering permissioned context and then synthesizing over it is a
+        // multi-step, permission-bearing turn even with no durable output —
+        // e.g. "summarize the active window". Without this the flagship
+        // read-then-synthesize case skipped plan review entirely and the user
+        // met a bare permission prompt with no stated strategy behind it.
+        var contextSynthesis = (hasContext || hasResearch) && ContainsAny(normalized, SynthesisSignals);
 
-        if (!highRisk && !explicitSequence && !compoundOutcome && !longStructuredAsk && actionCount < 3)
+        if (!highRisk && !explicitSequence && !compoundOutcome && !longStructuredAsk &&
+            !contextSynthesis && actionCount < 3)
             return null;
 
         var now = DateTimeOffset.UtcNow;

@@ -33,6 +33,13 @@ public static class PermissionsApi
                 PermissionsJsonContext.Default.PendingPermissionsResponse);
         });
 
+        app.MapGet("/api/permissions/session", (ToolPermissionGate gate) =>
+        {
+            return Results.Json(
+                new SessionGrantsResponse(gate.ListSessionGrants()),
+                PermissionsJsonContext.Default.SessionGrantsResponse);
+        });
+
         app.MapPost("/api/permissions/respond", async (
             RespondToPermissionRequest? req,
             ToolPermissionGate gate,
@@ -122,6 +129,9 @@ public static class PermissionsApi
 
 public sealed record PendingPermissionsResponse(IReadOnlyList<PendingPermission> Requests);
 
+/// <summary>Session grants currently in force, for the shell's ambient posture.</summary>
+public sealed record SessionGrantsResponse(IReadOnlyList<string> Grants);
+
 public sealed record RespondToPermissionRequest(string Id, string Decision, string? Scope = null);
 
 [JsonSourceGenerationOptions(
@@ -129,6 +139,7 @@ public sealed record RespondToPermissionRequest(string Id, string Decision, stri
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(PendingPermissionsResponse))]
+[JsonSerializable(typeof(SessionGrantsResponse))]
 [JsonSerializable(typeof(PendingPermission))]
 [JsonSerializable(typeof(RespondToPermissionRequest))]
 [JsonSerializable(typeof(PermissionCatalog))]

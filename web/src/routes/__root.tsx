@@ -5,10 +5,11 @@ import {
   useNavigate,
 } from '@tanstack/react-router';
 import { useEffect } from 'react';
-import { BookOpen, ClipboardList, Home, MessageSquareText, ShieldCheck } from 'lucide-react';
+import { BookOpen, ClipboardList, Globe, Home, MessageSquareText, ShieldCheck, WifiOff } from 'lucide-react';
 import { useRuntimeStore } from '../stores/runtimeStore';
 import { usePermissionsStore } from '../stores/permissionsStore';
 import { useToolActivityStore } from '../stores/toolActivityStore';
+import { useBoundaryStore } from '../stores/boundaryStore';
 import { RuntimeStateBadge } from '../components/RuntimeStateBadge';
 import { KillAppButton } from '../components/KillAppButton';
 import { PermissionPauseCard } from '../components/PermissionModal';
@@ -28,6 +29,11 @@ function RootLayout() {
   const startPermissions = usePermissionsStore((state) => state.start);
   const startToolActivity = useToolActivityStore((state) => state.start);
   const pendingPermissions = usePermissionsStore((state) => state.queue.length);
+  const sessionGrants = usePermissionsStore((state) => state.sessionGrants);
+  const refreshSessionGrants = usePermissionsStore((state) => state.refreshSessionGrants);
+  const connected = useRuntimeStore((state) => state.connected);
+  const posture = useBoundaryStore((state) => state.posture);
+  const refreshBoundary = useBoundaryStore((state) => state.refresh);
   const pathname = typeof window === 'undefined' ? '/' : window.location.pathname;
   const navigate = useNavigate();
   const meta = readRuntimeMetadata();
@@ -40,6 +46,14 @@ function RootLayout() {
     startToolActivity();
     return () => disconnect();
   }, [connect, disconnect, startPermissions, startToolActivity]);
+
+  // Re-read the boundary posture whenever the runtime connects, so the header
+  // reflects persisted privacy settings instead of a hardcoded assumption.
+  useEffect(() => {
+    if (!connected) return;
+    void refreshBoundary();
+    void refreshSessionGrants();
+  }, [connected, refreshBoundary, refreshSessionGrants]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -70,15 +84,43 @@ function RootLayout() {
           </nav>
 
           <div className="hidden min-w-0 items-center gap-2 text-[10px] text-ink-subtle lg:flex">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-2.5 py-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
-              Local
+            {/* Boundary posture. State is signalled by icon + text as well as
+                colour so it survives a monochrome or colour-blind read. */}
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-2.5 py-1"
+              data-testid="boundary-posture"
+              title={boundaryPostureHint(posture)}
+            >
+              {posture === 'offline' ? (
+                <WifiOff className="h-3 w-3 text-emerald-600 dark:text-emerald-400" aria-hidden />
+              ) : posture === 'web-allowed' ? (
+                <Globe className="h-3 w-3 text-ink-subtle" aria-hidden />
+              ) : (
+                <span className="h-1.5 w-1.5 rounded-full bg-ink-subtle" aria-hidden />
+              )}
+              {posture === 'offline'
+                ? 'Local · Offline'
+                : posture === 'web-allowed'
+                  ? 'Local · Web allowed'
+                  : 'Local'}
             </span>
             {pendingPermissions > 0 ? (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-700 dark:text-amber-300">
                 <ShieldCheck className="h-3 w-3" />
                 {pendingPermissions} permission {pendingPermissions === 1 ? 'waiting' : 'requests waiting'}
               </span>
+            ) : sessionGrants.length > 0 ? (
+              /* Standing grants are posture, not an alert — quiet styling, and
+                 only shown when nothing is actively waiting on the user. */
+              <Link
+                to="/settings"
+                search={{ tab: 'permissions' }}
+                className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-ink-muted transition-colors hover:text-ink"
+                title={`Active session grants:\n${sessionGrants.join('\n')}`}
+              >
+                <ShieldCheck className="h-3 w-3" />
+                {sessionGrants.length} session {sessionGrants.length === 1 ? 'grant' : 'grants'}
+              </Link>
             ) : null}
           </div>
 
@@ -108,6 +150,12 @@ function RootLayout() {
       <CommandPalette />
     </div>
   );
+}
+
+function boundaryPostureHint(posture: 'unknown' | 'offline' | 'web-allowed'): string {
+  if (posture === 'offline') return 'Offline mode: web-backed tools are blocked. Nothing leaves this machine.';
+  if (posture === 'web-allowed') return 'Web-backed tools may run, but only with an explicit permission grant.';
+  return 'Boundary posture not read yet.';
 }
 
 function MobileLink({

@@ -49,6 +49,17 @@ function token(): string {
   return readRuntimeMetadata().token;
 }
 
+/**
+ * Session grants currently in force, read from the runtime gate rather than
+ * inferred from what this tab happened to approve — a refresh must not make
+ * active grants disappear from the posture indicator.
+ */
+export async function listSessionGrants(): Promise<string[]> {
+  const res = await runtimeFetch(readRuntimeMetadata().token, '/api/permissions/session');
+  const body = await parseRuntimeJson<{ grants?: string[] }>(res);
+  return body.grants ?? [];
+}
+
 export async function listPendingPermissions(): Promise<PendingPermission[]> {
   const res = await runtimeFetch(token(), '/api/permissions/pending');
   const body = await parseRuntimeJson<{ requests?: PendingPermission[] }>(res);

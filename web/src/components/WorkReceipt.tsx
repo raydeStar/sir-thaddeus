@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import {
   AlertCircle,
   BookOpen,
@@ -17,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { ChatMessageSource } from '@thaddeus/shared-types';
 import { SourceCards } from './SourceCards';
+import { ProvenanceChip } from './ProvenanceChip';
 import { useToolActivityStore } from '../stores/toolActivityStore';
 import { useMemoryRecallStore } from '../stores/memoryRecallStore';
 import { usePermissionsStore } from '../stores/permissionsStore';
@@ -74,15 +76,21 @@ export function WorkReceipt({
   const durationMs = activities.reduce((total, activity) => total + (activity.durationMs ?? 0), 0);
   const hasEvidence = activities.length > 0 || Boolean(memory) || Boolean(sources?.length) || permissions.length > 0;
   const outcome = summarizeOutcome(text);
+  // Evidence *tier*, not a measured confidence. The numeric prior below is a
+  // fixed per-tier weight that exists only so the local calibration metric has
+  // a stable expectation to compare user-confirmed outcomes against. It is
+  // deliberately never rendered as a percentage: showing "95%" would present a
+  // lookup-table constant as if it were a measurement, which is exactly the
+  // overtrust failure the trust surface is supposed to prevent.
   const evidenceConfidence = useMemo(() => {
     if (activities.some((activity) => activity.effectOutcome?.independentlyVerified)) {
-      return { value: 0.95, label: 'Verified evidence' };
+      return { value: 0.95, label: 'Independently verified', detail: 'Runtime re-read the resulting state.' };
     }
-    if (sources?.length) return { value: 0.8, label: 'Source-backed evidence' };
+    if (sources?.length) return { value: 0.8, label: 'Source-backed', detail: 'Cited sources are attached below.' };
     if (activities.some((activity) => activity.effectOutcome)) {
-      return { value: 0.6, label: 'Tool-result evidence' };
+      return { value: 0.6, label: 'Tool-result only', detail: 'Reported by the tool, not re-verified.' };
     }
-    return { value: 0.5, label: 'Unverified response' };
+    return { value: 0.5, label: 'Unverified', detail: 'No tool evidence backs this response.' };
   }, [activities, sources]);
 
   async function submitOutcomeFeedback(success: boolean) {
@@ -211,28 +219,48 @@ export function WorkReceipt({
 
       <div className="flex flex-wrap gap-1.5 border-t border-line px-3.5 py-2.5" aria-label="Provenance">
         {activities.slice(0, 4).map((activity) => (
-          <span key={activity.activityId} className="receipt-chip">
-            <Wrench className="h-3 w-3" aria-hidden />
-            {humanizeTool(activity.tool)}
-          </span>
+          <ProvenanceChip
+            key={activity.activityId}
+            label={humanizeTool(activity.tool)}
+            icon={<Wrench className="h-3 w-3" aria-hidden />}
+            title={activity.tool}
+            snippet={activity.resultSnippet ?? activity.error ?? null}
+            scope={activity.effect ? `${activity.effect.capability} · ${activity.effect.boundary}` : null}
+            timestamp={activity.durationMs != null ? formatDuration(activity.durationMs) : null}
+            outbound={activity.group === 'Web'}
+            onOpen={() => setExpanded(true)}
+          />
         ))}
-        {memory ? (
-          <a href="/memory" className="receipt-chip hover:border-line-strong hover:text-ink">
-            <BookOpen className="h-3 w-3" aria-hidden />
-            Memory - {memory.factsCount + memory.eventsCount + memory.chunksCount + memory.nuggetsCount}
-          </a>
-        ) : null}
-        {sources?.slice(0, 3).map((source, index) => (
+        {/* Never truncate provenance silently — a receipt that hides tools it
+            actually used reads as narrower than the work really was. */}
+        {activities.length > 4 ? (
           <button
             type="button"
-            key={`${source.url}-${index}`}
-            onClick={() => window.open(source.url, '_blank', 'noopener,noreferrer')}
-            className="receipt-chip receipt-chip--source"
-            aria-label={`Source: ${source.title || source.domain || source.url}`}
+            onClick={() => setExpanded(true)}
+            className="receipt-chip hover:border-line-strong hover:text-ink"
+            aria-label={`Show ${activities.length - 4} more tools used`}
           >
-            <Globe className="h-3 w-3" aria-hidden />
-            {source.domain || safeDomain(source.url)}
+            +{activities.length - 4} more {activities.length - 4 === 1 ? 'tool' : 'tools'}
           </button>
+        ) : null}
+        {memory ? (
+          <Link to="/memory" className="receipt-chip hover:border-line-strong hover:text-ink">
+            <BookOpen className="h-3 w-3" aria-hidden />
+            Memory - {memory.factsCount + memory.eventsCount + memory.chunksCount + memory.nuggetsCount}
+          </Link>
+        ) : null}
+        {sources?.slice(0, 3).map((source, index) => (
+          <ProvenanceChip
+            key={`${source.url}-${index}`}
+            label={source.domain || safeDomain(source.url)}
+            icon={<Globe className="h-3 w-3" aria-hidden />}
+            className="receipt-chip--source"
+            title={source.title || source.domain || safeDomain(source.url)}
+            snippet={source.excerpt ?? null}
+            scope={source.url}
+            outbound
+            onOpen={() => window.open(source.url, '_blank', 'noopener,noreferrer')}
+          />
         ))}
         {sources && sources.length > 3 ? <span className="receipt-chip">+{sources.length - 3} sources</span> : null}
         <span className={`receipt-chip ${webBoundary ? 'receipt-chip--outbound' : 'receipt-chip--local'}`}>
@@ -300,8 +328,8 @@ export function WorkReceipt({
           {sources && sources.length > 0 ? <SourceCards sources={sources} /> : null}
 
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-            <span className="receipt-chip" title="Displayed evidence confidence used for local trust calibration">
-              {evidenceConfidence.label} · {Math.round(evidenceConfidence.value * 100)}%
+            <span className="receipt-chip" title={evidenceConfidence.detail}>
+              Evidence: {evidenceConfidence.label}
             </span>
             <span className="text-[10px] text-ink-subtle">Outcome accurate?</span>
             <button
@@ -334,13 +362,14 @@ export function WorkReceipt({
                 Open {wikiDestination.title || 'Wiki page'} in workbench
               </button>
             ) : null}
-            <a
-              href={`/settings?tab=logs&messageId=${encodeURIComponent(messageId)}`}
+            <Link
+              to="/settings"
+              search={{ tab: 'logs', messageId }}
               className="btn-ghost min-h-9 text-xs"
             >
               <History className="h-3.5 w-3.5" />
               View audit trail
-            </a>
+            </Link>
             {reversibleWikiEffect ? (
               <button
                 type="button"
