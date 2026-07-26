@@ -74,6 +74,35 @@ public sealed class ChatTurnPublisher
                 resultSnippet, error, DateTimeOffset.UtcNow),
             correlationId: messageId,
             ct);
+
+    public Task PublishEffectProposedAsync(
+        string activityId,
+        string threadId,
+        string messageId,
+        string tool,
+        ChatEffectDescriptor effect,
+        CancellationToken ct = default) =>
+        _bus.PublishAsync(
+            ChatTurnEvents.EffectProposed,
+            new ChatEffectProposed(
+                activityId, threadId, messageId, tool, effect, DateTimeOffset.UtcNow),
+            correlationId: messageId,
+            ct);
+
+    public Task PublishEffectCompletedAsync(
+        string activityId,
+        string threadId,
+        string messageId,
+        string tool,
+        ChatEffectDescriptor effect,
+        ChatEffectOutcome outcome,
+        CancellationToken ct = default) =>
+        _bus.PublishAsync(
+            ChatTurnEvents.EffectCompleted,
+            new ChatEffectCompleted(
+                activityId, threadId, messageId, tool, effect, outcome, DateTimeOffset.UtcNow),
+            correlationId: messageId,
+            ct);
     public Task PublishUserMessageAppendedAsync(
         string threadId,
         string messageId,
@@ -121,6 +150,15 @@ public sealed class ChatTurnPublisher
                 threadId, messageId, factsCount, eventsCount,
                 chunksCount, nuggetsCount, preview, durationMs, DateTimeOffset.UtcNow),
             correlationId: messageId,
+            ct);
+
+    public Task PublishRunStateAsync(
+        ChatRunStateChanged state,
+        CancellationToken ct = default) =>
+        _bus.PublishAsync(
+            ChatTurnEvents.RunStateChanged,
+            state,
+            correlationId: state.RunId,
             ct);
 
 }

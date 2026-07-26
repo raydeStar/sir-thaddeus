@@ -5,15 +5,18 @@ import type {
   ChatTurnComplete,
   ChatTurnDelta,
   ChatTurnStart,
+  ChatRunStateChanged,
   ChatUserMessageAppended,
   RuntimeEvent,
   ThreadSummary,
+  TurnRunSnapshot,
 } from '@thaddeus/shared-types';
 import { ChatTurnEventTypes } from '@thaddeus/shared-types';
 import * as api from '../lib/chatApi';
 import type { WikiChatContextInput } from '../lib/chatApi';
 import { buildRuntimeWebSocketUrl, readRuntimeMetadata } from '../lib/runtime';
 import { useMemoryRecallStore } from './memoryRecallStore';
+import { useToolActivityStore } from './toolActivityStore';
 
 /**
  * Single-threaded (one active conversation at a time) chat store. Reads thread
@@ -34,6 +37,7 @@ interface ChatStoreState {
   activeThreadId: string | null;
   activeThread: ChatThread | null;
   activeTurn: ActiveTurn | null;
+  activeRun: TurnRunSnapshot | null;
   loading: boolean;
   error: string | null;
   sending: boolean;
@@ -41,8 +45,19 @@ interface ChatStoreState {
   loadThreads: () => Promise<void>;
   openThread: (id: string) => Promise<void>;
   newThread: (title?: string) => Promise<ChatThread>;
-  send: (text: string, wikiContext?: WikiChatContextInput) => Promise<void>;
-  retryLatestResponse: () => Promise<void>;
+  send: (
+    text: string,
+    wikiContext?: WikiChatContextInput,
+    options?: { ephemeralMemory?: boolean },
+  ) => Promise<void>;
+  retryLatestResponse: (options?: { ephemeralMemory?: boolean }) => Promise<void>;
+  pauseActiveRun: () => Promise<void>;
+  resumeActiveRun: () => Promise<void>;
+  cancelActiveRun: () => Promise<void>;
+  takeOverActiveRun: () => Promise<void>;
+  redirectActiveRun: (instruction: string) => Promise<void>;
+  approveActivePlan: () => Promise<void>;
+  editActivePlan: (steps: import('@thaddeus/shared-types').WorkPlanStep[]) => Promise<void>;
   destroy: () => void;
   ingestEvent: (evt: RuntimeEvent<unknown>) => void;
 }
@@ -77,6 +92,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   activeThreadId: null,
   activeThread: null,
   activeTurn: null,
+  activeRun: null,
   loading: false,
   error: null,
   sending: false,
@@ -92,14 +108,16 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   },
 
   openThread: async (id: string) => {
-    set({ loading: true, activeThreadId: id, activeThread: null, activeTurn: null });
+    set({ loading: true, activeThreadId: id, activeThread: null, activeTurn: null, activeRun: null });
     try {
-      const thread = await api.getThread(id);
-      set({ activeThread: thread, loading: false });
+      const [thread, runs] = await Promise.all([api.getThread(id), api.listRuns(id)]);
+      const activeRun = runs.find((run) => !isTerminalRun(run.state)) ?? null;
+      set({ activeThread: thread, activeRun, loading: false });
       const assistantMessageIds = thread.messages
         .filter((m) => m.role === 'assistant')
         .map((m) => m.id);
       void useMemoryRecallStore.getState().hydrateFromTraces(assistantMessageIds);
+      void useToolActivityStore.getState().hydrateFromTraces(assistantMessageIds);
       ensureSocket((evt) => get().ingestEvent(evt));
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
@@ -132,7 +150,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }
   },
 
-  send: async (text: string, wikiContext?: WikiChatContextInput) => {
+  send: async (text, wikiContext, options) => {
     const id = get().activeThreadId;
     const trimmed = text.trim();
     if (!id || !trimmed) return;
@@ -161,8 +179,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     });
     ensureSocket((evt) => get().ingestEvent(evt));
     try {
-      const updated = await api.appendMessage(id, trimmed, wikiContext);
-      set({ activeThread: updated, sending: false });
+      const result = await api.appendMessage(id, trimmed, wikiContext, options);
+      set({ activeThread: result.thread, activeRun: result.run, sending: false });
     } catch (e) {
       set((s) => ({
         error: (e as Error).message,
@@ -172,17 +190,66 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }
   },
 
-  retryLatestResponse: async () => {
+  retryLatestResponse: async (options) => {
     const id = get().activeThreadId;
     if (!id || get().sending || get().activeTurn) return;
     set({ sending: true, error: null });
     ensureSocket((evt) => get().ingestEvent(evt));
     try {
-      const updated = await api.retryLatestResponse(id);
-      set({ activeThread: updated, sending: false });
+      const result = await api.retryLatestResponse(id, options);
+      set({ activeThread: result.thread, activeRun: result.run, sending: false });
     } catch (e) {
       set({ error: (e as Error).message, sending: false });
     }
+  },
+
+  pauseActiveRun: async () => {
+    const run = get().activeRun;
+    if (!run || isTerminalRun(run.state)) return;
+    const updated = await api.pauseRun(run.runId);
+    set({ activeRun: updated });
+  },
+
+  resumeActiveRun: async () => {
+    const run = get().activeRun;
+    if (!run || isTerminalRun(run.state)) return;
+    const updated = await api.resumeRun(run.runId);
+    set({ activeRun: updated });
+  },
+
+  cancelActiveRun: async () => {
+    const run = get().activeRun;
+    if (!run || isTerminalRun(run.state)) return;
+    const updated = await api.cancelRun(run.runId);
+    set({ activeRun: updated });
+  },
+
+  takeOverActiveRun: async () => {
+    const run = get().activeRun;
+    if (!run || isTerminalRun(run.state)) return;
+    const updated = await api.takeOverRun(run.runId);
+    set({ activeRun: updated });
+  },
+
+  redirectActiveRun: async (instruction) => {
+    const run = get().activeRun;
+    if (!run || isTerminalRun(run.state) || !instruction.trim()) return;
+    const updated = await api.redirectRun(run.runId, instruction.trim());
+    set({ activeRun: updated });
+  },
+
+  approveActivePlan: async () => {
+    const run = get().activeRun;
+    if (!run?.plan || !isAwaitingApproval(run.state)) return;
+    const updated = await api.approvePlan(run.runId, run.plan.version);
+    set({ activeRun: updated });
+  },
+
+  editActivePlan: async (steps) => {
+    const run = get().activeRun;
+    if (!run?.plan || !isAwaitingApproval(run.state)) return;
+    const updated = await api.editPlan(run.runId, run.plan.version, steps);
+    set({ activeRun: updated });
   },
 
   destroy: () => {
@@ -192,6 +259,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       activeThreadId: null,
       activeThread: null,
       activeTurn: null,
+      activeRun: null,
       threads: [],
       loading: false,
       error: null,
@@ -200,6 +268,20 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   },
 
   ingestEvent: (evt) => {
+    if (evt.type === ChatTurnEventTypes.RunStateChanged) {
+      const p = evt.payload as ChatRunStateChanged;
+      if (p.threadId !== get().activeThreadId) return;
+      const normalized = {
+        ...p,
+        state: String(p.state).toLowerCase(),
+      } as TurnRunSnapshot;
+      set((state) => {
+        if (state.activeRun?.runId === normalized.runId &&
+            state.activeRun.version > normalized.version) return {};
+        return { activeRun: normalized };
+      });
+      return;
+    }
     if (evt.type === ChatTurnEventTypes.UserMessageAppended) {
       // A user message was appended server-side (e.g. an automation step).
       // The HTTP-POST path already renders the bubble optimistically, so we
@@ -274,6 +356,14 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }
   },
 }));
+
+function isTerminalRun(state: TurnRunSnapshot['state']): boolean {
+  return state === 'cancelled' || state === 'completed' || state === 'failed';
+}
+
+function isAwaitingApproval(state: TurnRunSnapshot['state']): boolean {
+  return state === 'awaitingapproval' || state === 'awaiting_approval';
+}
 
 function removeOptimisticMessage(thread: ChatThread | null, messageId: string): ChatThread | null {
   if (!thread) return thread;

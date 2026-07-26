@@ -98,13 +98,24 @@ test.describe('wiki canvas smoke', () => {
     await page.keyboard.press('Enter');
     await page.keyboard.type('Example link target');
 
-    const linkTarget = editorContent.getByText('Example link target', { exact: false });
-    await expect(linkTarget).toBeVisible();
-    await linkTarget.click();
-    await page.keyboard.press('Home');
-    await page.keyboard.down('Shift');
-    await page.keyboard.press('End');
-    await page.keyboard.up('Shift');
+    const selectEditorText = async (needle: string) => {
+      await editorContent.evaluate((root, text) => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const start = node.textContent?.indexOf(text) ?? -1;
+          if (start < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, start);
+          range.setEnd(node, start + text.length);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+          return;
+        }
+        throw new Error(`Could not select editor text: ${text}`);
+      }, needle);
+    };
+    await selectEditorText('Example link target');
 
     await page.getByRole('button', { name: 'Link', exact: true }).click();
     const linkDialog = page.getByRole('dialog', { name: 'Insert link' });
@@ -112,11 +123,7 @@ test.describe('wiki canvas smoke', () => {
     await page.keyboard.press('Escape');
     await expect(linkDialog).toBeHidden();
 
-    await linkTarget.click();
-    await page.keyboard.press('Home');
-    await page.keyboard.down('Shift');
-    await page.keyboard.press('End');
-    await page.keyboard.up('Shift');
+    await selectEditorText('Example link target');
     await page.getByRole('button', { name: 'Link', exact: true }).click();
     await expect(linkDialog).toBeVisible({ timeout: 10_000 });
     await expect(linkDialog.getByLabel('Display text')).toHaveValue(/Example link target/);

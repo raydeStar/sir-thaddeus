@@ -16,4 +16,13 @@ public interface IAssistant
     /// message (already appended to the thread).
     /// </summary>
     Task<ChatMessage> RespondAsync(string threadId, string userText, CancellationToken ct);
+
+    Task<ChatMessage> RespondAsync(
+        string threadId,
+        string userText,
+        AssistantTurnOptions options,
+        CancellationToken ct) =>
+        RespondAsync(threadId, userText, ct);
 }
+
+public sealed record AssistantTurnOptions(bool EphemeralMemory = false);

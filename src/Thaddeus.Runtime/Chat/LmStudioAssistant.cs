@@ -110,6 +110,7 @@ public sealed partial class LmStudioAssistant : IAssistant
     /// Null = no memory writes.
     /// </summary>
     public IAutoMemoryExtractor? AutoMemoryExtractor { get; init; }
+    public bool MemoryEnabled { get; init; } = true;
 
     /// <summary>
     /// Optional search-fallback executor for <c>SearchFallbackStep</c>.
@@ -154,6 +155,12 @@ public sealed partial class LmStudioAssistant : IAssistant
     /// Null = dialogue-state step is a no-op.
     /// </summary>
     public IDialogueStateAccessor? DialogueStateAccessor { get; init; }
+
+    /// <summary>
+    /// Optional cooperative run controller supplied by the desktop runtime.
+    /// Headless and test compositions default to a no-op implementation.
+    /// </summary>
+    public ITurnExecutionControl? ExecutionControl { get; init; }
 
     /// <summary>Most recent N messages from the thread to send as history.</summary>
     public int HistoryTurns { get; init; } = 16;
@@ -231,6 +238,13 @@ public sealed partial class LmStudioAssistant : IAssistant
     }
 
     public async Task<RuntimeChatMessage> RespondAsync(string threadId, string userText, CancellationToken ct)
+        => await RespondAsync(threadId, userText, new AssistantTurnOptions(), ct).ConfigureAwait(false);
+
+    public async Task<RuntimeChatMessage> RespondAsync(
+        string threadId,
+        string userText,
+        AssistantTurnOptions options,
+        CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrEmpty(threadId);
         ArgumentException.ThrowIfNullOrEmpty(userText);
@@ -266,6 +280,16 @@ public sealed partial class LmStudioAssistant : IAssistant
         // model will just answer from knowledge.
         var toolDiscoveryStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         var toolDefs = await BuildToolDefinitionsAsync(ct).ConfigureAwait(false);
+        if (options.EphemeralMemory || !MemoryEnabled)
+        {
+            toolDefs = toolDefs
+                .Where(definition =>
+                {
+                    var capability = ToolCapabilityRegistry.ResolveCapability(definition.Function.Name);
+                    return capability is not ToolCapability.MemoryRead and not ToolCapability.MemoryWrite;
+                })
+                .ToList();
+        }
         RoutingLatencyTrace.Mark(
             _logger,
             latencyTrace,
@@ -309,6 +333,11 @@ public sealed partial class LmStudioAssistant : IAssistant
             IsAutomationRun = false,
             LlmMessages = llmMessages,
             ToolDefs = toolDefs,
+            MemoryAccess = options.EphemeralMemory
+                ? TurnMemoryAccess.Ephemeral
+                : MemoryEnabled
+                    ? TurnMemoryAccess.Enabled
+                    : TurnMemoryAccess.Disabled,
         };
 
         AgentResponse response;

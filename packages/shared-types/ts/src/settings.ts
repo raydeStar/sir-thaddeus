@@ -102,6 +102,10 @@ export interface FilesSettings {
   maxDefaultCharsPerRead: number;
 }
 
+export interface RuntimeMemorySettings {
+  enabled: boolean;
+}
+
 export interface SettingsDocument {
   llm: LlmSettings;
   voice: VoiceSettings;
@@ -114,4 +118,5 @@ export interface SettingsDocument {
   uiPrefs?: UiPreferencesSettings | null;
   permissions?: PermissionsSettings | null;
   files?: FilesSettings | null;
+  memory?: RuntimeMemorySettings | null;
 }

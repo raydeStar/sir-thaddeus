@@ -1,19 +1,21 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, Copy, Loader2, Mic, Plus, RotateCcw, Square, Volume2, WifiOff } from 'lucide-react';
+import { ArrowLeft, EyeOff, Loader2, Mic, Plus, Send, Square, Volume2, WifiOff, X } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
-import { ToolActivityPills } from '../components/ToolActivityPills';
-import { FootmanDecisionChip } from '../components/FootmanDecisionChip';
-import { MemoryRecallChip } from '../components/MemoryRecallChip';
 import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
+import { PermissionPauseCard } from '../components/PermissionModal';
+import { SteerableProgressCard } from '../components/SteerableProgressCard';
+import { WorkReceipt } from '../components/WorkReceipt';
+import { PlanApprovalCard } from '../components/PlanApprovalCard';
 import { subscribeVoicePttEvents, synthesizeSpeech, transcribeSpeech, warmVoiceHost } from '../lib/voiceApi';
 import { stopAllProcesses } from '../lib/runtimeActions';
 import { getSettings, putSettings } from '../lib/settingsApi';
 import { acquireMicStream, isStreamLive, prepareMicCapture, stopMicStream } from '../lib/micCapture';
 import { trimSilenceToWav } from '../lib/audioTrim';
 import type { ChatMessageSource } from '@thaddeus/shared-types';
+import { usePermissionsStore } from '../stores/permissionsStore';
 
 const MIN_VOICE_HOLD_MS = 350;
 
@@ -29,20 +31,32 @@ function ChatThreadRoute() {
   const { focusMessageId } = Route.useSearch();
   const thread = useChatStore((s) => s.activeThread);
   const activeTurn = useChatStore((s) => s.activeTurn);
+  const activeRun = useChatStore((s) => s.activeRun);
   const sending = useChatStore((s) => s.sending);
   const error = useChatStore((s) => s.error);
   const openThread = useChatStore((s) => s.openThread);
   const send = useChatStore((s) => s.send);
   const retryLatestResponse = useChatStore((s) => s.retryLatestResponse);
+  const pauseActiveRun = useChatStore((s) => s.pauseActiveRun);
+  const resumeActiveRun = useChatStore((s) => s.resumeActiveRun);
+  const takeOverActiveRun = useChatStore((s) => s.takeOverActiveRun);
+  const redirectActiveRun = useChatStore((s) => s.redirectActiveRun);
+  const cancelActiveRun = useChatStore((s) => s.cancelActiveRun);
+  const approveActivePlan = useChatStore((s) => s.approveActivePlan);
+  const editActivePlan = useChatStore((s) => s.editActivePlan);
+  const permissionQueue = usePermissionsStore((s) => s.queue);
 
   const [draft, setDraft] = useState('');
+  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [speechState, setSpeechState] = useState<{ messageId: string; status: 'loading' | 'playing' } | null>(null);
   const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing' | 'sending'>('idle');
   const [offlineMode, setOfflineMode] = useState(false);
   const [offlineModeLoading, setOfflineModeLoading] = useState(true);
   const [offlineModeSaving, setOfflineModeSaving] = useState(false);
+  const [ephemeralMemory, setEphemeralMemory] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [steeringMode, setSteeringMode] = useState<'redirect' | 'takeover' | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
@@ -53,6 +67,7 @@ function ChatThreadRoute() {
   const micStartedAtRef = useRef(0);
   const abortPendingCaptureRef = useRef(false);
   const pendingVoiceResponseRef = useRef(false);
+  const turnStartedAtRef = useRef<number | null>(null);
   // Persistent stream kept warm across PTT presses so the second and
   // subsequent presses skip the getUserMedia spinner.
   const warmStreamRef = useRef<MediaStream | null>(null);
@@ -63,9 +78,23 @@ function ChatThreadRoute() {
     return voiceWarmupRef.current;
   }, []);
 
+  const blockedByPermission = permissionQueue.some((request) => request.threadId === threadId);
+  const blockedByPlan = Boolean(
+    activeRun?.plan &&
+    (activeRun.state === 'awaitingapproval' || activeRun.state === 'awaiting_approval'),
+  );
+
   useEffect(() => {
     void openThread(threadId);
   }, [openThread, threadId]);
+
+  useEffect(() => {
+    if (activeTurn && turnStartedAtRef.current === null) {
+      turnStartedAtRef.current = Date.now();
+    } else if (!activeTurn) {
+      turnStartedAtRef.current = null;
+    }
+  }, [activeTurn]);
 
   useEffect(() => {
     let disposed = false;
@@ -133,9 +162,19 @@ function ChatThreadRoute() {
   }, []);
 
   const onSubmit = async (text: string, wikiContext?: WikiContextSelection) => {
-    if (sending) return;
+    if (sending || blockedByPermission || blockedByPlan) return;
+    if (steeringMode && activeRun) {
+      await redirectActiveRun(text);
+      setSteeringMode(null);
+      setDraft('');
+      return;
+    }
+    if (voiceTranscript !== null) {
+      pendingVoiceResponseRef.current = true;
+    }
+    setVoiceTranscript(null);
     setDraft('');
-    await send(text, wikiContext);
+    await send(text, wikiContext, { ephemeralMemory });
   };
 
   const toggleOfflineMode = useCallback(async () => {
@@ -237,12 +276,58 @@ function ChatThreadRoute() {
 
   const triggerShutup = useCallback(async () => {
     stopSpeech();
+    setSteeringMode(null);
     try {
       await stopAllProcesses();
     } catch {
       // Local playback is the important part for voice UX; runtime stop-all is best effort.
     }
   }, [stopSpeech]);
+
+  const focusComposer = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>('[data-testid="chat-input"]')?.focus();
+    });
+  }, []);
+
+  const redirectActiveWork = useCallback(async () => {
+    await pauseActiveRun();
+    setSteeringMode('redirect');
+    setDraft((current) => current || '');
+    focusComposer();
+  }, [focusComposer, pauseActiveRun]);
+
+  const takeOverActiveWork = useCallback(async () => {
+    await takeOverActiveRun();
+    setSteeringMode('takeover');
+    setDraft('');
+    focusComposer();
+  }, [focusComposer, takeOverActiveRun]);
+
+  const pauseOrResumeActiveWork = useCallback(async () => {
+    if (activeRun?.state === 'paused' || activeRun?.state === 'pausing') {
+      await resumeActiveRun();
+    } else {
+      await pauseActiveRun();
+    }
+  }, [activeRun?.state, pauseActiveRun, resumeActiveRun]);
+
+  useEffect(() => {
+    if (!activeTurn) return;
+    const handler = (event: KeyboardEvent) => {
+      if ((event.key !== '.' && event.key !== ' ') || event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.matches('input, textarea, button, [contenteditable="true"]')) return;
+      event.preventDefault();
+      if (event.key === '.') {
+        void triggerShutup();
+      } else {
+        void pauseOrResumeActiveWork();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [activeTurn, pauseOrResumeActiveWork, triggerShutup]);
 
   const beginVoiceCapture = useCallback(async () => {
     if (recorderRef.current || voiceState !== 'idle') {
@@ -379,16 +464,17 @@ function ChatThreadRoute() {
         return;
       }
 
-      setVoiceState('sending');
-      pendingVoiceResponseRef.current = true;
-      await send(text);
+      // Put the transcript in the same composer the keyboard path uses. The
+      // user sees exactly what ASR heard and can correct it before any agent
+      // action begins.
+      setDraft(text);
+      setVoiceTranscript(text);
     } catch (e) {
-      pendingVoiceResponseRef.current = false;
       setSpeechError((e as Error).message || 'Could not transcribe the microphone audio.');
     } finally {
       setVoiceState('idle');
     }
-  }, [send, threadId, triggerShutup]);
+  }, [threadId, triggerShutup]);
 
   const pttHandlersRef = useRef({
     begin: () => undefined as void,
@@ -494,6 +580,10 @@ function ChatThreadRoute() {
       <div
         ref={scrollRef}
         data-testid="chat-message-list"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-busy={Boolean(activeTurn)}
         className="flex-1 overflow-y-auto px-4 md:px-10"
       >
         <div className="mx-auto w-full max-w-[720px] py-6 pb-40">
@@ -515,8 +605,9 @@ function ChatThreadRoute() {
                     text={m.text}
                     sources={m.sources ?? null}
                     messageId={m.id}
+                    threadId={threadId}
                     isLatestAssistantResponse={m.id === latestAssistantResponseId}
-                    onRetryLatest={() => void retryLatestResponse()}
+                    onRetryLatest={() => void retryLatestResponse({ ephemeralMemory })}
                     retryDisabled={sending || Boolean(activeTurn)}
                     speechStatus={speechState?.messageId === m.id ? speechState.status : null}
                     onSpeak={() => void onSpeakMessage(m.id, m.text)}
@@ -530,10 +621,28 @@ function ChatThreadRoute() {
                   role="assistant"
                   text={activeTurn.text || ''}
                   messageId={activeTurn.messageId}
+                  threadId={threadId}
                   streaming
+                  startedAt={turnStartedAtRef.current ?? undefined}
+                  runState={activeRun?.state}
+                  checkpoint={activeRun?.checkpoint}
+                  plan={activeRun?.plan}
+                  onPauseResume={() => { void pauseOrResumeActiveWork(); }}
+                  onRedirect={redirectActiveWork}
+                  onTakeOver={takeOverActiveWork}
+                  onStop={() => { void triggerShutup(); }}
                   testId="chat-message-streaming"
                 />
               ) : null}
+              {blockedByPlan && activeRun?.plan ? (
+                <PlanApprovalCard
+                  plan={activeRun.plan}
+                  onSave={editActivePlan}
+                  onApprove={approveActivePlan}
+                  onCancel={cancelActiveRun}
+                />
+              ) : null}
+              <PermissionPauseCard threadId={threadId} />
             </div>
           )}
         </div>
@@ -565,16 +674,134 @@ function ChatThreadRoute() {
               {speechError}
             </p>
           ) : null}
+          {voiceTranscript ? (
+            <div
+              className="mb-2 rounded-2xl border border-accent/30 bg-accent-soft/70 px-3.5 py-3"
+              data-testid="chat-voice-transcript-review"
+              role="status"
+            >
+              <div className="flex items-start gap-3">
+                <span className="voice-waveform mt-1" aria-hidden>
+                  <i /><i /><i /><i /><i />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-ink">Check what Sir Thaddeus heard</p>
+                  <p className="mt-1 text-xs leading-5 text-ink-muted">
+                    Edit the transcript in the composer, then send when it is right.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVoiceTranscript(null);
+                    setDraft('');
+                  }}
+                  className="wiki-icon-button h-7 w-7"
+                  aria-label="Cancel voice transcript"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => void onSubmit(draft)}
+                disabled={!draft.trim() || blockedByPermission}
+                className="btn-primary mt-2 min-h-9 px-3 text-xs"
+              >
+                <Send className="h-3.5 w-3.5" />
+                Send transcript
+              </button>
+            </div>
+          ) : null}
+          {ephemeralMemory ? (
+            <div
+              className="mb-2 flex items-center gap-2 rounded-xl border border-violet-400/35 bg-violet-500/10 px-3 py-2 text-xs text-violet-800 dark:text-violet-200"
+              role="status"
+              data-testid="chat-incognito-status"
+            >
+              <EyeOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                Incognito is on. Durable memory will not be read or written for this turn.
+              </span>
+            </div>
+          ) : null}
+          {blockedByPermission ? (
+            <p className="mb-2 text-center text-[11px] text-amber-700 dark:text-amber-300">
+              Approve or deny the inline permission request to continue.
+            </p>
+          ) : null}
+          {blockedByPlan ? (
+            <p className="mb-2 text-center text-[11px] text-accent" role="status">
+              Review, edit, or cancel the inline plan before work begins.
+            </p>
+          ) : null}
+          {steeringMode ? (
+            <div
+              className="mb-2 flex items-center justify-between rounded-xl border border-accent/30 bg-accent-soft/50 px-3 py-2 text-xs text-ink-muted"
+              role="status"
+              data-testid="run-steering-mode"
+            >
+              <span>
+                {steeringMode === 'takeover'
+                  ? 'Take over: describe what you did or how Sir Thaddeus should continue.'
+                  : 'Redirect: tell Sir Thaddeus how the remaining work should change.'}
+              </span>
+              <button
+                type="button"
+                className="wiki-icon-button h-7 w-7"
+                aria-label="Cancel steering"
+                onClick={() => {
+                  setSteeringMode(null);
+                  setDraft('');
+                  void resumeActiveRun();
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : null}
 
           <ChatComposer
             value={draft}
             onChange={setDraft}
             onSubmit={onSubmit}
-            sending={sending}
+            sending={sending || blockedByPermission || blockedByPlan}
+            placeholder={
+              blockedByPermission
+                ? 'Permission decision required above'
+                : blockedByPlan
+                  ? 'Plan approval required above'
+                : steeringMode === 'takeover'
+                  ? 'Describe your result or tell Sir Thaddeus what to do next'
+                  : steeringMode === 'redirect'
+                    ? 'How should the remaining work change?'
+                : voiceTranscript
+                  ? 'Correct the transcript before sending'
+                  : 'Message Sir Thaddeus...'
+            }
             inputTestId="chat-input"
             sendTestId="chat-send"
             rightActions={
               <>
+                <button
+                  type="button"
+                  className={`chat-composer-icon-button ${
+                    ephemeralMemory
+                      ? 'border-violet-400 bg-violet-500/10 text-violet-800 dark:text-violet-200'
+                      : ''
+                  }`}
+                  aria-label={ephemeralMemory ? 'Turn incognito off' : 'Turn incognito on'}
+                  aria-pressed={ephemeralMemory}
+                  title={
+                    ephemeralMemory
+                      ? 'Incognito on: durable memory is neither read nor written'
+                      : 'Incognito off: normal memory policy applies'
+                  }
+                  data-testid="chat-incognito-toggle"
+                  onClick={() => setEphemeralMemory((value) => !value)}
+                >
+                  <EyeOff className="h-4 w-4" strokeWidth={1.9} />
+                </button>
                 <button
                   type="button"
                   className={`chat-composer-icon-button ${
@@ -621,7 +848,7 @@ function ChatThreadRoute() {
                   {voiceState === 'starting' || voiceState === 'transcribing' || voiceState === 'sending' ? (
                     <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} />
                   ) : voiceState === 'recording' ? (
-                    <Square className="h-4 w-4" strokeWidth={1.9} />
+                    <span className="voice-waveform" aria-hidden><i /><i /><i /><i /><i /></span>
                   ) : (
                     <Mic className="h-4 w-4" strokeWidth={1.9} />
                   )}
@@ -648,12 +875,21 @@ interface MessageRowProps {
   text: string;
   sources?: ChatMessageSource[] | null;
   messageId?: string;
+  threadId?: string;
   streaming?: boolean;
+  startedAt?: number;
   isLatestAssistantResponse?: boolean;
   onRetryLatest?: () => void;
   retryDisabled?: boolean;
   speechStatus?: 'loading' | 'playing' | null;
   onSpeak?: () => void;
+  runState?: import('@thaddeus/shared-types').TurnRunState;
+  checkpoint?: string | null;
+  plan?: import('@thaddeus/shared-types').WorkPlan | null;
+  onPauseResume?: () => void;
+  onRedirect?: () => void;
+  onTakeOver?: () => void;
+  onStop?: () => void;
   highlighted?: boolean;
   testId: string;
 }
@@ -663,12 +899,21 @@ function MessageRow({
   text,
   sources,
   messageId,
+  threadId,
   streaming,
+  startedAt,
   isLatestAssistantResponse,
   onRetryLatest,
   retryDisabled,
   speechStatus,
   onSpeak,
+  runState,
+  checkpoint,
+  plan,
+  onPauseResume,
+  onRedirect,
+  onTakeOver,
+  onStop,
   highlighted,
   testId,
 }: MessageRowProps) {
@@ -715,7 +960,6 @@ function MessageRow({
   // Tool activity pills (if any fired during this turn) float above the
   // text so the reader sees what the model did before reading what it said.
   const showActions = !streaming && text.trim().length > 0;
-  const showWorking = Boolean(streaming && text.trim().length === 0);
   return (
     <div
       data-testid={testId}
@@ -723,22 +967,29 @@ function MessageRow({
       data-streaming={streaming ? 'true' : undefined}
       className={highlightClass}
     >
-      {messageId ? <FootmanDecisionChip messageId={messageId} /> : null}
-      {messageId ? <MemoryRecallChip messageId={messageId} /> : null}
-      {messageId ? <ToolActivityPills messageId={messageId} /> : null}
-      {showWorking ? (
-        <div
-          className="flex h-7 items-center gap-1.5 text-accent"
-          aria-label="Assistant response in progress"
-          data-testid="chat-streaming-placeholder"
-        >
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:140ms]" />
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:280ms]" />
+      {streaming && messageId && onPauseResume && onRedirect && onTakeOver && onStop ? (
+        <SteerableProgressCard
+          messageId={messageId}
+          startedAt={startedAt}
+          hasVisibleText={Boolean(text.trim())}
+          runState={runState}
+          checkpoint={checkpoint}
+          plan={plan}
+          onPauseResume={onPauseResume}
+          onRedirect={onRedirect}
+          onTakeOver={onTakeOver}
+          onStop={onStop}
+        />
+      ) : null}
+      {text.trim() ? (
+        <div aria-live={streaming ? 'off' : undefined}>
+          <Markdown>{text}</Markdown>
         </div>
-      ) : (
-        <Markdown>{text}</Markdown>
-      )}
+      ) : streaming ? (
+        <span className="sr-only" data-testid="chat-streaming-placeholder">
+          Assistant response in progress
+        </span>
+      ) : null}
       {sources && sources.length > 0 ? <SourceCards sources={sources} /> : null}
       {showActions ? (
         <div
@@ -762,34 +1013,21 @@ function MessageRow({
               <Volume2 className="h-3.5 w-3.5" strokeWidth={1.9} />
             )}
           </button>
-          {isLatestAssistantResponse ? (
-            <>
-              <button
-                type="button"
-                onClick={onCopy}
-                data-testid="chat-copy-latest-response"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-transparent transition hover:border-line hover:bg-canvas-sunken hover:text-ink"
-                aria-label={copied ? 'Copied latest response' : 'Copy latest response'}
-                title={copied ? 'Copied' : 'Copy'}
-              >
-                {copied ? <Check className="h-3.5 w-3.5" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.9} />}
-              </button>
-              <button
-                type="button"
-                onClick={onRetryLatest}
-                disabled={retryDisabled}
-                data-testid="chat-retry-latest-response"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-transparent transition hover:border-line hover:bg-canvas-sunken hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
-                aria-label="Retry latest response"
-                title="Retry"
-              >
-                <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.9} />
-              </button>
-            </>
-          ) : null}
         </div>
       ) : null}
-      {streaming && !showWorking ? (
+      {!streaming && messageId && text.trim() ? (
+        <WorkReceipt
+          messageId={messageId}
+          threadId={threadId}
+          text={text}
+          sources={sources}
+          isLatest={isLatestAssistantResponse}
+          onCopy={() => { void onCopy(); }}
+          onRetry={onRetryLatest}
+          retryDisabled={retryDisabled}
+        />
+      ) : null}
+      {streaming && text.trim() ? (
         <span
           className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-1 animate-pulse bg-accent align-middle"
           aria-hidden

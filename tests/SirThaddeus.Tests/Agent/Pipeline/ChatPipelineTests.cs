@@ -118,6 +118,28 @@ public class ChatPipelineTests
     }
 
     [Fact]
+    public async Task User_steering_is_injected_before_the_remaining_step_runs()
+    {
+        TurnContext? observed = null;
+        var terminal = new RecordingStep("remaining", new(), context =>
+        {
+            observed = context;
+            return new StepResult.Terminate(new AgentResponse { Text = "redirected" });
+        });
+        var control = new SteeringControl("Use the attached Wiki page instead.");
+        var pipeline = new ChatPipeline([terminal], executionControl: control);
+
+        await pipeline.RunAsync(NewContext("research this"), CancellationToken.None);
+
+        Assert.NotNull(observed);
+        var steering = Assert.Single(observed.LlmMessages);
+        Assert.Equal("system", steering.Role);
+        Assert.Contains("[USER STEERING]", steering.Content);
+        Assert.Contains("attached Wiki page", steering.Content);
+        Assert.Equal(["pipeline:remaining"], control.Checkpoints);
+    }
+
+    [Fact]
     public async Task Opt_in_latency_trace_records_correlated_step_and_pipeline_timings()
     {
         var previous = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
@@ -169,6 +191,20 @@ public class ChatPipelineTests
         {
             _calls.Add(Name);
             return Task.FromResult(_body(context));
+        }
+    }
+
+    private sealed class SteeringControl(string steering) : ITurnExecutionControl
+    {
+        public List<string> Checkpoints { get; } = [];
+
+        public Task<string?> ReachCheckpointAsync(
+            TurnContext context,
+            string checkpoint,
+            CancellationToken cancellationToken)
+        {
+            Checkpoints.Add(checkpoint);
+            return Task.FromResult<string?>(steering);
         }
     }
 }

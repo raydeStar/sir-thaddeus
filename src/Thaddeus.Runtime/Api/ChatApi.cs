@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Thaddeus.Runtime.Activity;
 using Thaddeus.Runtime.Chat;
@@ -76,6 +77,7 @@ public static class ChatApi
             async (string id, AppendMessageRequest? req, IThreadStore store, IAssistant assistant,
                 WikiChatContextService wikiContext,
                 RuntimeStateMachine machine, IActivityLog activity, ILoggerFactory loggerFactory,
+                TurnRunCoordinator runs,
                 IHostApplicationLifetime lifetime,
                 CancellationToken ct) =>
         {
@@ -149,13 +151,17 @@ public static class ChatApi
                     ThreadId: id,
                     Detail: null));
 
+                var plan = WorkPlanBuilder.TryBuild(userText);
+                var run = runs.Create(id, message.Id, lifetime.ApplicationStopping, plan);
                 RoutingLatencyTrace.Mark(turnLogger, latencyTrace, "assistant_task_queued");
                 StartAssistantTurn(
                     id, prompt.Prompt, assistant, machine, activity, loggerFactory,
-                    lifetime, activityEntry, latencyTrace);
+                    runs, run.RunId, activityEntry,
+                    new AssistantTurnOptions(req.EphemeralMemory),
+                    latencyTrace);
 
                 return Results.Json(
-                    new AppendMessageResponse(message, updated),
+                    new AppendMessageResponse(message, updated, run),
                     ChatJsonContext.Default.AppendMessageResponse,
                     statusCode: StatusCodes.Status201Created);
             }
@@ -169,9 +175,28 @@ public static class ChatApi
         app.MapPost("/api/threads/{id}/messages/retry",
             async (string id, IThreadStore store, IAssistant assistant,
                 RuntimeStateMachine machine, IActivityLog activity, ILoggerFactory loggerFactory,
+                TurnRunCoordinator runs,
                 IHostApplicationLifetime lifetime,
+                HttpContext ctx,
                 CancellationToken ct) =>
         {
+            RetryMessageRequest? retryRequest = null;
+            if (ctx.Request.ContentLength is > 0)
+            {
+                try
+                {
+                    retryRequest = await JsonSerializer.DeserializeAsync(
+                        ctx.Request.Body,
+                        ChatJsonContext.Default.RetryMessageRequest,
+                        ct).ConfigureAwait(false);
+                }
+                catch (JsonException)
+                {
+                    return Results.BadRequest(new { error = "invalid retry body" });
+                }
+                if (retryRequest is null)
+                    return Results.BadRequest(new { error = "invalid retry body" });
+            }
             var thread = await store.GetAsync(id, ct).ConfigureAwait(false);
             if (thread is null) return Results.NotFound();
             if (thread.Messages.Count == 0)
@@ -202,14 +227,183 @@ public static class ChatApi
                 ThreadId: id,
                 Detail: null));
 
-            StartAssistantTurn(id, userMessage.Text, assistant, machine, activity, loggerFactory, lifetime, activityEntry);
+            var plan = WorkPlanBuilder.TryBuild(userMessage.Text);
+            var run = runs.Create(id, userMessage.Id, lifetime.ApplicationStopping, plan);
+            StartAssistantTurn(
+                id,
+                userMessage.Text,
+                assistant,
+                machine,
+                activity,
+                loggerFactory,
+                runs,
+                run.RunId,
+                activityEntry,
+                new AssistantTurnOptions(retryRequest?.EphemeralMemory ?? false));
 
             return Results.Json(
-                new RetryAssistantResponse(updated),
+                new RetryAssistantResponse(updated, run),
                 ChatJsonContext.Default.RetryAssistantResponse,
                 statusCode: StatusCodes.Status202Accepted);
         })
             .WithName("RetryLatestAssistantResponse");
+
+        app.MapGet("/api/runs", (string? threadId, TurnRunCoordinator runs) =>
+            Results.Json(
+                new TurnRunListResponse(runs.List(threadId)),
+                ChatJsonContext.Default.TurnRunListResponse))
+            .WithName("ListTurnRuns");
+
+        app.MapGet("/api/runs/{runId}", (string runId, TurnRunCoordinator runs) =>
+        {
+            var run = runs.Get(runId);
+            return run is null
+                ? Results.NotFound()
+                : Results.Json(run, ChatJsonContext.Default.TurnRunSnapshot);
+        })
+            .WithName("GetTurnRun");
+
+        app.MapPost("/api/runs/{runId}/pause", (string runId, TurnRunCoordinator runs) =>
+        {
+            var run = runs.Pause(runId);
+            return run is null
+                ? Results.NotFound()
+                : Results.Json(run, ChatJsonContext.Default.TurnRunSnapshot);
+        })
+            .WithName("PauseTurnRun");
+
+        app.MapPost("/api/runs/{runId}/resume", (string runId, TurnRunCoordinator runs) =>
+        {
+            var run = runs.Resume(runId);
+            return run is null
+                ? Results.NotFound()
+                : Results.Json(run, ChatJsonContext.Default.TurnRunSnapshot);
+        })
+            .WithName("ResumeTurnRun");
+
+        app.MapPost("/api/runs/{runId}/cancel", (string runId, TurnRunCoordinator runs) =>
+        {
+            var run = runs.Cancel(runId);
+            return run is null
+                ? Results.NotFound()
+                : Results.Json(run, ChatJsonContext.Default.TurnRunSnapshot);
+        })
+            .WithName("CancelTurnRun");
+
+        app.MapPost("/api/runs/{runId}/take-over", (string runId, TurnRunCoordinator runs) =>
+        {
+            var run = runs.TakeOver(runId);
+            return run is null
+                ? Results.NotFound()
+                : Results.Json(run, ChatJsonContext.Default.TurnRunSnapshot);
+        })
+            .WithName("TakeOverTurnRun");
+
+        app.MapPost("/api/runs/{runId}/redirect", (
+            string runId,
+            RedirectTurnRunRequest? request,
+            TurnRunCoordinator runs) =>
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.Instruction))
+                return Results.BadRequest(new { error = "instruction is required" });
+            var run = runs.Redirect(runId, request.Instruction);
+            return run is null
+                ? Results.NotFound()
+                : Results.Json(run, ChatJsonContext.Default.TurnRunSnapshot);
+        })
+            .WithName("RedirectTurnRun");
+
+        app.MapPost("/api/runs/{runId}/plan/approve", (
+            string runId,
+            ApproveWorkPlanRequest? request,
+            TurnRunCoordinator runs) =>
+        {
+            if (request is null || request.ExpectedVersion < 1)
+                return Results.BadRequest(new { error = "expectedVersion must be positive" });
+            try
+            {
+                var run = runs.ApprovePlan(runId, request.ExpectedVersion);
+                return run is null
+                    ? Results.NotFound()
+                    : Results.Json(run, ChatJsonContext.Default.TurnRunSnapshot);
+            }
+            catch (TurnRunConflictException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+        })
+            .WithName("ApproveWorkPlan");
+
+        app.MapPut("/api/runs/{runId}/plan", (
+            string runId,
+            EditWorkPlanRequest? request,
+            TurnRunCoordinator runs) =>
+        {
+            if (request is null || request.ExpectedVersion < 1)
+                return Results.BadRequest(new { error = "expectedVersion and steps are required" });
+            try
+            {
+                if (!TryParseEditedPlanSteps(request.Steps, out var parsedSteps, out var parseError))
+                    return Results.BadRequest(new { error = parseError });
+                var run = runs.EditPlan(runId, request.ExpectedVersion, parsedSteps);
+                return run is null
+                    ? Results.NotFound()
+                    : Results.Json(run, ChatJsonContext.Default.TurnRunSnapshot);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (TurnRunConflictException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+        })
+            .WithName("EditWorkPlan");
+    }
+
+    internal static bool TryParseEditedPlanSteps(
+        IReadOnlyList<EditWorkPlanStepRequest>? requests,
+        out IReadOnlyList<WorkPlanStep> steps,
+        out string? error)
+    {
+        var parsed = new List<WorkPlanStep>();
+        if (requests is null)
+        {
+            steps = parsed;
+            error = "steps are required";
+            return false;
+        }
+
+        foreach (var request in requests)
+        {
+            if (!Enum.TryParse<WorkPlanCapability>(request.Capability, ignoreCase: true, out var capability) ||
+                !Enum.IsDefined(capability))
+            {
+                steps = parsed;
+                error = $"Unsupported plan capability '{request.Capability}'.";
+                return false;
+            }
+            if (!Enum.TryParse<WorkPlanRisk>(request.Risk, ignoreCase: true, out var risk) ||
+                !Enum.IsDefined(risk))
+            {
+                steps = parsed;
+                error = $"Unsupported plan risk '{request.Risk}'.";
+                return false;
+            }
+
+            parsed.Add(new WorkPlanStep(
+                request.StepId,
+                request.Label,
+                capability,
+                risk,
+                request.RequiresPermission,
+                WorkPlanStepStatus.Pending));
+        }
+
+        steps = parsed;
+        error = null;
+        return true;
     }
 
     private static void StartAssistantTurn(
@@ -219,8 +413,10 @@ public static class ChatApi
         RuntimeStateMachine machine,
         IActivityLog activity,
         ILoggerFactory loggerFactory,
-        IHostApplicationLifetime lifetime,
+        TurnRunCoordinator runs,
+        string runId,
         ActivityEntry activityEntry,
+        AssistantTurnOptions turnOptions,
         RoutingLatencyTrace.TraceState? latencyTrace = null)
     {
         _ = Task.Run(async () =>
@@ -230,10 +426,16 @@ public static class ChatApi
             RoutingLatencyTrace.Mark(log, latencyTrace, "assistant_task_start");
             var status = ActivityStatus.Ok;
             string? detail = null;
-            var bgCt = lifetime.ApplicationStopping;
+            var failed = false;
+            var bgCt = runs.GetCancellationToken(runId);
+            using var runActivation = runs.Activate(runId);
             try
             {
-                var reply = await assistant.RespondAsync(threadId, prompt, bgCt)
+                var approvedPlan = await runs.WaitForApprovalAsync(runId, bgCt).ConfigureAwait(false);
+                var effectivePrompt = approvedPlan is null
+                    ? prompt
+                    : WorkPlanBuilder.ComposeApprovedPrompt(prompt, approvedPlan);
+                var reply = await assistant.RespondAsync(threadId, effectivePrompt, turnOptions, bgCt)
                     .ConfigureAwait(false);
                 RoutingLatencyTrace.Mark(log, latencyTrace, "assistant_response_complete");
                 detail = reply.Text.Length > 280 ? reply.Text[..280] + "…" : reply.Text;
@@ -241,17 +443,22 @@ public static class ChatApi
             catch (OperationCanceledException) when (bgCt.IsCancellationRequested)
             {
                 status = ActivityStatus.Failed;
-                detail = "cancelled by shutdown";
-                log.LogInformation("stub_assistant.cancelled_by_shutdown thread={ThreadId}", threadId);
+                detail = "cancelled";
+                log.LogInformation("assistant.cancelled thread={ThreadId} run={RunId}", threadId, runId);
             }
             catch (Exception ex)
             {
+                failed = true;
                 status = ActivityStatus.Failed;
                 detail = ex.Message;
-                log.LogWarning(ex, "stub_assistant.respond_failed thread={ThreadId}", threadId);
+                log.LogWarning(ex, "assistant.respond_failed thread={ThreadId} run={RunId}", threadId, runId);
             }
             finally
             {
+                if (failed)
+                    runs.Fail(runId, detail ?? "Assistant turn failed");
+                else
+                    runs.Complete(runId, bgCt.IsCancellationRequested, detail);
                 RoutingLatencyTrace.Mark(log, latencyTrace, "ui_completion_event");
                 machine.TryTransition(StateTrigger.PlanTextOnly);
                 activity.Update(
@@ -280,13 +487,33 @@ public sealed record CreateThreadRequest(string? Title);
 public sealed record PatchThreadRequest(string? Title, bool? Pinned);
 
 /// <summary>Body for POST /api/threads/{id}/messages.</summary>
-public sealed record AppendMessageRequest(string Text, WikiChatContextRequest? WikiContext = null);
+public sealed record AppendMessageRequest(
+    string Text,
+    WikiChatContextRequest? WikiContext = null,
+    bool EphemeralMemory = false);
+public sealed record RetryMessageRequest(bool EphemeralMemory = false);
 
 /// <summary>Response for POST /api/threads/{id}/messages.</summary>
-public sealed record AppendMessageResponse(ChatMessage Message, ChatThread Thread);
+public sealed record AppendMessageResponse(
+    ChatMessage Message,
+    ChatThread Thread,
+    TurnRunSnapshot Run);
 
 /// <summary>Response for POST /api/threads/{id}/messages/retry.</summary>
-public sealed record RetryAssistantResponse(ChatThread Thread);
+public sealed record RetryAssistantResponse(ChatThread Thread, TurnRunSnapshot Run);
+
+public sealed record TurnRunListResponse(IReadOnlyList<TurnRunSnapshot> Runs);
+public sealed record RedirectTurnRunRequest(string Instruction);
+public sealed record ApproveWorkPlanRequest(long ExpectedVersion);
+public sealed record EditWorkPlanRequest(
+    long ExpectedVersion,
+    IReadOnlyList<EditWorkPlanStepRequest> Steps);
+public sealed record EditWorkPlanStepRequest(
+    string StepId,
+    string Label,
+    string Capability,
+    string Risk,
+    bool RequiresPermission);
 
 /// <summary>Compact thread summary for the chat list view.</summary>
 public sealed record ThreadSummary(
@@ -321,12 +548,21 @@ public sealed record ThreadListResponse(IReadOnlyList<ThreadSummary> Threads);
 [JsonSerializable(typeof(PatchThreadRequest))]
 [JsonSerializable(typeof(CreateThreadRequest))]
 [JsonSerializable(typeof(AppendMessageRequest))]
+[JsonSerializable(typeof(RetryMessageRequest))]
 [JsonSerializable(typeof(WikiChatContextRequest))]
 [JsonSerializable(typeof(WikiChatContextPrompt))]
 [JsonSerializable(typeof(WikiChatContextAttachment))]
 [JsonSerializable(typeof(WikiChatEvidenceSource))]
 [JsonSerializable(typeof(AppendMessageResponse))]
 [JsonSerializable(typeof(RetryAssistantResponse))]
+[JsonSerializable(typeof(TurnRunSnapshot))]
+[JsonSerializable(typeof(TurnRunListResponse))]
+[JsonSerializable(typeof(RedirectTurnRunRequest))]
+[JsonSerializable(typeof(ApproveWorkPlanRequest))]
+[JsonSerializable(typeof(EditWorkPlanRequest))]
+[JsonSerializable(typeof(EditWorkPlanStepRequest))]
+[JsonSerializable(typeof(WorkPlan))]
+[JsonSerializable(typeof(WorkPlanStep))]
 public partial class ChatJsonContext : JsonSerializerContext
 {
 }

@@ -10,7 +10,7 @@ namespace SirThaddeus.Memory.Sqlite;
 /// Thread-safe for concurrent reads. Schema is initialized lazily
 /// on first access via <see cref="EnsureSchemaAsync"/>.
 /// </summary>
-public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
+public sealed class SqliteMemoryStore : IMemoryStore, IMemoryResetStore, IDisposable
 {
     private readonly string _connectionString;
     private SqliteConnection? _connection;
@@ -618,6 +618,38 @@ public sealed class SqliteMemoryStore : IMemoryStore, IDisposable
         cmd.CommandText = "UPDATE memory_chunks SET is_deleted = 1 WHERE chunk_id = @id";
         cmd.Parameters.AddWithValue("@id", chunkId);
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> ResetAllAsync(CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await _lock.WaitAsync(ct);
+        try
+        {
+            await using var transaction = await conn.BeginTransactionAsync(ct);
+            var removed = 0;
+            foreach (var table in new[]
+                     {
+                         "memory_facts",
+                         "memory_events",
+                         "memory_chunks",
+                         "profile_cards",
+                         "memory_nuggets",
+                     })
+            {
+                using var command = conn.CreateCommand();
+                command.Transaction = (SqliteTransaction)transaction;
+                command.CommandText = $"DELETE FROM {table}";
+                removed += await command.ExecuteNonQueryAsync(ct);
+            }
+            await transaction.CommitAsync(ct);
+            return removed;
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────

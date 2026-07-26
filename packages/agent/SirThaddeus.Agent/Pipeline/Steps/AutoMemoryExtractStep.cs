@@ -44,7 +44,7 @@ public sealed class AutoMemoryExtractStep : ITurnStep
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_extractor is null)
+        if (_extractor is null || context.MemoryAccess != TurnMemoryAccess.Enabled)
             return Task.FromResult<StepResult>(new StepResult.Continue(context));
 
         var profileId = _activeProfileIdGetter(context);

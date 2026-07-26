@@ -161,7 +161,7 @@ test.describe('permissions editor', () => {
     const modal = page.getByTestId('permission-modal');
     await expect(modal).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('permission-modal-tool')).toContainText('web_search');
-    await expect(modal).toContainText('Apply to all Web tools');
+    await expect(modal).toContainText('Apply broader grants to all Web tools');
     await expect(modal).toContainText('Settings → Permissions');
 
     // Request without scope → defaults to group-wide (checked).
@@ -187,8 +187,8 @@ test.describe('permissions editor', () => {
     await expect(page.getByTestId('permission-modal-tool')).toContainText('wiki_root_create');
     await expect(page.getByTestId('permission-call-scope-notice')).toBeVisible();
     await expect(page.getByTestId('permission-scope-checkbox')).toHaveCount(0);
-    await expect(page.getByTestId('permission-session')).toHaveCount(0);
-    await expect(page.getByTestId('permission-always')).toHaveCount(0);
+    await expect(page.getByTestId('permission-session')).toBeDisabled();
+    await expect(page.getByTestId('permission-always')).toBeDisabled();
     await page.getByTestId('permission-once').click();
     await expect
       .poll(() => responses.length, { timeout: 5_000 })

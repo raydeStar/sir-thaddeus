@@ -4,17 +4,22 @@ import {
   Copy,
   List as ListIcon,
   RefreshCw,
+  ShieldCheck,
   Terminal,
 } from 'lucide-react';
 import {
   getDiagnostics,
+  getAssistantInsights,
   getRuntimeLog,
   getTurnTrace,
   listRuntimeLogs,
+  listAuditEvents,
   listTurnTraces,
 } from '../../lib/activityApi';
 import type {
   DiagnosticsResponse,
+  AssistantInsightsResponse,
+  AuditEvent,
   RuntimeLogResponse,
   RuntimeLogSummary,
   TurnTraceResponse,
@@ -23,8 +28,9 @@ import type {
 import { SettingsSection as Section } from './SettingsSection';
 import { RuntimeLogsPane } from './diagnostics/RuntimeLogsPane';
 import { TurnTracePane, type TraceViewMode } from './diagnostics/TurnTracePane';
+import { AuditInsightsPane } from './diagnostics/AuditInsightsPane';
 
-type LogPaneId = 'traces' | 'runtime';
+type LogPaneId = 'traces' | 'runtime' | 'audit';
 
 // ───────────────────────── Logs ─────────────────────────
 
@@ -46,6 +52,9 @@ export function LogsTab() {
   const [runtimeLog, setRuntimeLog] = useState<RuntimeLogResponse | null>(null);
   const [runtimeLogLoading, setRuntimeLogLoading] = useState(false);
   const [runtimeLogError, setRuntimeLogError] = useState<string | null>(null);
+  const [insights, setInsights] = useState<AssistantInsightsResponse | null>(null);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[] | null>(null);
+  const [auditError, setAuditError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,6 +174,23 @@ export function LogsTab() {
     };
   }, [selectedRuntimeLog, tick]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setAuditError(null);
+    Promise.all([getAssistantInsights(), listAuditEvents(200)])
+      .then(([nextInsights, nextEvents]) => {
+        if (cancelled) return;
+        setInsights(nextInsights);
+        setAuditEvents(nextEvents);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setAuditError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tick]);
+
   const selectedTraceSummary = traces?.find((traceSummary) => traceSummary.messageId === selectedMessageId) ?? null;
   const selectedRuntimeLogSummary = runtimeLogs?.find((logSummary) => logSummary.fileName === selectedRuntimeLog) ?? null;
 
@@ -226,6 +252,21 @@ export function LogsTab() {
               <Terminal className="h-3.5 w-3.5" strokeWidth={1.75} />
               Runtime logs
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeLogPane === 'audit'}
+              data-testid="settings-logs-pane-audit"
+              onClick={() => setActiveLogPane('audit')}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                activeLogPane === 'audit'
+                  ? 'bg-accent-soft text-ink shadow-soft'
+                  : 'text-ink-muted hover:text-ink'
+              }`}
+            >
+              <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Audit &amp; insights
+            </button>
           </div>
           <button
             type="button"
@@ -254,7 +295,7 @@ export function LogsTab() {
               setSelectedMessageId(messageId);
             }}
           />
-        ) : (
+        ) : activeLogPane === 'runtime' ? (
           <RuntimeLogsPane
             logs={runtimeLogs}
             error={runtimeLogListError}
@@ -264,6 +305,12 @@ export function LogsTab() {
             loading={runtimeLogLoading}
             logError={runtimeLogError}
             onSelect={setSelectedRuntimeLog}
+          />
+        ) : (
+          <AuditInsightsPane
+            insights={insights}
+            events={auditEvents}
+            error={auditError}
           />
         )}
       </Section>

@@ -1,64 +1,38 @@
-import { createRootRoute, Link, Outlet } from '@tanstack/react-router';
-import { useEffect } from 'react';
 import {
-  Activity,
-  BookOpenText,
-  ClipboardList,
-  Cog,
-  Database,
-  Gauge,
-  History,
-  Home,
-  Library,
-  MessageSquareText,
-  type LucideIcon,
-} from 'lucide-react';
+  createRootRoute,
+  Link,
+  Outlet,
+  useNavigate,
+} from '@tanstack/react-router';
+import { useEffect } from 'react';
+import { BookOpen, ClipboardList, Home, MessageSquareText, ShieldCheck } from 'lucide-react';
 import { useRuntimeStore } from '../stores/runtimeStore';
 import { usePermissionsStore } from '../stores/permissionsStore';
 import { useToolActivityStore } from '../stores/toolActivityStore';
 import { RuntimeStateBadge } from '../components/RuntimeStateBadge';
 import { KillAppButton } from '../components/KillAppButton';
-import { PermissionModal } from '../components/PermissionModal';
+import { PermissionPauseCard } from '../components/PermissionModal';
 import { ThaddeusSignet } from '../components/ThaddeusSignet';
+import { WorkbenchSidebar } from '../components/WorkbenchSidebar';
+import { WikiWorkbench } from '../components/WikiWorkbench';
+import { CommandPalette } from '../components/CommandPalette';
 import { readRuntimeMetadata } from '../lib/runtime';
 
 export const Route = createRootRoute({
   component: RootLayout,
 });
 
-interface NavEntry {
-  to: string;
-  label: string;
-  icon: LucideIcon;
-}
-
-const primaryNav: ReadonlyArray<NavEntry> = [
-  { to: '/', label: 'Home', icon: Home },
-  { to: '/chat', label: 'Chat', icon: MessageSquareText },
-  { to: '/wiki', label: 'Wiki', icon: Library },
-  { to: '/history', label: 'History', icon: History },
-  { to: '/activity', label: 'Activity', icon: Activity },
-  { to: '/modules', label: 'Data', icon: Database },
-];
-
-const secondaryNav: ReadonlyArray<NavEntry> = [
-  { to: '/memory', label: 'Memory', icon: BookOpenText },
-  { to: '/routines', label: 'Routines', icon: ClipboardList },
-  { to: '/settings', label: 'Settings', icon: Cog },
-  { to: '/diagnostics', label: 'Diagnostics', icon: Gauge },
-];
-
 function RootLayout() {
-  const connect = useRuntimeStore((s) => s.connect);
-  const disconnect = useRuntimeStore((s) => s.disconnect);
-  // Kick background stores on mount so they subscribe to WS events before
-  // any events they care about start flowing. If we lazily subscribe from
-  // feature components, early events (e.g. tool.started firing before the
-  // assistant message node exists) are lost to the race.
-  const startPermissions = usePermissionsStore((s) => s.start);
-  const startToolActivity = useToolActivityStore((s) => s.start);
+  const connect = useRuntimeStore((state) => state.connect);
+  const disconnect = useRuntimeStore((state) => state.disconnect);
+  const startPermissions = usePermissionsStore((state) => state.start);
+  const startToolActivity = useToolActivityStore((state) => state.start);
+  const pendingPermissions = usePermissionsStore((state) => state.queue.length);
+  const pathname = typeof window === 'undefined' ? '/' : window.location.pathname;
+  const navigate = useNavigate();
   const meta = readRuntimeMetadata();
   const versionLabel = meta.version === 'dev' ? 'dev' : `v${meta.version}`;
+  const insideConversation = /^\/chat\/[^/]+/.test(pathname);
 
   useEffect(() => {
     connect();
@@ -67,108 +41,93 @@ function RootLayout() {
     return () => disconnect();
   }, [connect, disconnect, startPermissions, startToolActivity]);
 
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'n' || !event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.matches('input, textarea, [contenteditable="true"]')) return;
+      event.preventDefault();
+      void navigate({ to: '/' });
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [navigate]);
+
   return (
     <div className="workspace-shell flex h-full text-ink" data-testid="workspace-root">
-      <aside
-        className="shell-sidebar group/aside hidden w-[72px] shrink-0 flex-col border-r border-line py-4 transition-[width] duration-200 hover:w-56 md:flex"
-        aria-label="Workspace"
-        data-testid="desktop-sidebar"
-      >
-        <Link
-          to="/"
-          className="mx-[18px] mb-5 flex h-9 items-center justify-center gap-0 text-ink group-hover/aside:justify-start group-hover/aside:gap-2.5"
-          aria-label="Sir Thaddeus home"
-        >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center">
-            <ThaddeusMark />
-          </span>
-          <span className="pointer-events-none max-w-0 overflow-hidden whitespace-nowrap text-[15px] font-semibold opacity-0 transition-[max-width,opacity] duration-200 group-hover/aside:max-w-[142px] group-hover/aside:opacity-100">
-            Sir Thaddeus
-          </span>
-        </Link>
-
-        <NavGroup items={primaryNav} />
-        <div className="my-3 mx-3 h-px bg-line" />
-        <NavGroup items={secondaryNav} />
-
-        <div className="mt-auto mx-3 pt-4 text-[11px] text-ink-subtle">
-          <div className="overflow-hidden whitespace-nowrap opacity-0 transition-opacity duration-150 group-hover/aside:opacity-100">
-            <span data-testid="runtime-version">{versionLabel}</span>
-            <span className="mx-2 text-ink-subtle/60">·</span>
-            <span className="font-mono lowercase tracking-wide">local</span>
-          </div>
-        </div>
-      </aside>
+      <WorkbenchSidebar versionLabel={versionLabel} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="shell-header flex min-w-0 h-12 items-center justify-between gap-2 overflow-hidden border-b border-line px-3 backdrop-blur-xl md:px-6">
-          <Link
-            to="/"
-            className="flex h-7 w-7 shrink-0 items-center justify-center md:hidden"
-            aria-label="Sir Thaddeus home"
-          >
+        <header className="shell-header flex h-12 min-w-0 shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-line px-3 backdrop-blur-xl md:px-4">
+          <Link to="/" className="flex h-8 w-8 shrink-0 items-center justify-center md:hidden" aria-label="Sir Thaddeus home">
             <ThaddeusSignet className="h-7 w-7" />
           </Link>
-          <nav
-            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap md:hidden"
-            aria-label="Primary"
-          >
-            {primaryNav.concat(secondaryNav).map(({ to, label }) => (
-              <Link
-                key={to}
-                to={to}
-                activeProps={{ className: 'bg-accent-soft text-accent' }}
-                className="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium text-ink-muted transition-colors hover:bg-canvas-sunken hover:text-ink"
-              >
-                {label}
-              </Link>
-            ))}
+          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap md:hidden" aria-label="Primary">
+            <MobileLink to="/" label="Home" icon={Home} />
+            <MobileLink to="/chat" label="Chat" icon={MessageSquareText} />
+            <MobileLink to="/wiki" label="Wiki" icon={BookOpen} />
+            <MobileLink to="/routines" label="Routines" icon={ClipboardList} />
           </nav>
-          <div className="hidden md:block" />
+
+          <div className="hidden min-w-0 items-center gap-2 text-[10px] text-ink-subtle md:flex">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-2.5 py-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+              Local
+            </span>
+            {pendingPermissions > 0 ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-700 dark:text-amber-300">
+                <ShieldCheck className="h-3 w-3" />
+                {pendingPermissions} permission {pendingPermissions === 1 ? 'waiting' : 'requests waiting'}
+              </span>
+            ) : null}
+          </div>
+
           <div className="flex items-center gap-2 text-xs text-ink-muted">
             <KillAppButton />
             <RuntimeStateBadge />
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">
-          <Outlet />
-        </main>
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <main className="min-w-0 flex-1 overflow-y-auto">
+            <Outlet />
+            {!insideConversation && pendingPermissions > 0 ? (
+              <div className="mx-auto w-full max-w-3xl px-4 pb-8">
+                <PermissionPauseCard compact />
+              </div>
+            ) : null}
+          </main>
+          <WikiWorkbench />
+        </div>
       </div>
 
-      {/* Global tool-permission prompt. Renders nothing until the runtime
-          asks for approval; shows the head of the queue when it fires. */}
-      <PermissionModal />
+      <div className="sr-only" aria-live="polite" aria-atomic="true" id="app-status-live-region" />
+      <div className="sr-only" aria-live="assertive" aria-atomic="true">
+        {pendingPermissions > 0 ? `${pendingPermissions} permission request waiting.` : ''}
+      </div>
+      <CommandPalette />
     </div>
   );
 }
 
-function NavGroup({ items }: { items: ReadonlyArray<NavEntry> }) {
+function MobileLink({
+  to,
+  label,
+  icon: Icon,
+}: {
+  to: string;
+  label: string;
+  icon: typeof Home;
+}) {
   return (
-    <ul className="px-2.5 space-y-0.5">
-      {items.map(({ to, label, icon: Icon }) => (
-        <li key={to}>
-          <Link
-            to={to}
-            data-testid={`desktop-nav-${label.toLowerCase()}`}
-            activeProps={{
-              className: 'bg-accent-soft text-accent ring-1 ring-inset ring-accent/15',
-            }}
-            activeOptions={{ exact: to === '/' }}
-            className="flex h-9 items-center justify-center gap-0 rounded-xl px-3 text-sm font-medium text-ink-muted transition-colors hover:bg-canvas-sunken hover:text-ink group-hover/aside:justify-start group-hover/aside:gap-3"
-          >
-            <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
-            <span className="pointer-events-none max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity] duration-200 group-hover/aside:max-w-[150px] group-hover/aside:opacity-100">
-              {label}
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <Link
+      to={to}
+      activeProps={{ className: 'bg-accent-soft text-accent' }}
+      activeOptions={{ exact: to === '/' }}
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-ink-muted transition-colors hover:bg-canvas-sunken hover:text-ink"
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </Link>
   );
-}
-
-function ThaddeusMark() {
-  // The compact signet carries identity at navigation scale.
-  return <ThaddeusSignet />;
 }

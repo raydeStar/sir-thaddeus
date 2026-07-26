@@ -55,11 +55,12 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         ModuleRuntimeService modules,
         LlmRuntimeRegistry llmRuntime,
         HarnessToolEvidenceStore harnessToolEvidence,
-        SirThaddeus.Memory.IMemoryStore? memoryStore = null)
+        SirThaddeus.Memory.IMemoryStore? memoryStore = null,
+        TurnRunCoordinator? runCoordinator = null)
         : this(settings, stub,
               CreateDefaultFactory(
                   mcp, gate, store, publisher, audit, loggerFactory, llmRuntime,
-                  harnessToolEvidence, memoryStore),
+                  harnessToolEvidence, memoryStore, runCoordinator),
               loggerFactory.CreateLogger<AssistantRouter>(),
               modules)
     {
@@ -83,6 +84,13 @@ public sealed class AssistantRouter : IAssistant, IDisposable
     }
 
     public async Task<RuntimeChatMessage> RespondAsync(string threadId, string userText, CancellationToken ct)
+        => await RespondAsync(threadId, userText, new AssistantTurnOptions(), ct).ConfigureAwait(false);
+
+    public async Task<RuntimeChatMessage> RespondAsync(
+        string threadId,
+        string userText,
+        AssistantTurnOptions options,
+        CancellationToken ct)
     {
         if (_modules is not null && _modules.IsHealthBriefRequest(userText))
         {
@@ -112,7 +120,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
 
         try
         {
-            return await lm.RespondAsync(threadId, userText, ct).ConfigureAwait(false);
+            return await lm.RespondAsync(threadId, userText, options, ct).ConfigureAwait(false);
         }
         catch (HttpRequestException ex)
         {
@@ -132,7 +140,8 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         IAuditLogger audit, ILoggerFactory loggerFactory,
         LlmRuntimeRegistry llmRuntime,
         HarnessToolEvidenceStore harnessToolEvidence,
-        SirThaddeus.Memory.IMemoryStore? memoryStore)
+        SirThaddeus.Memory.IMemoryStore? memoryStore,
+        TurnRunCoordinator? runCoordinator)
     {
         var cacheLock = new object();
         LmStudioClient? cached = null;
@@ -282,12 +291,14 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     PersonalityRuntime = personalityRuntime,
                     MemoryContextProvider = memoryProvider,
                     MemoryStore = memoryStore,
+                    MemoryEnabled = doc.Memory?.Enabled ?? true,
                     SearchFallbackExecutor = searchFallback,
                     GuardrailsPipeline = guardrails,
                     CompletionValidator = validator,
                     CompletionRepairLoop = repair,
                     HarnessToolEvidence = harnessToolEvidence,
                     DialogueStateAccessor = dialogueAccessor,
+                    ExecutionControl = runCoordinator,
                     MaxOutputTokens = Math.Max(1, llm.MaxTokens),
                 };
             }

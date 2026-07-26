@@ -142,6 +142,97 @@ local logs and audit records during diagnosis. It is not a production route.
 These diagnostics are intentionally opt-in because they increase logging or
 retain temporary test state. They are not dormant product features.
 
+## Live turn execution control
+
+Desktop chat turns are registered with a `TurnRunCoordinator` before assistant
+execution begins. Each run owns the cancellation token passed through the
+assistant pipeline, model client, permission boundary, MCP tool calls, response
+streaming, and persistence. `RuntimeStopAllService` cancels these tokens before
+stopping voice and MCP sidecars, so STOP covers active chat work as well as
+managed processes.
+
+Pause, resume, redirect, and take-over are cooperative controls. The pipeline
+declares safe checkpoints before each stage, model round, and tool call. Pause
+holds at the next checkpoint; it never claims to freeze a side effect midway.
+Redirect releases a paused or taken-over run and supplies a user steering
+instruction to the remaining pipeline. When steering arrives before a proposed
+tool batch, the stale calls are recorded as skipped and the model receives the
+correction before selecting further work.
+
+Run state is exposed through `/api/runs` and `chat.run.state` events. These
+events are the authority for progress UI and local audit records; clients must
+not invent elapsed percentages or synthetic execution steps. The shared agent
+pipeline exposes the same execution-control port to every host. Desktop supplies
+the live coordinator; hosts that do not yet expose a control transport use the
+no-op implementation and therefore retain their previous uninterrupted
+behavior.
+
+### User-approved intent plans
+
+Desktop requests with deterministic multi-step or consequential-action signals
+receive a typed intent plan before assistant execution. Casual chat, simple
+questions, and safe single-step synthesis stay on the direct path. Plan
+selection makes no model call, names abstract capabilities rather than concrete
+tools, and never widens the tool list.
+
+A planned run remains in `AwaitingApproval`; its assistant task waits on the
+run's approval signal before calling `IAssistant.RespondAsync`. Users may edit,
+add, remove, or reorder steps. Edits are server-validated and increment an
+optimistic plan version, so a stale approval fails rather than starting work
+under an unseen revision. The approved plan is supplied to the production
+pipeline as a user-approved constraint while normal safety, routing, permission,
+audit, completion-validation, and retry behavior remain authoritative.
+
+This is distinct from the retired shadow `TurnPlan` experiment: it is a
+user-control and execution-gating contract, not an LLM router, hidden planner,
+benchmark mechanism, or extra inference stage.
+
+### Structured effects, receipts, and undo
+
+Every production tool call is classified into a typed effect before it crosses
+the MCP boundary. The effect records whether the call mutates state, whether it
+is reversible, its local or outbound boundary, the resolved target, and the
+supported undo strategy. `chat.effect.proposed` is emitted before execution and
+`chat.effect.completed` after the audited result. Both events are persisted in
+the per-turn trace and rendered from the same contract in the Work Receipt.
+
+The result is intentionally explicit about verification. A successful tool
+transport is not automatically called independently verified. Wiki mutations
+earn that label only when the returned evidence contains a versioned, deleted,
+or restored Wiki state. The receipt otherwise says that only the tool result is
+available. Wiki undo/redo invokes the real versioned Wiki APIs; it does not
+optimistically remove a receipt or pretend the external state changed.
+
+### Per-turn and global memory policy
+
+`AssistantTurnOptions.EphemeralMemory` carries the incognito decision from the
+desktop request into the supported assistant pipeline. Ephemeral turns skip
+dynamic memory retrieval, core-memory injection, automatic extraction, chunk
+writes, and all model-visible memory tools. The same policy applies to typed and
+voice-submitted turns.
+
+The persisted runtime memory policy can independently pause durable memory.
+When paused, existing records remain inspectable but the assistant neither
+reads nor writes them. Reset is a separate, confirmation-gated administrative
+operation that transactionally deletes facts, events, chunks, profile cards,
+and nuggets from the local SQLite store. Pause/resume/reset actions are
+recorded in the append-only audit log.
+
+### Local audit and assistant insights
+
+The Settings audit surface reads only the local append-only audit log. It is
+browsable, filterable, and exportable as JSON Lines. Outcome, intervention,
+permission, recovery, escalation, and approval-fatigue measurements are
+computed from that same ledger; no telemetry service is added.
+
+Metrics expose their numerator, denominator, definition, and evidence status.
+An empty denominator is reported as insufficient data. Each receipt displays
+its evidence confidence (verified, source-backed, tool-result-only, or
+unverified), and optional user outcome feedback creates the paired observation
+used for local trust calibration. Until that pair exists, calibration reports
+insufficient data; routing confidence and activity volume are not substituted
+as flattering proxies.
+
 ## Retired experiments
 
 The following experiments are not part of the supported architecture and have

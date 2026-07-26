@@ -6,8 +6,10 @@ import {
   ListChecks,
   Loader2,
   Pencil,
+  Pause,
   Pin,
   PinOff,
+  Play,
   RefreshCw,
   Search,
   Sparkles,
@@ -21,11 +23,14 @@ import {
   deleteEvent,
   deleteFact,
   deleteNugget,
+  getMemoryPolicy,
   getMemoryOverview,
   listEvents,
   listFacts,
   listNuggets,
   runReflection,
+  resetMemory,
+  setMemoryEnabled,
   setNuggetPinned,
   updateFact,
   updateNugget,
@@ -76,20 +81,26 @@ function MemoryAuditRoute() {
   const [editingFactId, setEditingFactId] = useState<string | null>(null);
   const [editingFact, setEditingFact] = useState<FactDraft>({ subject: '', predicate: '', object: '' });
   const [openingSourceKey, setOpeningSourceKey] = useState<string | null>(null);
+  const [memoryEnabled, setMemoryEnabledState] = useState<boolean | null>(null);
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const [ov, n, f, e] = await Promise.all([
+      const [ov, n, f, e, policy] = await Promise.all([
         getMemoryOverview(),
         listNuggets(filter || undefined, DEFAULT_LIMIT),
         listFacts(filter || undefined, DEFAULT_LIMIT),
         listEvents(filter || undefined, DEFAULT_LIMIT),
+        getMemoryPolicy(),
       ]);
       setOverview(ov);
       setNuggets(n.items);
       setFacts(f.items);
       setEvents(e.items);
+      setMemoryEnabledState(policy.enabled);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -239,6 +250,40 @@ function MemoryAuditRoute() {
     }
   };
 
+  const onToggleMemory = async () => {
+    if (policyBusy || memoryEnabled === null) return;
+    setPolicyBusy(true);
+    setError(null);
+    try {
+      const policy = await setMemoryEnabled(!memoryEnabled);
+      setMemoryEnabledState(policy.enabled);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setPolicyBusy(false);
+    }
+  };
+
+  const onResetMemory = async () => {
+    if (resetting) return;
+    if (!confirm(
+      'Permanently delete all durable memory, including facts, events, conversation chunks, notes, and profile cards? This cannot be undone.',
+    )) return;
+    setResetting(true);
+    setError(null);
+    setResetNotice(null);
+    try {
+      const result = await resetMemory();
+      setLastReflection(null);
+      setResetNotice(`Memory reset complete. ${result.rowsRemoved} durable rows permanently removed.`);
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const onOpenSourceTurn = useCallback(
     async (sourceTurnId?: string | null, sourceRef?: string | null) => {
       const key = sourceTurnId ?? sourceRef ?? null;
@@ -333,6 +378,65 @@ function MemoryAuditRoute() {
           {reflecting ? 'Reflecting…' : 'Tidy memory'}
         </button>
       </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2" aria-label="Memory controls">
+        <button
+          type="button"
+          data-testid="memory-policy-toggle"
+          onClick={() => void onToggleMemory()}
+          disabled={policyBusy || memoryEnabled === null}
+          aria-pressed={memoryEnabled === false}
+          title={
+            memoryEnabled === false
+              ? 'Resume durable memory reads and writes'
+              : 'Pause durable memory without deleting existing entries'
+          }
+          className={MEMORY_SECONDARY_BUTTON_CLASSNAME}
+        >
+          {policyBusy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+          ) : memoryEnabled === false ? (
+            <Play className="h-3.5 w-3.5" strokeWidth={1.75} />
+          ) : (
+            <Pause className="h-3.5 w-3.5" strokeWidth={1.75} />
+          )}
+          {memoryEnabled === false ? 'Resume memory' : 'Pause memory'}
+        </button>
+        <button
+          type="button"
+          data-testid="memory-reset"
+          onClick={() => void onResetMemory()}
+          disabled={resetting}
+          className="inline-flex items-center gap-1 rounded-full border border-rose-500/25 bg-rose-500/5 px-3 py-1.5 text-xs font-medium text-rose-600 transition hover:border-rose-500/45 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-45 dark:text-rose-300"
+        >
+          {resetting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+          ) : (
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+          )}
+          Reset memory
+        </button>
+      </div>
+
+      {memoryEnabled === false ? (
+        <div
+          className="mb-4 rounded-xl border border-amber-400/35 bg-amber-500/10 px-3.5 py-3 text-sm text-amber-800 dark:text-amber-200"
+          role="status"
+          data-testid="memory-paused-status"
+        >
+          Memory is paused. Existing entries remain visible, but chat turns will not read or write durable memory.
+        </div>
+      ) : null}
+
+      {resetNotice ? (
+        <p
+          className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-700 dark:text-emerald-300"
+          role="status"
+          data-testid="memory-reset-notice"
+        >
+          {resetNotice}
+        </p>
+      ) : null}
 
       {lastReflection ? (
         <ReflectionResultPanel report={lastReflection} onClose={() => setLastReflection(null)} />

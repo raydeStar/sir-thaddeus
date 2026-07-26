@@ -70,7 +70,7 @@ test.describe('Sir Thaddeus visual system', () => {
     expect(layout.tabsScrollable).toBe(true);
   });
 
-  test('collapsed desktop navigation centers every icon in its target', async ({ page, context }) => {
+  test('desktop workbench navigation stays labeled and stable', async ({ page, context }) => {
     const baseUrl = process.env.RUNTIME_BASE_URL;
     const token = process.env.RUNTIME_TOKEN;
     expect(baseUrl).toBeTruthy();
@@ -82,39 +82,16 @@ test.describe('Sir Thaddeus visual system', () => {
     const sidebar = page.getByTestId('desktop-sidebar');
     await expect(sidebar).toBeVisible();
 
-    const alignment = await page.locator('[data-testid^="desktop-nav-"]').evaluateAll((links) =>
-      links.map((link) => {
-        const icon = link.querySelector('svg');
-        const linkRect = link.getBoundingClientRect();
-        const iconRect = icon?.getBoundingClientRect();
-        return {
-          label: link.getAttribute('data-testid'),
-          centerDelta: iconRect
-            ? Math.abs(
-                (iconRect.left + iconRect.width / 2) -
-                (linkRect.left + linkRect.width / 2),
-              )
-            : Number.POSITIVE_INFINITY,
-          hiddenLabelWidth: link.querySelector('span')?.getBoundingClientRect().width ?? -1,
-        };
-      }),
-    );
-
-    expect(alignment).toHaveLength(primaryNavCount + secondaryNavCount);
-    for (const item of alignment) {
-      expect(item.centerDelta, item.label ?? 'navigation item').toBeLessThanOrEqual(0.5);
-      expect(item.hiddenLabelWidth, item.label ?? 'navigation item').toBe(0);
-    }
-
+    await expect(sidebar).toHaveCSS('width', '248px');
+    await expect(sidebar.getByTestId('sidebar-new-conversation')).toBeVisible();
+    await expect(sidebar.getByRole('button', { name: /Search everything/ })).toBeVisible();
+    // The Workspaces section becomes the user's named roots once one exists;
+    // the stable knowledge entry remains the route-level Wiki affordance.
+    await expect(sidebar.getByRole('link', { name: 'Wiki and files' })).toBeVisible();
+    await expect(sidebar.getByRole('link', { name: 'Routines' })).toBeVisible();
+    const widthBeforeHover = await sidebar.evaluate((element) => element.getBoundingClientRect().width);
     await sidebar.hover();
     await expect.poll(() => sidebar.evaluate((element) =>
-      element.getBoundingClientRect().width)).toBeGreaterThanOrEqual(223);
-    const visibleLabels = await page.locator('[data-testid^="desktop-nav-"] span').evaluateAll(
-      (labels) => labels.filter((label) => label.getBoundingClientRect().width > 0).length,
-    );
-    expect(visibleLabels).toBe(primaryNavCount + secondaryNavCount);
+      element.getBoundingClientRect().width)).toBe(widthBeforeHover);
   });
 });
-
-const primaryNavCount = 6;
-const secondaryNavCount = 4;

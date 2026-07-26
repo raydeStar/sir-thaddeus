@@ -48,7 +48,8 @@ public sealed partial class LmStudioAssistant
             ],
             maxRoundTrips: MaxRoundTrips,
             maxOutputTokens: MaxOutputTokens,
-            log: latencyLog);
+            log: latencyLog,
+            executionControl: ExecutionControl);
 
         var steps = new List<ITurnStep>
         {
@@ -191,7 +192,7 @@ public sealed partial class LmStudioAssistant
             new ResponseComposerStep(),
         };
 
-        return new ChatPipeline(steps, latencyLog);
+        return new ChatPipeline(steps, latencyLog, ExecutionControl);
     }
 
     private static bool IsLatencyTracingEnabled()

@@ -90,6 +90,14 @@ export interface MemoryOverviewResponse {
   profile?: ProfileDto | null;
 }
 
+export interface MemoryPolicyResponse {
+  enabled: boolean;
+}
+
+export interface MemoryResetResponse {
+  rowsRemoved: number;
+}
+
 export interface NuggetListResponse {
   items: NuggetDto[];
   totalCount: number;

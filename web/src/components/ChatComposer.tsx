@@ -373,10 +373,10 @@ export function ChatComposer({
         <div className="ml-auto flex items-center gap-1">
           {rightActions}
           <Link
-            to="/history"
+            to="/chat"
             className="chat-composer-icon-button"
-            aria-label="Chat history"
-            title="Chat history"
+            aria-label="Conversations"
+            title="Conversations"
           >
             <History className="h-4 w-4" strokeWidth={1.8} />
           </Link>
