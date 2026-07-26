@@ -1,6 +1,74 @@
 import { expect, test } from '@playwright/test';
 
 test.describe('legible workbench UX', () => {
+  test('compact desktop widths preserve a usable Wiki editor measure', async ({ page, context }) => {
+    const baseUrl = process.env.RUNTIME_BASE_URL!;
+    const token = process.env.RUNTIME_TOKEN!;
+    await context.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
+    await page.setViewportSize({ width: 1000, height: 720 });
+
+    await page.goto(`${baseUrl}/wiki`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('route-wiki')).toBeVisible();
+    await expect(page.getByTestId('desktop-sidebar')).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open Assistant' })).toBeVisible();
+
+    const editor = page.getByTestId('wiki-editor-pane');
+    await expect.poll(async () => (await editor.boundingBox())?.width ?? 0).toBeGreaterThan(600);
+
+    // Opening the optional assistant at this width yields the page-tree rail
+    // automatically instead of crushing the editor between two full panels.
+    await page.getByRole('button', { name: 'Open Assistant' }).click();
+    await expect(page.getByRole('button', { name: 'Open Pages' })).toBeVisible();
+    await expect.poll(async () => (await editor.boundingBox())?.width ?? 0).toBeGreaterThan(600);
+  });
+
+  test('ordinary replies keep lightweight actions instead of a work receipt', async ({ page, context }) => {
+    const baseUrl = process.env.RUNTIME_BASE_URL!;
+    const token = process.env.RUNTIME_TOKEN!;
+    await context.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
+
+    await page.route(`${baseUrl}/api/threads/casual-thread`, async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'casual-thread',
+          title: 'A quick hello',
+          createdAt: '2026-07-25T12:00:00Z',
+          updatedAt: '2026-07-25T12:01:00Z',
+          messages: [
+            {
+              id: 'casual-user',
+              role: 'user',
+              text: 'Hello there.',
+              createdAt: '2026-07-25T12:00:00Z',
+            },
+            {
+              id: 'casual-assistant',
+              role: 'assistant',
+              text: 'Hello. What shall we work on?',
+              createdAt: '2026-07-25T12:01:00Z',
+            },
+          ],
+        }),
+      });
+    });
+    await page.route(`${baseUrl}/api/turns/casual-assistant/trace`, async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ messageId: 'casual-assistant', events: [] }),
+      });
+    });
+    await page.route(`${baseUrl}/api/permissions/pending`, async (route) => {
+      await route.fulfill({ contentType: 'application/json', body: '{"requests":[]}' });
+    });
+
+    await page.goto(`${baseUrl}/chat/casual-thread`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('Hello. What shall we work on?')).toBeVisible();
+    await expect(page.getByTestId('work-receipt-casual-assistant')).toHaveCount(0);
+    await expect(page.getByTestId('chat-copy-latest-response')).toBeVisible();
+    await expect(page.getByTestId('chat-retry-latest-response')).toBeVisible();
+  });
+
   test('multi-step work is editable and cannot execute before plan approval', async ({ page, context }) => {
     const baseUrl = process.env.RUNTIME_BASE_URL!;
     const token = process.env.RUNTIME_TOKEN!;

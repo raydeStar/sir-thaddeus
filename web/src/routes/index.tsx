@@ -15,13 +15,11 @@ export const Route = createFileRoute('/')({
 
 const MIN_VOICE_HOLD_MS = 350;
 
-// Shown only on a fresh, connected workspace (no threads yet). Each one maps
-// to a capability the runtime actually ships — chat, permissioned tools, and
-// the wiki — so the first click demonstrates the product, not a canned demo.
+// Quiet capability cues. Selecting one drafts the request for review.
 const STARTER_PROMPTS = [
-  'What can you do on this machine?',
-  'Summarize a document in my workspace',
-  'Search the web for something recent',
+  'Summarize what is on my screen',
+  'Find something in my Wiki',
+  'Plan a task with me',
 ];
 
 function HomeRoute() {
@@ -211,7 +209,7 @@ function HomeRoute() {
   return (
     <section
       data-testid="route-home"
-      className="mx-auto flex min-h-full w-full max-w-[700px] flex-col px-5 pt-14 pb-16 sm:px-6 md:pt-20"
+      className="mx-auto flex min-h-full w-full max-w-[700px] flex-col px-5 pt-14 pb-16 sm:px-6 md:pt-20 lg:justify-center lg:pb-24 lg:pt-0"
     >
       {/* Hero mark — small, calm. Signals identity without being loud. */}
       <div className="mx-auto drop-shadow-[0_12px_28px_rgba(201,146,57,0.24)]">
@@ -308,14 +306,14 @@ function HomeRoute() {
           </div>
         ) : null}
 
-        {connected && recent.length === 0 ? (
-          <div className="mt-8 flex flex-wrap justify-center gap-2" data-testid="home-starter-prompts">
+        {connected ? (
+          <div className="mt-6 flex flex-wrap justify-center gap-2" data-testid="home-starter-prompts">
             {STARTER_PROMPTS.map((prompt) => (
               <button
                 key={prompt}
                 type="button"
                 disabled={busy}
-                onClick={() => void start(prompt)}
+                onClick={() => setDraft(prompt)}
                 className="rounded-full border border-line bg-canvas-raised px-3.5 py-2 text-[13px] text-ink-muted transition-colors hover:border-accent/60 hover:text-accent disabled:opacity-50"
               >
                 {prompt}
@@ -327,7 +325,7 @@ function HomeRoute() {
 
       {/* Recents. Only renders when there are threads — otherwise the hero breathes. */}
       {recent.length > 0 ? (
-        <nav aria-label="Recent conversations" className="mt-16">
+        <nav aria-label="Recent conversations" className="mt-16 lg:hidden">
           {/* Hairline divider gives the section its own visual weight so it
               doesn't read as a continuation of the input hint. */}
           <div className="mb-6 h-px bg-line" aria-hidden />

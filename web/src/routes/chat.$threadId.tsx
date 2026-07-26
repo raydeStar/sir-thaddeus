@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, EyeOff, Loader2, Mic, Plus, Send, Square, Volume2, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, Check, Clipboard, EyeOff, Loader2, Mic, Plus, RotateCcw, Send, Square, Volume2, WifiOff, X } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
@@ -1013,6 +1013,34 @@ function MessageRow({
               <Volume2 className="h-3.5 w-3.5" strokeWidth={1.9} />
             )}
           </button>
+          {isLatestAssistantResponse ? (
+            <>
+              <button
+                type="button"
+                onClick={() => { void onCopy(); }}
+                className="receipt-action"
+                aria-label="Copy latest response"
+                data-testid="chat-copy-latest-response"
+              >
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+              {onRetryLatest ? (
+                <button
+                  type="button"
+                  onClick={onRetryLatest}
+                  disabled={retryDisabled}
+                  className="receipt-action"
+                  aria-label="Retry latest response"
+                  data-testid="chat-retry-latest-response"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Retry
+                  <kbd className="text-[9px] opacity-60">R</kbd>
+                </button>
+              ) : null}
+            </>
+          ) : null}
         </div>
       ) : null}
       {!streaming && messageId && text.trim() ? (
@@ -1021,8 +1049,6 @@ function MessageRow({
           threadId={threadId}
           text={text}
           sources={sources}
-          isLatest={isLatestAssistantResponse}
-          onCopy={() => { void onCopy(); }}
           onRetry={onRetryLatest}
           retryDisabled={retryDisabled}
         />
