@@ -38,6 +38,12 @@ public sealed record TurnContext
     /// propose-automation virtual tool) short-circuit on this flag.</summary>
     public bool IsAutomationRun { get; init; }
 
+    /// <summary>
+    /// Per-turn memory policy. Ephemeral turns neither read durable memory nor
+    /// enqueue automatic writes, and their tool list must exclude memory tools.
+    /// </summary>
+    public TurnMemoryAccess MemoryAccess { get; init; } = TurnMemoryAccess.Enabled;
+
     /// <summary>Deterministic heuristic signals over the user message.
     /// Populated by a feature-extractor step. Null before that step runs.</summary>
     public RoutingFeatures? Features { get; init; }
@@ -86,4 +92,11 @@ public sealed record TurnContext
     /// <para>Null means no forcing — the default behavior.</para>
     /// </summary>
     public string? ForcedTool { get; init; }
+}
+
+public enum TurnMemoryAccess
+{
+    Enabled,
+    Disabled,
+    Ephemeral,
 }

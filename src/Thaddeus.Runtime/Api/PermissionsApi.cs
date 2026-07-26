@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using SirThaddeus.AuditLog;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.Runtime.Tools;
 
@@ -32,7 +33,11 @@ public static class PermissionsApi
                 PermissionsJsonContext.Default.PendingPermissionsResponse);
         });
 
-        app.MapPost("/api/permissions/respond", (RespondToPermissionRequest? req, ToolPermissionGate gate) =>
+        app.MapPost("/api/permissions/respond", async (
+            RespondToPermissionRequest? req,
+            ToolPermissionGate gate,
+            IAuditLogger audit,
+            CancellationToken ct) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Id) || string.IsNullOrWhiteSpace(req.Decision))
                 return Results.BadRequest(new { error = "id and decision are required" });
@@ -43,7 +48,32 @@ public static class PermissionsApi
             if (!TryNormalizeScope(req.Scope, out var scope))
                 return Results.BadRequest(new { error = $"unknown scope '{req.Scope}'" });
 
+            var pending = gate.ListPending().FirstOrDefault(item =>
+                string.Equals(item.Id, req.Id, StringComparison.Ordinal));
             var matched = gate.Respond(req.Id, decision, scope);
+            if (matched)
+            {
+                var latencyMs = pending is null
+                    ? -1L
+                    : Math.Max(0L, (long)(DateTimeOffset.UtcNow - pending.CreatedAt).TotalMilliseconds);
+                await audit.AppendAsync(new AuditEvent
+                {
+                    Actor = "user",
+                    Action = "TOOL_PERMISSION_DECISION",
+                    Target = pending?.Tool ?? req.Id,
+                    Result = decision == ToolPermissionResponse.Deny ? "denied" : "ok",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["requestId"] = req.Id,
+                        ["decision"] = req.Decision.Trim().ToLowerInvariant(),
+                        ["scope"] = scope,
+                        ["group"] = pending?.Group ?? string.Empty,
+                        ["threadId"] = pending?.ThreadId ?? string.Empty,
+                        ["turnId"] = pending?.TurnId ?? string.Empty,
+                        ["latencyMs"] = latencyMs,
+                    },
+                }, ct).ConfigureAwait(false);
+            }
             return matched
                 ? Results.Ok(new { applied = true })
                 : Results.NotFound(new { error = "permission request not found (already resolved or cancelled)" });
@@ -61,13 +91,18 @@ public static class PermissionsApi
         return app;
     }
 
-    private static bool TryNormalizeScope(string? value, out string scope)
+    internal static bool TryNormalizeScope(string? value, out string scope)
     {
         switch ((value ?? "").Trim().ToLowerInvariant())
         {
             case "":         scope = "group"; return true; // absent → group (back-compat)
             case "group":    scope = "group"; return true;
             case "tool":     scope = "tool"; return true;
+            // Call scope is server-authoritative for one-shot mutations such
+            // as Wiki writes. The client echoes it to keep the decision and
+            // audit contract explicit; the gate still refuses to cache or
+            // persist broader grants for these prompts.
+            case "call":     scope = "call"; return true;
             default:         scope = "group"; return false;
         }
     }

@@ -34,9 +34,12 @@ public sealed class TurnTraceWriter : IHostedService, IDisposable
         ChatTurnEvents.Complete,
         ChatTurnEvents.ToolStarted,
         ChatTurnEvents.ToolCompleted,
+        ChatTurnEvents.EffectProposed,
+        ChatTurnEvents.EffectCompleted,
         ChatTurnEvents.FootmanDecision,
         ChatTurnEvents.MemoryRecalled,
         ChatTurnEvents.UserMessageAppended,
+        ChatTurnEvents.RunStateChanged,
     };
 
     private static readonly JsonSerializerOptions JsonOptions = new()

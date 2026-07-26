@@ -70,6 +70,9 @@ public sealed class MemoryContextStep : ITurnStep
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (context.MemoryAccess != TurnMemoryAccess.Enabled)
+            return new StepResult.Continue(context);
+
         if (_provider is null)
             return new StepResult.Continue(context);
 

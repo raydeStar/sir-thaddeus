@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Routing;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Memory;
 using Thaddeus.Runtime.Memory;
+using Thaddeus.Runtime.Settings;
+using Thaddeus.SharedTypes;
 
 namespace Thaddeus.Runtime.Api;
 
@@ -50,6 +52,73 @@ public static class MemoryAuditApi
                 NuggetCount: nuggetCount,
                 Profile: profile is null ? null : ToDto(profile)),
                 MemoryAuditJsonContext.Default.MemoryOverviewResponse);
+        });
+
+        app.MapGet("/api/memory/policy", async (ISettingsStore settings, CancellationToken ct) =>
+        {
+            var document = await settings.GetAsync(ct).ConfigureAwait(false);
+            return Results.Json(
+                new MemoryPolicyResponse(document.Memory?.Enabled ?? true),
+                MemoryAuditJsonContext.Default.MemoryPolicyResponse);
+        });
+
+        app.MapPut("/api/memory/policy", async (
+            MemoryPolicyRequest request,
+            ISettingsStore settings,
+            IAuditLogger audit,
+            CancellationToken ct) =>
+        {
+            var current = await settings.GetAsync(ct).ConfigureAwait(false);
+            var updated = await settings.ReplaceAsync(
+                current with
+                {
+                    Memory = (current.Memory ?? new RuntimeMemorySettings(true)) with
+                    {
+                        Enabled = request.Enabled,
+                    },
+                },
+                ct).ConfigureAwait(false);
+            await audit.AppendAsync(new AuditEvent
+            {
+                Actor = "user",
+                Action = request.Enabled ? "memory.resume" : "memory.pause",
+                Target = "memory",
+                Result = "ok",
+            }, ct).ConfigureAwait(false);
+            return Results.Json(
+                new MemoryPolicyResponse(updated.Memory?.Enabled ?? true),
+                MemoryAuditJsonContext.Default.MemoryPolicyResponse);
+        });
+
+        app.MapDelete("/api/memory/reset", async (
+            HttpContext ctx,
+            IMemoryStore store,
+            IAuditLogger audit,
+            CancellationToken ct) =>
+        {
+            var request = await System.Text.Json.JsonSerializer.DeserializeAsync(
+                ctx.Request.Body,
+                MemoryAuditJsonContext.Default.MemoryResetRequest,
+                ct).ConfigureAwait(false);
+            if (!string.Equals(request?.Confirmation, "RESET", StringComparison.Ordinal))
+                return Results.BadRequest(new { error = "confirmation_required" });
+            if (store is not IMemoryResetStore resetStore)
+                return Results.Problem(
+                    "The configured memory store does not support permanent reset.",
+                    statusCode: StatusCodes.Status501NotImplemented);
+
+            var removed = await resetStore.ResetAllAsync(ct).ConfigureAwait(false);
+            await audit.AppendAsync(new AuditEvent
+            {
+                Actor = "user",
+                Action = "memory.reset",
+                Target = "memory",
+                Result = "ok",
+                Details = new Dictionary<string, object> { ["rowsRemoved"] = removed },
+            }, ct).ConfigureAwait(false);
+            return Results.Json(
+                new MemoryResetResponse(removed),
+                MemoryAuditJsonContext.Default.MemoryResetResponse);
         });
 
         app.MapGet("/api/memory/nuggets", async (string? filter, int? limit, IMemoryStore store, CancellationToken ct) =>
@@ -391,6 +460,10 @@ public sealed record MemoryOverviewResponse(
     int ChunkCount,
     int NuggetCount,
     ProfileDto? Profile);
+public sealed record MemoryPolicyRequest(bool Enabled);
+public sealed record MemoryPolicyResponse(bool Enabled);
+public sealed record MemoryResetRequest(string? Confirmation);
+public sealed record MemoryResetResponse(int RowsRemoved);
 
 public sealed record NuggetDto(
     string Id,
@@ -461,6 +534,10 @@ public sealed record UpdateFactRequest(string? Subject, string? Predicate, strin
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(MemoryOverviewResponse))]
+[JsonSerializable(typeof(MemoryPolicyRequest))]
+[JsonSerializable(typeof(MemoryPolicyResponse))]
+[JsonSerializable(typeof(MemoryResetRequest))]
+[JsonSerializable(typeof(MemoryResetResponse))]
 [JsonSerializable(typeof(NuggetDto))]
 [JsonSerializable(typeof(FactDto))]
 [JsonSerializable(typeof(EventDto))]

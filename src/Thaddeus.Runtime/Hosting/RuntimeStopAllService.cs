@@ -1,4 +1,5 @@
 using SirThaddeus.AuditLog;
+using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.State;
 using Thaddeus.Runtime.Tools;
 using Thaddeus.Runtime.Voice;
@@ -10,6 +11,7 @@ public sealed class RuntimeStopAllService
     private readonly VoiceModeController _voice;
     private readonly VoiceHostProcessSupervisor _voiceHost;
     private readonly McpClientHost _mcp;
+    private readonly TurnRunCoordinator _runs;
     private readonly RuntimeStateMachine _stateMachine;
     private readonly IAuditLogger _audit;
     private readonly ILogger<RuntimeStopAllService> _logger;
@@ -18,6 +20,7 @@ public sealed class RuntimeStopAllService
         VoiceModeController voice,
         VoiceHostProcessSupervisor voiceHost,
         McpClientHost mcp,
+        TurnRunCoordinator runs,
         RuntimeStateMachine stateMachine,
         IAuditLogger audit,
         ILogger<RuntimeStopAllService> logger)
@@ -25,6 +28,7 @@ public sealed class RuntimeStopAllService
         _voice = voice ?? throw new ArgumentNullException(nameof(voice));
         _voiceHost = voiceHost ?? throw new ArgumentNullException(nameof(voiceHost));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
+        _runs = runs ?? throw new ArgumentNullException(nameof(runs));
         _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -34,6 +38,18 @@ public sealed class RuntimeStopAllService
     {
         var stopped = new List<string>();
         var errors = new List<string>();
+
+        try
+        {
+            var count = _runs.CancelAll();
+            if (count > 0)
+                stopped.Add($"{count} assistant run{(count == 1 ? string.Empty : "s")}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "runtime.stop_all.chat_failed");
+            errors.Add($"assistant runs: {ex.Message}");
+        }
 
         try
         {

@@ -19,6 +19,10 @@ public static class ChatTurnEvents
     public const string ToolStarted = "chat.tool.started";
     /// <summary>Emitted when a tool call finishes (success, error, or denied).</summary>
     public const string ToolCompleted = "chat.tool.completed";
+    /// <summary>Emitted before a tool crosses its permission/execution boundary.</summary>
+    public const string EffectProposed = "chat.effect.proposed";
+    /// <summary>Emitted after the attempted effect returns with its evidence status.</summary>
+    public const string EffectCompleted = "chat.effect.completed";
 
     /// <summary>
     /// Emitted when a user message is appended server-side (not via the
@@ -47,6 +51,12 @@ public static class ChatTurnEvents
     /// same answer from training.
     /// </summary>
     public const string MemoryRecalled = "chat.memory.recalled";
+    /// <summary>
+    /// Emitted whenever the user-controllable lifecycle of a live turn changes.
+    /// This is the authoritative progress/control state; clients must not
+    /// synthesize progress from timers or animations.
+    /// </summary>
+    public const string RunStateChanged = "chat.run.state";
 }
 
 /// <summary>Payload for <see cref="ChatTurnEvents.Start"/>.</summary>
@@ -108,6 +118,39 @@ public sealed record ChatToolCompleted(
     long DurationMs,
     string? ResultSnippet,
     string? Error,
+    DateTimeOffset CompletedAt);
+
+public sealed record ChatEffectDescriptor(
+    string Kind,
+    bool Mutating,
+    bool Reversible,
+    string Boundary,
+    string Summary,
+    string? Target,
+    string? UndoStrategy,
+    string Capability);
+
+public sealed record ChatEffectOutcome(
+    string Status,
+    string Evidence,
+    bool IndependentlyVerified,
+    string? ResolvedTarget);
+
+public sealed record ChatEffectProposed(
+    string ActivityId,
+    string ThreadId,
+    string MessageId,
+    string Tool,
+    ChatEffectDescriptor Effect,
+    DateTimeOffset ProposedAt);
+
+public sealed record ChatEffectCompleted(
+    string ActivityId,
+    string ThreadId,
+    string MessageId,
+    string Tool,
+    ChatEffectDescriptor Effect,
+    ChatEffectOutcome Outcome,
     DateTimeOffset CompletedAt);
 
 /// <summary>
@@ -176,3 +219,17 @@ public sealed record ChatMemoryRecalled(
     string Preview,
     long DurationMs,
     DateTimeOffset RecalledAt);
+
+/// <summary>Payload for <see cref="ChatTurnEvents.RunStateChanged"/>.</summary>
+public sealed record ChatRunStateChanged(
+    string RunId,
+    string ThreadId,
+    string UserMessageId,
+    string? AssistantMessageId,
+    string State,
+    string? Checkpoint,
+    DateTimeOffset StartedAt,
+    DateTimeOffset UpdatedAt,
+    string? Detail,
+    long Version,
+    WorkPlan? Plan);

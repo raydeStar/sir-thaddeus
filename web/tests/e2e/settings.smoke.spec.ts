@@ -49,6 +49,22 @@ test.describe('settings smoke', () => {
     await expect(page.getByTestId('settings-logs-pane-traces')).toBeVisible();
     await page.getByTestId('settings-logs-pane-runtime').click();
     await expect(page.getByTestId('settings-logs-pane-runtime')).toHaveAttribute('aria-selected', 'true');
+    await page.getByTestId('settings-logs-pane-audit').click();
+    await expect(page.getByTestId('settings-audit-insights')).toBeVisible();
+    await expect(page.getByTestId('insight-task-completion')).toBeVisible();
+    await expect(page.getByTestId('insight-trust-calibration')).toContainText(/Needs evidence|\d+%/);
+    await page.getByTestId('audit-filter').fill('permission');
+    await expect(page.getByTestId('audit-export')).toBeVisible();
+
+    const insightsResponse = await context.request.get(`${baseUrl}/api/insights`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(insightsResponse.ok()).toBeTruthy();
+    const auditExport = await context.request.get(`${baseUrl}/api/audit/export`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(auditExport.ok()).toBeTruthy();
+    expect(auditExport.headers()['content-type']).toContain('application/x-ndjson');
 
     // Save.
     await page.getByTestId('settings-save').click();

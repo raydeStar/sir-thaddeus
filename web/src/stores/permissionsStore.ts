@@ -8,6 +8,13 @@ import {
 } from '../lib/permissionsApi';
 import { subscribeWsEvents } from '../lib/wsEvents';
 
+export interface ResolvedPermission {
+  request: PendingPermission;
+  decision: PermissionResponse;
+  scope: PermissionScope;
+  resolvedAt: string;
+}
+
 /**
  * Tracks outstanding tool-permission prompts from the runtime. The modal
  * reads the head of the queue and resolves it via the REST endpoint. New
@@ -17,6 +24,8 @@ import { subscribeWsEvents } from '../lib/wsEvents';
  */
 interface PermissionsStoreState {
   queue: PendingPermission[];
+  resolved: ResolvedPermission[];
+  error: string | null;
   start: () => void;
   resolve: (id: string, decision: PermissionResponse, scope?: PermissionScope) => Promise<void>;
   dismiss: (id: string) => void;
@@ -38,6 +47,8 @@ function enqueueUnique(queue: PendingPermission[], req: PendingPermission): Pend
 
 export const usePermissionsStore = create<PermissionsStoreState>((set, get) => ({
   queue: [],
+  resolved: [],
+  error: null,
 
   start: () => {
     if (started) return;
@@ -70,19 +81,39 @@ export const usePermissionsStore = create<PermissionsStoreState>((set, get) => (
   },
 
   resolve: async (id, decision, scope) => {
-    // Optimistically drop from the queue so the modal closes immediately.
-    // If the POST fails we re-queue from whatever the server reports.
     const prior = get().queue;
-    set({ queue: prior.filter((q) => q.id !== id) });
+    const original = prior.find((q) => q.id === id);
+    const resolvedScope: PermissionScope =
+      original?.scope === 'call'
+        ? 'call'
+        : scope === 'tool' || scope === 'call'
+          ? scope
+          : 'group';
+    set({ queue: prior.filter((q) => q.id !== id), error: null });
     try {
-      await respondToPermission(id, decision, scope);
+      await respondToPermission(id, decision, resolvedScope);
+      if (original) {
+        set((s) => ({
+          resolved: [
+            ...s.resolved.slice(-49),
+            {
+              request: original,
+              decision,
+              scope: resolvedScope,
+              resolvedAt: new Date().toISOString(),
+            },
+          ],
+        }));
+      }
     } catch (err) {
       // Roll back — let the user try again.
       console.warn('[permissions] respond failed', err);
       const current = get().queue;
-      const original = prior.find((q) => q.id === id);
       if (original && !current.some((q) => q.id === id)) {
-        set({ queue: [original, ...current] });
+        set({
+          queue: [original, ...current],
+          error: (err as Error).message || 'Could not record the permission decision.',
+        });
       }
     }
   },

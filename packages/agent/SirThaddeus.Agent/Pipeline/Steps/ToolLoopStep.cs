@@ -50,6 +50,7 @@ public sealed class ToolLoopStep : ITurnStep
     private readonly int _maxRoundTrips;
     private readonly int _maxOutputTokens;
     private readonly Action<string, string>? _log;
+    private readonly ITurnExecutionControl _executionControl;
 
     public ToolLoopStep(
         ILlmClient llm,
@@ -61,7 +62,8 @@ public sealed class ToolLoopStep : ITurnStep
         IEnumerable<IToolArgsRewriter>? argsRewriters = null,
         int maxRoundTrips = 6,
         int maxOutputTokens = DefaultMaxOutputTokens,
-        Action<string, string>? log = null)
+        Action<string, string>? log = null,
+        ITurnExecutionControl? executionControl = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
@@ -77,6 +79,7 @@ public sealed class ToolLoopStep : ITurnStep
         _maxRoundTrips = maxRoundTrips;
         _maxOutputTokens = maxOutputTokens;
         _log = log;
+        _executionControl = executionControl ?? NullTurnExecutionControl.Instance;
     }
 
     public string Name => "ToolLoop";
@@ -137,6 +140,15 @@ public sealed class ToolLoopStep : ITurnStep
         for (var round = 0; round < _maxRoundTrips; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var roundSteering = await _executionControl.ReachCheckpointAsync(
+                context,
+                $"tool-loop:model:{round + 1}",
+                cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(roundSteering))
+            {
+                messages.Add(ChatMessage.System(
+                    $"[USER STEERING]\n{roundSteering.Trim()}\nFollow this correction for all remaining work."));
+            }
 
             if (round > 0 &&
                 TryBuildPlacesDiscoverDraftFromRecords(toolCallsMade, context.UserText) is { Text.Length: > 0 } existingPlacesDraft)
@@ -332,16 +344,49 @@ public sealed class ToolLoopStep : ITurnStep
 
             messages.Add(ChatMessage.AssistantToolCalls(responseToolCalls));
 
+            var redirectedBatch = false;
             foreach (var call in responseToolCalls)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var toolName = call.Function.Name;
                 var rawArgs = call.Function.Arguments ?? "{}";
                 var args = ApplyArgsRewriters(context, toolName, rawArgs);
+                if (!redirectedBatch)
+                {
+                    var toolSteering = await _executionControl.ReachCheckpointAsync(
+                        context,
+                        $"tool-loop:tool:{toolName}",
+                        cancellationToken).ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(toolSteering))
+                    {
+                        messages.Add(ChatMessage.System(
+                            $"[USER STEERING]\n{toolSteering.Trim()}\nReconsider the remaining tool calls before acting."));
+                        redirectedBatch = true;
+                    }
+                }
+
+                if (redirectedBatch)
+                {
+                    const string skipped = "Skipped because the user redirected the remaining work.";
+                    messages.Add(ChatMessage.ToolResult(call.Id, skipped));
+                    toolCallsMade.Add(new ToolCallRecord
+                    {
+                        ToolName = toolName,
+                        Arguments = args,
+                        Result = skipped,
+                        Success = false,
+                    });
+                    continue;
+                }
 
                 var group = _groupClassifier.Classify(toolName);
                 var activityId = Guid.NewGuid().ToString("N");
+                var effect = ToolEffectClassifier.Describe(toolName, args);
 
+                await _sink.EffectProposedAsync(
+                        activityId, context.ThreadId, context.MessageId,
+                        toolName, effect, cancellationToken)
+                    .ConfigureAwait(false);
                 await _sink.ToolStartedAsync(
                         activityId, context.ThreadId, context.MessageId,
                         toolName, group, Trim(args, 512), cancellationToken)
@@ -358,6 +403,12 @@ public sealed class ToolLoopStep : ITurnStep
                         outcome.Ok, sw.ElapsedMilliseconds,
                         outcome.Ok ? Trim(outcome.ResultText, 280) : null,
                         outcome.Error,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                await _sink.EffectCompletedAsync(
+                        activityId, context.ThreadId, context.MessageId, toolName,
+                        effect,
+                        ToolEffectClassifier.Complete(effect, toolName, outcome.Ok, outcome.ResultText),
                         cancellationToken)
                     .ConfigureAwait(false);
 

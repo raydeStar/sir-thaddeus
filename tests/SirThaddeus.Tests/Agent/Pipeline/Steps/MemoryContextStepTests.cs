@@ -27,6 +27,25 @@ public class MemoryContextStepTests
     }
 
     [Fact]
+    public async Task Ephemeral_turn_never_calls_memory_provider()
+    {
+        var calls = 0;
+        var provider = new RecordingProvider(_ =>
+        {
+            calls++;
+            return new MemoryContextResult { PackText = "must not be read" };
+        });
+        var step = new MemoryContextStep(provider);
+        var ctx = WithSystemPrompt("base") with { MemoryAccess = TurnMemoryAccess.Ephemeral };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(0, calls);
+        Assert.DoesNotContain("REMEMBERED CONTEXT", ctx.LlmMessages[0].Content);
+    }
+
+    [Fact]
     public async Task No_op_when_provider_returns_empty_pack_text()
     {
         // Retrieval succeeded but there was nothing to say — leave the

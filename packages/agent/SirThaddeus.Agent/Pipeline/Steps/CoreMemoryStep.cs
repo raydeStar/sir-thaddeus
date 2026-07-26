@@ -61,6 +61,9 @@ public sealed class CoreMemoryStep : ITurnStep
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (context.MemoryAccess != TurnMemoryAccess.Enabled)
+            return new StepResult.Continue(context);
+
         if (_store is null)
             return new StepResult.Continue(context);
 

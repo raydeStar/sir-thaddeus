@@ -26,14 +26,17 @@ public sealed class ChatPipeline
 {
     private readonly IReadOnlyList<ITurnStep> _steps;
     private readonly Action<string, string>? _logEvent;
+    private readonly ITurnExecutionControl _executionControl;
 
     public ChatPipeline(
         IReadOnlyList<ITurnStep> steps,
-        Action<string, string>? logEvent = null)
+        Action<string, string>? logEvent = null,
+        ITurnExecutionControl? executionControl = null)
     {
         ArgumentNullException.ThrowIfNull(steps);
         _steps = steps;
         _logEvent = logEvent;
+        _executionControl = executionControl ?? NullTurnExecutionControl.Instance;
     }
 
     /// <summary>Snapshot of the pipeline's steps, in the order they will run.
@@ -59,6 +62,22 @@ public sealed class ChatPipeline
             cancellationToken.ThrowIfCancellationRequested();
 
             var step = _steps[i];
+            var steering = await _executionControl.ReachCheckpointAsync(
+                current,
+                $"pipeline:{step.Name}",
+                cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(steering))
+            {
+                current = current with
+                {
+                    LlmMessages =
+                    [
+                        .. current.LlmMessages,
+                        SirThaddeus.LlmClient.ChatMessage.System(
+                            $"[USER STEERING]\n{steering.Trim()}\nFollow this correction for all remaining work."),
+                    ],
+                };
+            }
             _logEvent?.Invoke("PIPELINE_STEP_START", $"{i}:{step.Name}");
 
             var stepStarted = timingEnabled ? Stopwatch.GetTimestamp() : 0L;

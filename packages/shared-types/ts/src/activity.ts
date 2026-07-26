@@ -92,3 +92,33 @@ export interface RuntimeLogResponse {
   fileName: string;
   lines: RuntimeLogLine[];
 }
+
+export interface AuditEvent {
+  timestamp: string;
+  actor: string;
+  action: string;
+  target?: string | null;
+  result: string;
+  permissionTokenId?: string | null;
+  details?: Record<string, unknown> | null;
+}
+
+export interface AuditTrailResponse {
+  events: AuditEvent[];
+}
+
+export interface AssistantInsightMetric {
+  key: string;
+  label: string;
+  value?: number | null;
+  numerator: number;
+  denominator: number;
+  status: 'measured' | 'insufficient-data' | 'not-instrumented';
+  definition: string;
+}
+
+export interface AssistantInsightsResponse {
+  generatedAt: string;
+  sampleEvents: number;
+  metrics: AssistantInsightMetric[];
+}

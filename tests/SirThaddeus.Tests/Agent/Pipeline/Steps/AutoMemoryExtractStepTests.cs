@@ -24,6 +24,24 @@ public class AutoMemoryExtractStepTests
     }
 
     [Fact]
+    public async Task Ephemeral_turn_never_enqueues_memory_writes()
+    {
+        var extractor = new RecordingExtractor();
+        var step = new AutoMemoryExtractStep(extractor);
+        var ctx = NewContext(
+            "remember this secret",
+            assistantDraft: "I will not retain it") with
+        {
+            MemoryAccess = TurnMemoryAccess.Ephemeral,
+        };
+
+        await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.Empty(extractor.ExtractionCalls);
+        Assert.Empty(extractor.ChunkCalls);
+    }
+
+    [Fact]
     public async Task Fires_user_extraction_and_user_chunk_when_user_text_present()
     {
         var ex = new RecordingExtractor();

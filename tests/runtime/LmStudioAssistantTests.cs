@@ -206,6 +206,46 @@ public class LmStudioAssistantTests : IDisposable
     }
 
     [Fact]
+    public async Task RespondAsync_ephemeral_memory_turn_hides_all_memory_tools()
+    {
+        var tools = new[]
+        {
+            new McpToolInfo
+            {
+                Name = "memory_retrieve",
+                Description = "Read durable memory",
+                InputSchema = new { type = "object" },
+            },
+            new McpToolInfo
+            {
+                Name = "memory_store_facts",
+                Description = "Write durable memory",
+                InputSchema = new { type = "object" },
+            },
+            new McpToolInfo
+            {
+                Name = "calculator",
+                Description = "Calculate locally",
+                InputSchema = new { type = "object" },
+            },
+        };
+        var (store, assistant, _, fake) = NewSut(tools: tools);
+        var thread = await store.CreateAsync("t", CancellationToken.None);
+
+        await assistant.RespondAsync(
+            thread.Id,
+            "help me think privately",
+            new AssistantTurnOptions(EphemeralMemory: true),
+            CancellationToken.None);
+
+        var sentTools = fake.ToolCalls.Single();
+        Assert.DoesNotContain(sentTools, tool =>
+            ToolCapabilityRegistry.ResolveCapability(tool.Function.Name) is
+                ToolCapability.MemoryRead or ToolCapability.MemoryWrite);
+        Assert.Contains(sentTools, tool => tool.Function.Name == "calculator");
+    }
+
+    [Fact]
     public void BuildTurnPipeline_uses_audited_mcp_as_the_only_permission_boundary()
     {
         var (_, assistant, _, _) = NewSut();

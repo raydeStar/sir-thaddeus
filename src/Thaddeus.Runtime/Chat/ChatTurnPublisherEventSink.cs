@@ -69,6 +69,37 @@ public sealed class ChatTurnPublisherEventSink : IChatEventSink
             nameof(ToolCompletedAsync),
             () => _publisher.PublishToolCompletedAsync(activityId, threadId, messageId, tool, ok, durationMs, resultSnippet, error, cancellationToken));
 
+    public Task EffectProposedAsync(
+        string activityId,
+        string threadId,
+        string messageId,
+        string tool,
+        ToolEffectDescriptor effect,
+        CancellationToken cancellationToken = default)
+        => SafePublishAsync(
+            nameof(EffectProposedAsync),
+            () => _publisher.PublishEffectProposedAsync(
+                activityId, threadId, messageId, tool, Map(effect), cancellationToken));
+
+    public Task EffectCompletedAsync(
+        string activityId,
+        string threadId,
+        string messageId,
+        string tool,
+        ToolEffectDescriptor effect,
+        ToolEffectOutcome outcome,
+        CancellationToken cancellationToken = default)
+        => SafePublishAsync(
+            nameof(EffectCompletedAsync),
+            () => _publisher.PublishEffectCompletedAsync(
+                activityId, threadId, messageId, tool, Map(effect),
+                new Thaddeus.SharedTypes.ChatEffectOutcome(
+                    outcome.Status,
+                    outcome.Evidence,
+                    outcome.IndependentlyVerified,
+                    outcome.ResolvedTarget),
+                cancellationToken));
+
     public Task FootmanDecisionAsync(
         string threadId,
         string messageId,
@@ -101,4 +132,15 @@ public sealed class ChatTurnPublisherEventSink : IChatEventSink
             _logger.LogWarning(ex, "chat_event_sink.publish_failed event={Event}", eventName);
         }
     }
+
+    private static Thaddeus.SharedTypes.ChatEffectDescriptor Map(ToolEffectDescriptor effect) =>
+        new(
+            effect.Kind,
+            effect.Mutating,
+            effect.Reversible,
+            effect.Boundary,
+            effect.Summary,
+            effect.Target,
+            effect.UndoStrategy,
+            effect.Capability);
 }

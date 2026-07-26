@@ -10,6 +10,8 @@ import type {
   FactDto,
   UpdateFactRequest,
   UpdateNuggetRequest,
+  MemoryPolicyResponse,
+  MemoryResetResponse,
 } from '@thaddeus/shared-types';
 
 function token(): string {
@@ -20,6 +22,29 @@ function token(): string {
 export async function getMemoryOverview(): Promise<MemoryOverviewResponse> {
   const res = await runtimeFetch(token(), '/api/memory/overview');
   return parseRuntimeJson<MemoryOverviewResponse>(res);
+}
+
+export async function getMemoryPolicy(): Promise<MemoryPolicyResponse> {
+  const res = await runtimeFetch(token(), '/api/memory/policy');
+  return parseRuntimeJson<MemoryPolicyResponse>(res);
+}
+
+export async function setMemoryEnabled(enabled: boolean): Promise<MemoryPolicyResponse> {
+  const res = await runtimeFetch(token(), '/api/memory/policy', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  return parseRuntimeJson<MemoryPolicyResponse>(res);
+}
+
+export async function resetMemory(): Promise<MemoryResetResponse> {
+  const res = await runtimeFetch(token(), '/api/memory/reset', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirmation: 'RESET' }),
+  });
+  return parseRuntimeJson<MemoryResetResponse>(res);
 }
 
 export async function listNuggets(filter?: string, limit = 50): Promise<NuggetListResponse> {

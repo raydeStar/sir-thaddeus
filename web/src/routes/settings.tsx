@@ -62,6 +62,10 @@ import { LogsTab } from '../components/settings/LogsTab';
 import { SettingsSection as Section } from '../components/settings/SettingsSection';
 
 export const Route = createFileRoute('/settings')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    tab: typeof search.tab === 'string' ? search.tab : undefined,
+    messageId: typeof search.messageId === 'string' ? search.messageId : undefined,
+  }),
   component: SettingsRoute,
 });
 
@@ -160,6 +164,7 @@ const DEFAULT_FILES: FilesSettings = {
 };
 
 function SettingsRoute() {
+  const { tab: requestedTab } = Route.useSearch();
   const [doc, setDoc] = useState<SettingsDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -170,9 +175,17 @@ function SettingsRoute() {
   const [gatekeeperStatus, setGatekeeperStatus] = useState<GatekeeperStatusResponse | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     if (typeof window === 'undefined') return 'general';
+    const fromQuery = new URLSearchParams(window.location.search).get('tab') as TabId | null;
+    if (fromQuery && TABS.some((candidate) => candidate.id === fromQuery)) return fromQuery;
     const fromHash = window.location.hash.replace('#', '') as TabId;
     return TABS.some((t) => t.id === fromHash) ? fromHash : 'general';
   });
+
+  useEffect(() => {
+    if (requestedTab && TABS.some((candidate) => candidate.id === requestedTab)) {
+      setActiveTab(requestedTab as TabId);
+    }
+  }, [requestedTab]);
 
   useEffect(() => {
     let cancelled = false;

@@ -139,7 +139,6 @@ public static class Program
             builder.Services.AddSingleton<StubAssistant>();
             builder.Services.AddSingleton<LlmRuntimeRegistry>();
             builder.Services.AddSingleton<HarnessToolEvidenceStore>();
-            builder.Services.AddSingleton<IAssistant, AssistantRouter>();
             builder.Services.AddSingleton<IActivityLog>(_ => new InMemoryActivityLog(capacity: 500));
             // The SQLite-backed semantic memory store. Previously this was
             // instantiated ad-hoc by the MCP server and the headless host —
@@ -244,6 +243,8 @@ public static class Program
                 Path.GetDirectoryName(options.LockFilePath)!, "logs", "audit.jsonl");
             Directory.CreateDirectory(Path.GetDirectoryName(auditPath)!);
             builder.Services.AddSingleton<IAuditLogger>(_ => new JsonLineAuditLogger(auditPath));
+            builder.Services.AddSingleton<TurnRunCoordinator>();
+            builder.Services.AddSingleton<IAssistant, AssistantRouter>();
             builder.Services.AddSingleton<McpClientHost>();
             builder.Services.AddSingleton<IMcpToolClient>(sp => sp.GetRequiredService<McpClientHost>());
             builder.Services.AddHostedService(sp => sp.GetRequiredService<McpClientHost>());
@@ -337,6 +338,7 @@ public static class Program
             app.MapActivityApi();
             app.MapTurnsApi();
             app.MapRuntimeLogsApi();
+            app.MapAuditInsightsApi();
             app.MapFilesApi();
             app.MapSettingsApi();
             app.MapMemoryAuditApi();

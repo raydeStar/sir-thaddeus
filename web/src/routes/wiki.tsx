@@ -61,10 +61,15 @@ const WIKI_SELECTION_REWRITE_PRESETS = [
 ] as const;
 
 export const Route = createFileRoute('/wiki')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    pageId: typeof search.pageId === 'string' ? search.pageId : undefined,
+    rootId: typeof search.rootId === 'string' ? search.rootId : undefined,
+  }),
   component: WikiRoute,
 });
 
 function WikiRoute() {
+  const { pageId: requestedPageId, rootId: requestedRootId } = Route.useSearch();
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [pagePrompt, setPagePrompt] = useState('');
@@ -147,8 +152,19 @@ function WikiRoute() {
   } = useWikiStore();
 
   useEffect(() => {
-    void loadRoots();
-  }, [loadRoots]);
+    let disposed = false;
+    void loadRoots().then(async () => {
+      if (disposed) return;
+      if (requestedPageId) {
+        await selectPage(requestedPageId);
+      } else if (requestedRootId) {
+        await selectRoot(requestedRootId);
+      }
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [loadRoots, requestedPageId, requestedRootId, selectPage, selectRoot]);
 
   useEffect(() => {
     if (trashOpen && selectedRootId) void loadTrash();

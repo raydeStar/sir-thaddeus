@@ -4,11 +4,12 @@ import react from '@vitejs/plugin-react';
 
 // Vite config for the Sir Thaddeus web workspace.
 //
-// `base: './'` is critical: the build output ships to `src/Thaddeus.Runtime/wwwroot/`
-// and is served from arbitrary loopback ports. Asset URLs must be relative.
+// The runtime serves the SPA at the loopback origin root. Root-relative asset
+// URLs keep direct deep links such as /chat/:threadId and /wiki working after
+// a refresh; document-relative URLs would incorrectly request /chat/assets/*.
 export default defineConfig({
   plugins: [react()],
-  base: './',
+  base: '/',
   resolve: {
     alias: {
       '@tanstack/react-router': path.resolve(__dirname, './src/lib/routerShim.tsx'),

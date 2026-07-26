@@ -79,6 +79,32 @@ public interface IChatEventSink
         string? error,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// A structured, user-legible effect preview emitted before permission
+    /// evaluation and execution. The default keeps older headless adapters
+    /// source-compatible while the desktop runtime persists the event.
+    /// </summary>
+    Task EffectProposedAsync(
+        string activityId,
+        string threadId,
+        string messageId,
+        string tool,
+        ToolEffectDescriptor effect,
+        CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <summary>
+    /// The truthful effect outcome emitted after the tool returns. A successful
+    /// call is only independently verified when the outcome says so.
+    /// </summary>
+    Task EffectCompletedAsync(
+        string activityId,
+        string threadId,
+        string messageId,
+        string tool,
+        ToolEffectDescriptor effect,
+        ToolEffectOutcome outcome,
+        CancellationToken cancellationToken = default) => Task.CompletedTask;
+
     /// <summary>The footman (gatekeeper) has classified this turn. Carries
     /// the resulting agent state, confidence, reason code, and the
     /// before/after tool counts so the UI can show "kept N of M".</summary>

@@ -190,6 +190,9 @@ public sealed record UiPreferencesSettings(
     bool AutoStartLocalRuntime,
     bool MinimizeToTrayOnClose);
 
+/// <summary>Master policy for durable assistant memory.</summary>
+public sealed record RuntimeMemorySettings(bool Enabled);
+
 /// <summary>Top-level settings document.</summary>
 public sealed record SettingsDocument(
     LlmSettings Llm,
@@ -202,7 +205,8 @@ public sealed record SettingsDocument(
     LimitsSettings? Limits = null,
     UiPreferencesSettings? UiPrefs = null,
     PermissionsSettings? Permissions = null,
-    FilesSettings? Files = null)
+    FilesSettings? Files = null,
+    RuntimeMemorySettings? Memory = null)
 {
     /// <summary>Defaults applied when no settings file exists yet.</summary>
     public static SettingsDocument Defaults() => new(
@@ -294,5 +298,6 @@ public sealed record SettingsDocument(
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .ToArray(),
             DisableAllFileAccess: false,
-            MaxDefaultCharsPerRead: 4000));
+            MaxDefaultCharsPerRead: 4000),
+        Memory: new RuntimeMemorySettings(Enabled: true));
 }
