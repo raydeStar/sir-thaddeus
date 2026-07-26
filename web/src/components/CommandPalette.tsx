@@ -39,13 +39,15 @@ const COMMANDS: Array<{
   title: string;
   detail: string;
   to: string;
+  /** Route search params. Kept structured so navigation stays in-SPA. */
+  search?: Record<string, string>;
   icon: LucideIcon;
 }> = [
   { id: 'new-chat', title: 'New conversation', detail: 'Start with a clean composer', to: '/', icon: Plus },
   { id: 'conversations', title: 'Open conversations', detail: 'Search and resume recent work', to: '/chat', icon: MessageSquareText },
   { id: 'wiki', title: 'Open Wiki workspaces', detail: 'Durable local pages and knowledge', to: '/wiki', icon: BookOpen },
   { id: 'routines', title: 'Open routines', detail: 'Repeatable local workflows', to: '/routines', icon: ClipboardList },
-  { id: 'audit', title: 'Open audit log', detail: 'Inspect turn traces and runtime evidence', to: '/settings?tab=logs', icon: Activity },
+  { id: 'audit', title: 'Open audit log', detail: 'Inspect turn traces and runtime evidence', to: '/settings', search: { tab: 'logs' }, icon: Activity },
   { id: 'settings', title: 'Open system settings', detail: 'Permissions, voice, models, and files', to: '/settings', icon: Settings },
 ];
 
@@ -132,7 +134,7 @@ export function CommandPalette() {
               },
               secondary: () => {
                 hide();
-                window.location.assign(`/wiki?pageId=${encodeURIComponent(result.pageId)}`);
+                void navigate({ to: '/wiki', search: { pageId: result.pageId } });
               },
             });
           }
@@ -182,10 +184,10 @@ export function CommandPalette() {
         kind: 'command' as const,
         run: () => {
           hide();
-          window.location.assign(command.to);
+          void navigate({ to: command.to, search: command.search });
         },
       }));
-  }, [hide, parsed.mode, parsed.text]);
+  }, [hide, navigate, parsed.mode, parsed.text]);
 
   const results = parsed.mode === 'people'
     ? []
@@ -246,6 +248,10 @@ export function CommandPalette() {
             }}
             placeholder="Search conversations, Wiki, outputs, or type > for commands"
             className="h-14 min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-ink-subtle"
+            role="combobox"
+            aria-expanded={results.length > 0}
+            aria-haspopup="listbox"
+            aria-autocomplete="list"
             aria-controls="command-palette-results"
             aria-activedescendant={results[safeSelected] ? `palette-result-${results[safeSelected].id}` : undefined}
           />
@@ -258,8 +264,10 @@ export function CommandPalette() {
         <div className="flex flex-wrap gap-1.5 border-b border-line px-4 py-2 text-[10px] text-ink-subtle" aria-label="Search prefixes">
           <PrefixHint prefix=">" label="commands" active={parsed.mode === 'commands'} />
           <PrefixHint prefix="#" label="Wiki" active={parsed.mode === 'wiki'} />
-          <PrefixHint prefix="@" label="people" active={parsed.mode === 'people'} />
-          <PrefixHint prefix="/" label="current object" active={parsed.mode === 'actions'} />
+          {/* Shown but explicitly unavailable, so the prefix spectrum stays
+              legible without advertising a capability that does nothing. */}
+          <PrefixHint prefix="@" label="people (not configured)" active={parsed.mode === 'people'} unavailable />
+          <PrefixHint prefix="/" label="commands for this view" active={parsed.mode === 'actions'} />
         </div>
 
         <div id="command-palette-results" role="listbox" className="max-h-[52vh] overflow-y-auto p-2">
@@ -273,6 +281,9 @@ export function CommandPalette() {
                 type="button"
                 role="option"
                 aria-selected={active}
+                // Keyboard traversal is driven by the combobox input via
+                // aria-activedescendant, so options stay out of the tab order.
+                tabIndex={-1}
                 onMouseEnter={() => setSelected(index)}
                 onClick={() => choose(index)}
                 className={`flex min-h-14 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${
@@ -331,10 +342,24 @@ export function CommandPalette() {
   );
 }
 
-function PrefixHint({ prefix, label, active }: { prefix: string; label: string; active: boolean }) {
+function PrefixHint({
+  prefix,
+  label,
+  active,
+  unavailable = false,
+}: {
+  prefix: string;
+  label: string;
+  active: boolean;
+  unavailable?: boolean;
+}) {
   return (
-    <span className={`rounded-md px-2 py-1 ${active ? 'bg-accent-soft text-accent' : 'bg-canvas-sunken'}`}>
-      <strong className="mr-1 font-mono text-ink">{prefix}</strong>{label}
+    <span
+      className={`rounded-md px-2 py-1 ${
+        active ? 'bg-accent-soft text-accent' : 'bg-canvas-sunken'
+      } ${unavailable ? 'opacity-50' : ''}`}
+    >
+      <strong className={`mr-1 font-mono ${unavailable ? 'text-ink-subtle' : 'text-ink'}`}>{prefix}</strong>{label}
     </span>
   );
 }

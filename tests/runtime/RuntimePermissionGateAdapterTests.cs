@@ -161,6 +161,33 @@ public class RuntimePermissionGateAdapterTests
     }
 
     [Fact]
+    public async Task ListSessionGrants_ReportsGroupAndToolScopedGrants()
+    {
+        using var fixture = new GateFixture(
+            webPolicy: "ask",
+            toolOverrides: new Dictionary<string, string> { ["web_search"] = "ask" });
+
+        Assert.Empty(fixture.Gate.ListSessionGrants());
+
+        var groupPending = await DriveToPromptAsync(fixture.Gate, "weather_geocode");
+        fixture.Gate.Respond(groupPending.Pending.Id, ToolPermissionResponse.Session, "group");
+        await groupPending.Decision;
+
+        var toolPending = await DriveToPromptAsync(fixture.Gate, "web_search");
+        fixture.Gate.Respond(toolPending.Pending.Id, ToolPermissionResponse.Session, "tool");
+        await toolPending.Decision;
+
+        var grants = fixture.Gate.ListSessionGrants();
+        Assert.Equal(2, grants.Count);
+        Assert.Contains(grants, grant => grant.Contains("all tools", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(grants, grant => grant.Contains("web_search", StringComparison.OrdinalIgnoreCase));
+
+        // The posture indicator must go quiet again once grants are cleared.
+        fixture.Gate.ClearSessionGrants();
+        Assert.Empty(fixture.Gate.ListSessionGrants());
+    }
+
+    [Fact]
     public async Task RespondAlwaysToolScoped_PersistsToolOverride_WithoutChangingGroupPolicy()
     {
         using var fixture = new GateFixture(

@@ -56,6 +56,33 @@ public sealed class WorkPlanBuilderTests
         Assert.True(plan.Steps.Count >= 2);
     }
 
+    [Theory]
+    [InlineData("Summarize the active window")]
+    [InlineData("Analyze the screen and tell me what changed")]
+    [InlineData("Review my notes and explain the tradeoff")]
+    [InlineData("Extract the totals from that document")]
+    public void TryBuild_plans_permissioned_context_then_synthesis(string prompt)
+    {
+        // Reading permissioned context and synthesizing over it is multi-step
+        // work, so the user must get a reviewable plan before the first grant.
+        var plan = WorkPlanBuilder.TryBuild(prompt);
+
+        Assert.NotNull(plan);
+        Assert.Contains(plan.Steps, step => step.Capability == WorkPlanCapability.Compose);
+        Assert.Contains(plan.Steps, step => step.RequiresPermission);
+    }
+
+    [Theory]
+    [InlineData("Open the notes")]
+    [InlineData("What is in this file?")]
+    public void TryBuild_stays_quiet_for_context_lookups_without_synthesis(string prompt)
+    {
+        // Fetching context is not by itself a plan-worthy strategy; forcing a
+        // plan card here would manufacture exactly the approval fatigue the
+        // plan-first model exists to reduce.
+        Assert.Null(WorkPlanBuilder.TryBuild(prompt));
+    }
+
     [Fact]
     public void Edited_plan_validation_rejects_duplicate_ids_and_completed_states()
     {

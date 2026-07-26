@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
+﻿import { createFileRoute, Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Check, Clipboard, EyeOff, Loader2, Mic, Plus, RotateCcw, Send, Square, Volume2, WifiOff, X } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
@@ -16,6 +16,7 @@ import { acquireMicStream, isStreamLive, prepareMicCapture, stopMicStream } from
 import { trimSilenceToWav } from '../lib/audioTrim';
 import type { ChatMessageSource } from '@thaddeus/shared-types';
 import { usePermissionsStore } from '../stores/permissionsStore';
+import { useBoundaryStore } from '../stores/boundaryStore';
 
 const MIN_VOICE_HOLD_MS = 350;
 
@@ -101,7 +102,10 @@ function ChatThreadRoute() {
     setOfflineModeLoading(true);
     getSettings()
       .then((doc) => {
-        if (!disposed) setOfflineMode(doc.privacy.offlineMode ?? false);
+        if (disposed) return;
+        const persisted = doc.privacy.offlineMode ?? false;
+        setOfflineMode(persisted);
+        useBoundaryStore.getState().setOfflineMode(persisted);
       })
       .catch(() => {
         if (!disposed) setOfflineMode(false);
@@ -192,7 +196,10 @@ function ChatThreadRoute() {
           offlineMode: next,
         },
       });
-      setOfflineMode(saved.privacy.offlineMode ?? false);
+      const persisted = saved.privacy.offlineMode ?? false;
+      setOfflineMode(persisted);
+      // Keep the shell's ambient boundary badge in step with the composer.
+      useBoundaryStore.getState().setOfflineMode(persisted);
     } catch (e) {
       setOfflineMode(!next);
       setSpeechError((e as Error).message || 'Could not update offline mode.');
@@ -400,7 +407,7 @@ function ChatThreadRoute() {
       setVoiceState('recording');
     } catch (e) {
       releaseMicCapture(recorderRef, micStreamRef);
-      // The warm stream may have died (device unplugged) — drop it so
+      // The warm stream may have died (device unplugged) â€” drop it so
       // the next attempt re-acquires.
       if (warmStreamRef.current && !isStreamLive(warmStreamRef.current)) {
         stopMicStream(warmStreamRef.current);
@@ -572,7 +579,7 @@ function ChatThreadRoute() {
             <ArrowLeft className="h-4 w-4" strokeWidth={1.75} />
           </Link>
           <h1 className="truncate text-[13px] font-medium text-ink-muted">
-            {thread?.title ?? 'Loading…'}
+            {thread?.title ?? 'Loadingâ€¦'}
           </h1>
         </div>
       </div>
@@ -956,7 +963,7 @@ function MessageRow({
     );
   }
 
-  // Assistant messages flow into the page directly — no bubble, no avatar.
+  // Assistant messages flow into the page directly â€” no bubble, no avatar.
   // Tool activity pills (if any fired during this turn) float above the
   // text so the reader sees what the model did before reading what it said.
   const showActions = !streaming && text.trim().length > 0;
@@ -1065,7 +1072,7 @@ function MessageRow({
 
 function locateLatestMessageEl(container: HTMLElement): HTMLElement | null {
   // While the assistant is streaming, the streaming row is what the reader
-  // is following — anchor scroll math to it so we react to its growing
+  // is following â€” anchor scroll math to it so we react to its growing
   // height in real time.
   const streaming = container.querySelector<HTMLElement>('[data-streaming="true"]');
   if (streaming) return streaming;
@@ -1170,7 +1177,7 @@ function releaseMicCapture(
     try { recorder.stop(); } catch { /* best effort */ }
   }
   recorderRef.current = null;
-  // Intentionally do NOT stop the underlying MediaStream here \u2014 the
+  // Intentionally do NOT stop the underlying MediaStream here — the
   // chat route keeps it warm in warmStreamRef so subsequent PTT presses
   // skip the getUserMedia spinner. The route unmount cleanup is the
   // single owner that actually stops the tracks.

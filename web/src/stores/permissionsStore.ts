@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import {
   listPendingPermissions,
+  listSessionGrants,
   respondToPermission,
   type PendingPermission,
   type PermissionResponse,
@@ -25,9 +26,12 @@ export interface ResolvedPermission {
 interface PermissionsStoreState {
   queue: PendingPermission[];
   resolved: ResolvedPermission[];
+  /** Scope strings for grants the runtime gate is currently honouring. */
+  sessionGrants: string[];
   error: string | null;
   start: () => void;
   resolve: (id: string, decision: PermissionResponse, scope?: PermissionScope) => Promise<void>;
+  refreshSessionGrants: () => Promise<void>;
   dismiss: (id: string) => void;
 }
 
@@ -48,11 +52,23 @@ function enqueueUnique(queue: PendingPermission[], req: PendingPermission): Pend
 export const usePermissionsStore = create<PermissionsStoreState>((set, get) => ({
   queue: [],
   resolved: [],
+  sessionGrants: [],
   error: null,
+
+  refreshSessionGrants: async () => {
+    try {
+      set({ sessionGrants: await listSessionGrants() });
+    } catch {
+      // Posture is ambient, not load-bearing; the connection badge already
+      // reports an unreachable runtime.
+    }
+  },
 
   start: () => {
     if (started) return;
     started = true;
+
+    void get().refreshSessionGrants();
 
     // Backfill: server may have prompts outstanding from before we connected
     // (shouldn't happen often, but e.g. after a page refresh mid-prompt).
@@ -76,6 +92,9 @@ export const usePermissionsStore = create<PermissionsStoreState>((set, get) => (
         if (resolved.id) {
           set((s) => ({ queue: s.queue.filter((q) => q.id !== resolved.id) }));
         }
+        // A decision anywhere (this tab or another client) can widen or clear
+        // session scope, so re-read rather than guess.
+        void get().refreshSessionGrants();
       }
     });
   },

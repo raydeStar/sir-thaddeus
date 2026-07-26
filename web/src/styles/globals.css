@@ -7,22 +7,24 @@
     color-scheme: light dark;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 
-    /* Light palette — parchment, blue-black ink, and aged brass. */
-    --color-canvas: #F7F5EF;
-    --color-canvas-raised: #FFFEFA;
-    --color-canvas-sunken: #EEEAE1;
-    --color-ink: #17212E;
-    --color-ink-muted: #65707D;
-    --color-ink-subtle: #929AA3;
-    --color-line: #E1DDD3;
-    --color-line-strong: #C9C2B4;
+    /* Light palette — neutral greys with a single brass accent. The neutrals
+       are deliberately hue-free: warm parchment tints made every surface read
+       as heritage stationery and left the accent nothing to contrast against. */
+    --color-canvas: #F7F8FA;
+    --color-canvas-raised: #FFFFFF;
+    --color-canvas-sunken: #F0F2F5;
+    --color-ink: #16191D;
+    --color-ink-muted: #62696F;
+    --color-ink-subtle: #8C939B;
+    --color-line: #E4E7EB;
+    --color-line-strong: #CBD1D8;
     --color-accent: #96651D;
     --color-accent-strong: #765015;
-    --color-accent-soft: #F0E7D5;
+    --color-accent-soft: #F4EEE2;
     --color-accent-ring: #A97527;
     --color-on-accent: #FFFDF7;
     --color-danger: #B84940;
-    --color-shell-glow: rgba(169, 117, 39, 0.09);
+    --color-shell-glow: transparent;
     --shadow-soft: 0 1px 2px rgba(23, 33, 46, 0.04), 0 0 0 1px rgba(23, 33, 46, 0.04);
     --shadow-lift: 0 18px 50px -24px rgba(23, 33, 46, 0.28), 0 4px 14px -8px rgba(23, 33, 46, 0.12);
     --scrollbar-thumb: rgba(23, 33, 46, 0.10);
@@ -41,21 +43,21 @@
      before the JS hydrates and for any pre-hydration paint. */
   :root.dark,
   :root[data-theme='dark'] {
-    --color-canvas: #080D14;
-    --color-canvas-raised: #101722;
-    --color-canvas-sunken: #060A10;
-    --color-ink: #F1ECDF;
-    --color-ink-muted: #A3ABB4;
-    --color-ink-subtle: #687383;
-    --color-line: #1C2735;
-    --color-line-strong: #344357;
+    --color-canvas: #0B0D10;
+    --color-canvas-raised: #14171C;
+    --color-canvas-sunken: #101317;
+    --color-ink: #E9ECEF;
+    --color-ink-muted: #9AA1A9;
+    --color-ink-subtle: #6B737C;
+    --color-line: #22262C;
+    --color-line-strong: #343A42;
     --color-accent: #D2A34F;
     --color-accent-strong: #E4B863;
-    --color-accent-soft: #252014;
+    --color-accent-soft: #241E12;
     --color-accent-ring: #D2A34F;
     --color-on-accent: #0B1118;
     --color-danger: #E36C63;
-    --color-shell-glow: rgba(210, 163, 79, 0.10);
+    --color-shell-glow: transparent;
     --shadow-soft: 0 1px 0 rgba(255, 255, 255, 0.025) inset, 0 12px 30px -18px rgba(0, 0, 0, 0.72);
     --shadow-lift: 0 24px 70px -30px rgba(0, 0, 0, 0.92), 0 8px 22px -12px rgba(0, 0, 0, 0.72);
     --scrollbar-thumb: rgba(241, 236, 223, 0.09);
@@ -66,21 +68,21 @@
   @media (prefers-color-scheme: dark) {
     :root[data-theme='system']:not(.dark),
     :root:not([data-theme]):not(.dark) {
-      --color-canvas: #080D14;
-      --color-canvas-raised: #101722;
-      --color-canvas-sunken: #060A10;
-      --color-ink: #F1ECDF;
-      --color-ink-muted: #A3ABB4;
-      --color-ink-subtle: #687383;
-      --color-line: #1C2735;
-      --color-line-strong: #344357;
+      --color-canvas: #0B0D10;
+      --color-canvas-raised: #14171C;
+      --color-canvas-sunken: #101317;
+      --color-ink: #E9ECEF;
+      --color-ink-muted: #9AA1A9;
+      --color-ink-subtle: #6B737C;
+      --color-line: #22262C;
+      --color-line-strong: #343A42;
       --color-accent: #D2A34F;
       --color-accent-strong: #E4B863;
-      --color-accent-soft: #252014;
+      --color-accent-soft: #241E12;
       --color-accent-ring: #D2A34F;
       --color-on-accent: #0B1118;
       --color-danger: #E36C63;
-      --color-shell-glow: rgba(210, 163, 79, 0.10);
+      --color-shell-glow: transparent;
       --shadow-soft: 0 1px 0 rgba(255, 255, 255, 0.025) inset, 0 12px 30px -18px rgba(0, 0, 0, 0.72);
       --shadow-lift: 0 24px 70px -30px rgba(0, 0, 0, 0.92), 0 8px 22px -12px rgba(0, 0, 0, 0.72);
       --scrollbar-thumb: rgba(241, 236, 223, 0.09);
@@ -180,21 +182,23 @@
 }
 
 @layer components {
+  /* Flat canvas. A large gold radial glow used to sit behind every screen,
+     which tinted all neutrals warm and made the shell read busy before any
+     content loaded. The accent now appears only where it means something. */
   .workspace-shell {
-    background:
-      radial-gradient(880px 420px at 52% -180px, var(--color-shell-glow), transparent 72%),
-      var(--color-canvas);
+    background: var(--color-canvas);
   }
 
   .sidebar-row {
     @apply flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-xs text-ink-muted transition-colors hover:bg-canvas-raised hover:text-ink;
   }
 
+  /* The amber left rule carries the "paused" signal on its own; the diagonal
+     gradient wash on top was redundant and muddied the card's text. */
   .permission-pause-card {
-    @apply my-3 rounded-2xl border border-amber-500/35 bg-canvas-raised p-4;
-    border-left-width: 3px;
+    @apply my-3 rounded-2xl border border-line bg-canvas-raised p-4;
+    border-left: 3px solid rgb(245 158 11 / 70%);
     box-shadow: var(--shadow-soft);
-    background-image: linear-gradient(100deg, color-mix(in srgb, #f1b85b 8%, transparent), transparent 44%);
   }
 
   .permission-pause-card--compact {
@@ -218,6 +222,14 @@
 
   .receipt-chip {
     @apply inline-flex min-h-7 max-w-full items-center gap-1.5 truncate rounded-full border border-line bg-canvas px-2.5 py-1 text-[10px] text-ink-muted transition-colors;
+  }
+
+  /* Hover/focus preview for a provenance chip. Sits above the chip so it never
+     covers the row of chips the user is scanning. */
+  .provenance-preview {
+    @apply absolute bottom-full left-0 z-30 mb-1.5 w-[min(20rem,70vw)] rounded-xl border border-line-strong bg-canvas-raised p-2.5 text-left;
+    box-shadow: var(--shadow-lift);
+    pointer-events: none;
   }
 
   .receipt-chip--source {
@@ -289,25 +301,26 @@
     to { height: 95%; }
   }
 
+  /* Flat chrome surfaces. The sidebar previously ran a three-stop vertical
+     gradient plus an inset highlight; a single recessed tone separates it from
+     the content column with far less visual noise. */
   .shell-sidebar {
-    background: linear-gradient(180deg, var(--color-canvas-raised), var(--color-canvas) 42%, var(--color-canvas-sunken));
-    box-shadow: 1px 0 0 rgb(255 255 255 / 0.018) inset;
+    background: var(--color-canvas-sunken);
   }
 
   .shell-header {
-    background: color-mix(in srgb, var(--color-canvas-raised) 88%, transparent);
-    box-shadow: 0 1px 0 rgb(255 255 255 / 0.018) inset;
+    background: var(--color-canvas);
   }
 
   /* Pill primary action. Only CTA that carries accent color — used for Save, Send, Create. */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-accent px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-accent px-4 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40;
     color: var(--color-on-accent);
-    box-shadow: 0 7px 18px -10px var(--color-accent);
   }
+  /* Colour shift only. A coloured glow plus a 1px lift on every primary button
+     made ordinary actions feel like they were floating off the page. */
   .btn-primary:hover:not(:disabled) {
     background: var(--color-accent-strong);
-    transform: translateY(-1px);
   }
 
   /* Ghost button for secondary actions. Lives on canvas, reveals on hover. */
@@ -335,35 +348,32 @@
   /* Shared composer shell. A confident rounded surface that lifts on focus
      with a soft accent halo + warm drop shadow. Used by both the home
      hero composer and the in-thread composer. */
+  /* Resting state is a plain bordered surface; focus adds one accent ring.
+     Previously it carried a full drop shadow at rest and stacked three
+     shadows on focus, which read as a modal rather than an input. */
   .composer-shell {
-    @apply relative rounded-[26px] border border-line-strong bg-canvas-raised p-2.5 transition-all duration-200;
-    box-shadow: var(--shadow-lift);
+    @apply relative rounded-[22px] border border-line bg-canvas-raised p-2.5 transition-colors duration-200;
   }
   .composer-shell:focus-within {
     border-color: var(--color-accent-ring);
-    box-shadow:
-      0 1px 0 0 rgb(255 255 255 / 0.04) inset,
-      0 0 0 3px var(--color-accent-soft),
-      0 18px 45px -22px var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-soft);
   }
 
   /* Confident circular send button with a subtle gradient + lift on hover.
      Disabled state collapses back to a flat muted swatch. */
   .composer-send {
-    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-sm transition-all duration-200;
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors duration-200;
     color: var(--color-on-accent);
-    background-image: linear-gradient(135deg, var(--color-accent-strong) 0%, var(--color-accent) 100%);
+    background-color: var(--color-accent);
   }
   .composer-send:hover:not(:disabled) {
-    box-shadow: 0 7px 18px -8px var(--color-accent);
-    transform: translateY(-1px);
+    background-color: var(--color-accent-strong);
   }
   .composer-send:active:not(:disabled) {
     filter: brightness(0.96);
   }
   .composer-send:disabled {
-    @apply cursor-not-allowed text-ink-subtle shadow-none;
-    background-image: none;
+    @apply cursor-not-allowed text-ink-subtle;
     background-color: var(--color-line-strong);
   }
 
