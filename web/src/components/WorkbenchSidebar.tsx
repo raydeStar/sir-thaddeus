@@ -9,7 +9,6 @@ import {
   Database,
   Gauge,
   History,
-  Library,
   MessageSquarePlus,
   Search,
 } from 'lucide-react';
@@ -46,14 +45,16 @@ export function WorkbenchSidebar({ versionLabel }: { versionLabel: string }) {
       aria-label="Workspace"
       data-testid="desktop-sidebar"
     >
-      <Link to="/" className="flex h-14 items-center gap-3 border-b border-line px-4" aria-label="Sir Thaddeus home">
-        <ThaddeusSignet className="h-8 w-8 shrink-0" />
-        <span className="min-w-0">
-          <strong className="block truncate text-sm font-semibold text-ink">Sir Thaddeus</strong>
-          <span className="mt-0.5 block text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-subtle">
-            Local workbench
-          </span>
-        </span>
+      {/* Single-line lockup. The old two-line version paired the mark with a
+          9px uppercase micro-label; the header's boundary badge already states
+          the local posture, so the sub-label was redundant texture. */}
+      <Link
+        to="/"
+        className="flex h-14 items-center gap-2.5 border-b border-line px-4 text-ink"
+        aria-label="Sir Thaddeus home"
+      >
+        <ThaddeusSignet className="h-7 w-7 shrink-0" />
+        <strong className="min-w-0 truncate text-sm font-semibold tracking-tight">Sir Thaddeus</strong>
       </Link>
 
       <div className="grid gap-2 p-3">
@@ -81,19 +82,20 @@ export function WorkbenchSidebar({ versionLabel }: { versionLabel: string }) {
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4" aria-label="Primary">
         <SidebarLabel label="Workspaces" count={roots.length || undefined} />
         {roots.length > 0 ? roots.map((root) => (
-          <a
+          <Link
             key={root.id}
-            href={`/wiki?rootId=${encodeURIComponent(root.id)}`}
+            to="/wiki"
+            search={{ rootId: root.id }}
             className="sidebar-row"
+            activeProps={{ className: 'bg-canvas-raised text-ink' }}
           >
-            <span className="h-2 w-2 shrink-0 rounded-[3px] bg-accent shadow-[0_0_0_4px_var(--color-accent-soft)]" />
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
             <span className="truncate">{root.name}</span>
-          </a>
-        )) : (
-          <Link to="/wiki" className="sidebar-row">
-            <Library className="h-4 w-4" />
-            Wiki workspaces
           </Link>
+        )) : (
+          /* Not a link: "Wiki and files" under Knowledge already routes to
+             /wiki, and two rows to the same destination read as clutter. */
+          <p className="px-2.5 py-1 text-xs text-ink-subtle">No workspaces yet</p>
         )}
 
         <SidebarLabel label="Recent" />
