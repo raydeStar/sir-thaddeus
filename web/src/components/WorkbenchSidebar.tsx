@@ -42,7 +42,7 @@ export function WorkbenchSidebar({ versionLabel }: { versionLabel: string }) {
 
   return (
     <aside
-      className="shell-sidebar hidden w-[248px] shrink-0 flex-col border-r border-line md:flex"
+      className="shell-sidebar hidden w-[248px] shrink-0 flex-col border-r border-line lg:flex"
       aria-label="Workspace"
       data-testid="desktop-sidebar"
     >

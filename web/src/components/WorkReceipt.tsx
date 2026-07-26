@@ -4,13 +4,11 @@ import {
   BookOpen,
   Check,
   ChevronDown,
-  Clipboard,
   Clock3,
   FileText,
   Globe,
   HardDrive,
   History,
-  RotateCcw,
   ShieldCheck,
   ThumbsDown,
   ThumbsUp,
@@ -38,8 +36,6 @@ export interface WorkReceiptProps {
   threadId?: string;
   text: string;
   sources?: ChatMessageSource[] | null;
-  isLatest?: boolean;
-  onCopy?: () => void;
   onRetry?: () => void;
   retryDisabled?: boolean;
 }
@@ -49,8 +45,6 @@ export function WorkReceipt({
   threadId,
   text,
   sources,
-  isLatest,
-  onCopy,
   onRetry,
   retryDisabled,
 }: WorkReceiptProps) {
@@ -165,7 +159,7 @@ export function WorkReceipt({
     }
   }
 
-  if (!hasEvidence && !isLatest) return null;
+  if (!hasEvidence) return null;
 
   return (
     <section
@@ -382,36 +376,6 @@ export function WorkReceipt({
         </div>
       ) : null}
 
-      {isLatest ? (
-        <div className="flex items-center gap-1 border-t border-line px-2.5 py-1.5 text-ink-subtle">
-          {onCopy ? (
-            <button
-              type="button"
-              onClick={onCopy}
-              className="receipt-action"
-              aria-label="Copy latest response"
-              data-testid="chat-copy-latest-response"
-            >
-              <Clipboard className="h-3.5 w-3.5" />
-              Copy
-            </button>
-          ) : null}
-          {onRetry ? (
-            <button
-              type="button"
-              onClick={onRetry}
-              disabled={retryDisabled}
-              className="receipt-action"
-              aria-label="Retry latest response"
-              data-testid="chat-retry-latest-response"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Retry
-              <kbd className="text-[9px] opacity-60">R</kbd>
-            </button>
-          ) : null}
-        </div>
-      ) : null}
     </section>
   );
 }

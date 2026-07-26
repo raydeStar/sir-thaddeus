@@ -250,6 +250,10 @@ test.describe('wiki canvas smoke', () => {
   await workspaceSelect.selectOption(rootId);
     await expect(page.getByRole('button', { name: /Graph Source/ })).toBeVisible({ timeout: 15_000 });
     await page.getByRole('button', { name: /Graph Source/ }).click();
+    const openAssistantForKnowledge = page.getByRole('button', { name: 'Open Assistant' });
+    if (await openAssistantForKnowledge.isVisible().catch(() => false)) {
+      await openAssistantForKnowledge.click();
+    }
     const knowledgePanel = page.getByTestId('wiki-knowledge-panel');
     await expect(knowledgePanel.getByRole('button', { name: '#graph-e2e' })).toBeVisible({ timeout: 10_000 });
     await expect(knowledgePanel.getByRole('button', { name: /Graph Target/ })).toBeVisible({ timeout: 10_000 });
@@ -270,10 +274,17 @@ test.describe('wiki canvas smoke', () => {
     await page.screenshot({ path: 'test-results/wiki-06-left-collapsed.png', fullPage: true });
     await page.getByRole('button', { name: 'Open Pages' }).click();
 
-    // Right "Assistant" panel: collapse + re-expand.
+    // Right "Assistant" panel defaults closed at the normal desktop test
+    // width so the editor keeps a useful reading measure. Prove both states
+    // without coupling the test to the initial responsive choice.
+    const openAssistant = page.getByRole('button', { name: 'Open Assistant' });
+    if (await openAssistant.isVisible().catch(() => false)) {
+      await openAssistant.click();
+    }
+    await expect(page.getByRole('button', { name: 'Collapse Assistant' })).toBeVisible();
     await page.getByRole('button', { name: 'Collapse Assistant' }).click();
-    await expect(page.getByRole('button', { name: 'Open Assistant' })).toBeVisible();
-    await page.getByRole('button', { name: 'Open Assistant' }).click();
+    await expect(openAssistant).toBeVisible();
+    await openAssistant.click();
 
     // ---------- Phase 8: cleanup — remove the freshly created workspace ----------
     // Dialog handler will accept the confirm() prompt above.

@@ -71,7 +71,9 @@ export const Route = createFileRoute('/wiki')({
 function WikiRoute() {
   const { pageId: requestedPageId, rootId: requestedRootId } = Route.useSearch();
   const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 1520,
+  );
   const [pagePrompt, setPagePrompt] = useState('');
   const [pageTitleDraft, setPageTitleDraft] = useState('');
   const [renamingRoot, setRenamingRoot] = useState(false);
@@ -169,6 +171,15 @@ function WikiRoute() {
   useEffect(() => {
     if (trashOpen && selectedRootId) void loadTrash();
   }, [trashOpen, selectedRootId, loadTrash]);
+
+  useEffect(() => {
+    const protectEditorMeasure = () => {
+      if (window.innerWidth < 1520) setRightCollapsed(true);
+    };
+    protectEditorMeasure();
+    window.addEventListener('resize', protectEditorMeasure);
+    return () => window.removeEventListener('resize', protectEditorMeasure);
+  }, []);
 
   useEffect(() => {
     if (isDraftPage) {
@@ -550,15 +561,19 @@ function WikiRoute() {
       <div
         className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[var(--wiki-left)_minmax(0,1fr)_var(--wiki-right)]"
         style={{
-          '--wiki-left': leftCollapsed ? '56px' : '304px',
-          '--wiki-right': rightCollapsed ? '56px' : '336px',
+          '--wiki-left': leftCollapsed ? '56px' : '280px',
+          '--wiki-right': rightCollapsed ? '56px' : '304px',
         } as CSSProperties}
       >
         <aside className="min-h-0 border-b border-line bg-canvas md:border-b-0 md:border-r" aria-label="Page tree">
           <PanelHeader
             title="Pages"
             collapsed={leftCollapsed}
-            onToggle={() => setLeftCollapsed((value) => !value)}
+            onToggle={() => setLeftCollapsed((value) => {
+              const next = !value;
+              if (!next && window.innerWidth < 1520) setRightCollapsed(true);
+              return next;
+            })}
             collapsedIcon={<PanelLeftOpen className="h-4 w-4" strokeWidth={1.8} />}
             expandedIcon={<PanelLeftClose className="h-4 w-4" strokeWidth={1.8} />}
           />
@@ -801,7 +816,7 @@ function WikiRoute() {
           ) : null}
         </aside>
 
-        <main className="min-h-0 overflow-hidden">
+        <main className="min-h-0 overflow-hidden" data-testid="wiki-editor-pane">
           <div className="flex h-full min-h-0 flex-col">
             <div className="flex items-center justify-between border-b border-line px-4 py-2 md:px-5">
               <div className="flex min-w-0 items-center gap-2 text-xs text-ink-muted">
@@ -920,7 +935,11 @@ function WikiRoute() {
           <PanelHeader
             title="Assistant"
             collapsed={rightCollapsed}
-            onToggle={() => setRightCollapsed((value) => !value)}
+            onToggle={() => setRightCollapsed((value) => {
+              const next = !value;
+              if (!next && window.innerWidth < 1520) setLeftCollapsed(true);
+              return next;
+            })}
             collapsedIcon={<PanelRightOpen className="h-4 w-4" strokeWidth={1.8} />}
             expandedIcon={<PanelRightClose className="h-4 w-4" strokeWidth={1.8} />}
           />

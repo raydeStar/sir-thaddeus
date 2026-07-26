@@ -59,17 +59,17 @@ function RootLayout() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="shell-header flex h-12 min-w-0 shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-line px-3 backdrop-blur-xl md:px-4">
-          <Link to="/" className="flex h-8 w-8 shrink-0 items-center justify-center md:hidden" aria-label="Sir Thaddeus home">
+          <Link to="/" className="flex h-8 w-8 shrink-0 items-center justify-center lg:hidden" aria-label="Sir Thaddeus home">
             <ThaddeusSignet className="h-7 w-7" />
           </Link>
-          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap md:hidden" aria-label="Primary">
+          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap lg:hidden" aria-label="Primary">
             <MobileLink to="/" label="Home" icon={Home} />
             <MobileLink to="/chat" label="Chat" icon={MessageSquareText} />
             <MobileLink to="/wiki" label="Wiki" icon={BookOpen} />
             <MobileLink to="/routines" label="Routines" icon={ClipboardList} />
           </nav>
 
-          <div className="hidden min-w-0 items-center gap-2 text-[10px] text-ink-subtle md:flex">
+          <div className="hidden min-w-0 items-center gap-2 text-[10px] text-ink-subtle lg:flex">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-2.5 py-1">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
               Local
