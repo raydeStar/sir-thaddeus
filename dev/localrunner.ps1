@@ -10,6 +10,15 @@ Write-Host "`n══════════════════════
 Write-Host "  Sir Thaddeus Local Runner"
 Write-Host "══════════════════════════════════════════════════════════════"
 
+$GitBranch = (& git -C $RepoRoot branch --show-current 2>$null)
+$GitCommit = (& git -C $RepoRoot rev-parse --short HEAD 2>$null)
+if ($LASTEXITCODE -ne 0) {
+    $GitBranch = "(git unavailable)"
+    $GitCommit = "(unknown)"
+}
+Write-Host "  Source: $RepoRoot" -ForegroundColor Cyan
+Write-Host "  Revision: $GitBranch @ $GitCommit" -ForegroundColor Cyan
+
 $DebugMode = $args -contains "--debug"
 $TerminalMode = $args -contains "--terminal"
 $OfflineRequested = $args -contains "--offline"
@@ -72,6 +81,85 @@ function Invoke-ProjectBuild {
         Write-Host "`nERROR: $Label build failed." -ForegroundColor Red
         exit $LASTEXITCODE
     }
+}
+
+function Invoke-WebWorkspaceBuild {
+    param(
+        [string]$RepoRootPath,
+        [bool]$Offline = $false
+    )
+
+    $webRoot = Join-Path $RepoRootPath "web"
+    $packageJson = Join-Path $webRoot "package.json"
+    $nodeModules = Join-Path $webRoot "node_modules"
+    if (-not (Test-Path $packageJson)) {
+        Write-Host "`nERROR: Web workspace was not found at $webRoot." -ForegroundColor Red
+        exit 1
+    }
+
+    $npmCommand = if ($env:OS -eq "Windows_NT") { "npm.cmd" } else { "npm" }
+    if (-not (Get-Command $npmCommand -ErrorAction SilentlyContinue)) {
+        Write-Host "`nERROR: npm is required to build the desktop UI." -ForegroundColor Red
+        exit 1
+    }
+
+    Push-Location $webRoot
+    try {
+        if (-not (Test-Path $nodeModules)) {
+            if ($Offline) {
+                Write-Host "`nERROR: web/node_modules is missing and offline mode is enabled." -ForegroundColor Red
+                Write-Host "       Connect once and rerun localrunner so npm ci can restore the UI dependencies." -ForegroundColor Red
+                exit 1
+            }
+
+            Write-Host "      Installing web dependencies..." -ForegroundColor DarkGray
+            & $npmCommand ci
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "`nERROR: Web dependency restore failed." -ForegroundColor Red
+                exit $LASTEXITCODE
+            }
+        }
+
+        Write-Host "      Building current React workspace..." -ForegroundColor DarkGray
+        & $npmCommand run build
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "`nERROR: React workspace build failed." -ForegroundColor Red
+            exit $LASTEXITCODE
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Assert-WebBundleSynced {
+    param([string]$RepoRootPath)
+
+    $distIndexPath = Join-Path $RepoRootPath "web\dist\index.html"
+    $runtimeIndexPath = Join-Path $RepoRootPath "src\Thaddeus.Runtime\wwwroot\index.html"
+    if (-not (Test-Path $distIndexPath) -or -not (Test-Path $runtimeIndexPath)) {
+        Write-Host "`nERROR: The built React bundle was not synchronized into the runtime." -ForegroundColor Red
+        exit 1
+    }
+
+    $assetPattern = 'assets/index-[^"''\s]+\.js'
+    $distAsset = [regex]::Match((Get-Content -LiteralPath $distIndexPath -Raw), $assetPattern).Value
+    $runtimeAsset = [regex]::Match((Get-Content -LiteralPath $runtimeIndexPath -Raw), $assetPattern).Value
+    if ([string]::IsNullOrWhiteSpace($distAsset) -or $distAsset -ne $runtimeAsset) {
+        Write-Host "`nERROR: Runtime UI bundle does not match the current React build." -ForegroundColor Red
+        Write-Host "       web/dist: $distAsset" -ForegroundColor Red
+        Write-Host "       runtime:  $runtimeAsset" -ForegroundColor Red
+        exit 1
+    }
+
+    $runtimeWebRoot = Join-Path $RepoRootPath "src\Thaddeus.Runtime\wwwroot"
+    $runtimeAssetPath = Join-Path $runtimeWebRoot ($runtimeAsset -replace '/', '\')
+    if (-not (Test-Path $runtimeAssetPath)) {
+        Write-Host "`nERROR: Runtime UI entry asset is missing: $runtimeAsset" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "      Frontend bundle verified: $runtimeAsset" -ForegroundColor Green
 }
 
 function Stop-RepoOwnedPortListeners {
@@ -566,7 +654,9 @@ if ($TerminalMode) {
 else {
     # Shell spawns Runtime as a child via dotnet run --no-build, so both must be
     # built ahead of time in the same (Debug) configuration.
+    Invoke-WebWorkspaceBuild -RepoRootPath $RepoRoot -Offline:$IsOffline
     Invoke-ProjectBuild -ProjectPath $RuntimeProjectPath -Label "runtime" -Offline:$IsOffline
+    Assert-WebBundleSynced -RepoRootPath $RepoRoot
     Invoke-ProjectBuild -ProjectPath $ShellProjectPath -Label "shell" -Offline:$IsOffline
     $ProjectPath = $ShellProjectPath
 }
