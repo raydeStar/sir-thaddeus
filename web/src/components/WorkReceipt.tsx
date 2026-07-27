@@ -10,6 +10,7 @@ import {
   Globe,
   HardDrive,
   History,
+  MessageSquare,
   ShieldCheck,
   ThumbsDown,
   ThumbsUp,
@@ -74,6 +75,10 @@ export function WorkReceipt({
     [activities],
   );
   const durationMs = activities.reduce((total, activity) => total + (activity.durationMs ?? 0), 0);
+  // Governs what the receipt *says*, never whether it appears. A turn that ran
+  // no tools is the case the reader should trust least, so staying silent
+  // exactly there inverted the trust signal: well-evidenced answers advertised
+  // their sources while unevidenced ones passed without comment.
   const hasEvidence = activities.length > 0 || Boolean(memory) || Boolean(sources?.length) || permissions.length > 0;
   const outcome = summarizeOutcome(text);
   // Evidence *tier*, not a measured confidence. The numeric prior below is a
@@ -167,8 +172,6 @@ export function WorkReceipt({
     }
   }
 
-  if (!hasEvidence) return null;
-
   return (
     <section
       role="group"
@@ -199,15 +202,29 @@ export function WorkReceipt({
               ? 'bg-rose-500/10 text-rose-500'
               : stillRunning
                 ? 'bg-accent-soft text-accent'
-                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+                : hasEvidence
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+                  // No tools ran: a green tick would imply a verification that
+                  // never happened, so this state stays deliberately neutral.
+                  : 'bg-canvas-sunken text-ink-subtle'
           }`}
           aria-hidden
         >
-          {hasErrors ? <AlertCircle className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+          {hasErrors
+            ? <AlertCircle className="h-3.5 w-3.5" />
+            : hasEvidence
+              ? <Check className="h-3.5 w-3.5" />
+              : <MessageSquare className="h-3.5 w-3.5" />}
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-xs font-semibold text-ink">
-            {hasErrors ? 'Completed with a blocked step' : stillRunning ? 'Work in progress' : 'Work completed'}
+            {hasErrors
+              ? 'Completed with a blocked step'
+              : stillRunning
+                ? 'Work in progress'
+                : hasEvidence
+                  ? 'Work completed'
+                  : 'Answered without tools'}
           </span>
           <span className="mt-0.5 block truncate text-[11px] text-ink-muted">{outcome}</span>
         </span>
@@ -267,6 +284,13 @@ export function WorkReceipt({
           {webBoundary ? <Globe className="h-3 w-3" /> : <HardDrive className="h-3 w-3" />}
           {webBoundary ? 'Web used' : 'Local'}
         </span>
+        {/* Say it in the collapsed row, not just behind a disclosure: with no
+            tool evidence the answer rests on the model's weights alone. */}
+        {!hasEvidence && !stillRunning ? (
+          <span className="receipt-chip" title="No tool, file, or source backed this answer.">
+            Model only · unverified
+          </span>
+        ) : null}
       </div>
 
       {expanded ? (

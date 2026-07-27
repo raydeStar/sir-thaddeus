@@ -22,7 +22,7 @@ test.describe('legible workbench UX', () => {
     await expect.poll(async () => (await editor.boundingBox())?.width ?? 0).toBeGreaterThan(600);
   });
 
-  test('ordinary replies keep lightweight actions instead of a work receipt', async ({ page, context }) => {
+  test('ordinary replies still get a receipt that states no tools ran', async ({ page, context }) => {
     const baseUrl = process.env.RUNTIME_BASE_URL!;
     const token = process.env.RUNTIME_TOKEN!;
     await context.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
@@ -64,7 +64,13 @@ test.describe('legible workbench UX', () => {
 
     await page.goto(`${baseUrl}/chat/casual-thread`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByText('Hello. What shall we work on?')).toBeVisible();
-    await expect(page.getByTestId('work-receipt-casual-assistant')).toHaveCount(0);
+    // A turn that ran no tools still gets a receipt, and it says so plainly.
+    // Staying silent here inverted the trust signal: evidenced answers
+    // advertised their sources while unevidenced ones passed without comment.
+    const casualReceipt = page.getByTestId('work-receipt-casual-assistant');
+    await expect(casualReceipt).toBeVisible();
+    await expect(casualReceipt).toContainText('Answered without tools');
+    await expect(casualReceipt).toContainText('Model only · unverified');
     await expect(page.getByTestId('chat-copy-latest-response')).toBeVisible();
     await expect(page.getByTestId('chat-retry-latest-response')).toBeVisible();
   });
@@ -257,7 +263,10 @@ test.describe('legible workbench UX', () => {
     });
     const palette = page.getByTestId('command-palette');
     await expect(palette).toBeVisible();
-    await palette.getByRole('textbox').fill('# release');
+    // The palette input carries role="combobox" (it owns the results listbox
+    // and drives selection via aria-activedescendant), so it is no longer
+    // exposed as a plain textbox.
+    await palette.getByRole('combobox').fill('# release');
     await expect(palette.getByRole('option', { name: /Release brief/ })).toBeVisible();
     await palette.getByRole('option', { name: /Release brief/ }).click();
 

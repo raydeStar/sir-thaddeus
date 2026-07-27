@@ -26,6 +26,11 @@ test.describe('wiki assistant flow', () => {
 
     await context.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
 
+    // The Wiki route auto-collapses the assistant panel below 1520px, and
+    // Playwright's default viewport is 1280 — so the page-chat prompt this test
+    // drives never rendered. Give it a width where the panel stays open.
+    await page.setViewportSize({ width: 1680, height: 1000 });
+
     page.on('dialog', async (dialog: Dialog) => {
       if (dialog.type() === 'prompt') await dialog.accept(dialog.defaultValue());
       else await dialog.accept();
