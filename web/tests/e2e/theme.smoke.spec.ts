@@ -1,14 +1,17 @@
 import { expect, test } from '@playwright/test';
 
+// Hue-free neutrals with a single brass accent. The neutrals were previously
+// warm parchment, which read as heritage stationery and left the accent nothing
+// to contrast against; the accent itself is unchanged.
 const palettes = {
   light: {
-    canvas: '#f7f5ef',
-    ink: '#17212e',
+    canvas: '#f7f8fa',
+    ink: '#16191d',
     accent: '#96651d',
   },
   dark: {
-    canvas: '#080d14',
-    ink: '#f1ecdf',
+    canvas: '#0b0d10',
+    ink: '#e9ecef',
     accent: '#d2a34f',
   },
 } as const;
