@@ -11,7 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="KokoroSharp.CPU" Version="0.6.7" />
+    <PackageReference Include="KokoroSharp.CPU" Version="0.8.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
   </ItemGroup>
 
