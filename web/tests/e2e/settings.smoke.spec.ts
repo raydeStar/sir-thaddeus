@@ -34,13 +34,13 @@ test.describe('settings smoke', () => {
     await modelInput.fill('llama3.1:70b');
 
     // The gatekeeper status banner must render (regardless of reachability).
-    // Its `data-state` is one of: active / unreachable / not-configured —
-    // any value is fine here; we just want to confirm the banner is wired
-    // to the status endpoint and shows up in the UI.
+    // Its `data-state` is one of: checking / active / unreachable /
+    // not-configured. Any value is fine here; we just want to confirm the
+    // banner is wired to the status endpoint and shows up in the UI.
     const gkBanner = page.getByTestId('settings-gatekeeper-status');
     await expect(gkBanner).toBeVisible({ timeout: 5_000 });
     const gkState = await gkBanner.getAttribute('data-state');
-    expect(['active', 'unreachable', 'not-configured']).toContain(gkState);
+    expect(['checking', 'active', 'unreachable', 'not-configured']).toContain(gkState);
 
     // Diagnostics is a separately owned settings feature. Keep its tab and
     // both viewer modes covered when the route is reorganized.

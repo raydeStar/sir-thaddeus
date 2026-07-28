@@ -244,7 +244,16 @@ function SettingsRoute() {
         if (!cancelled) setGatekeeperStatus(s);
       })
       .catch(() => {
-        /* best-effort — leave existing status in place on transient errors */
+        if (!cancelled) {
+          setGatekeeperStatus({
+            configured: true,
+            ok: false,
+            modelId: null,
+            baseUrl: null,
+            reusingPrimary: false,
+            message: 'Gatekeeper status is temporarily unavailable.',
+          });
+        }
       });
     return () => {
       cancelled = true;
@@ -731,7 +740,7 @@ function ModelsTab({
         title="Verification model (gatekeeper)"
         description="Small fast model used to pre-classify each turn so the primary model only sees the tools that make sense for what you asked. Falls back to the primary endpoint when the base URL is blank."
       >
-        {gatekeeperStatus ? <GatekeeperStatusBanner status={gatekeeperStatus} /> : null}
+        <GatekeeperStatusBanner status={gatekeeperStatus} />
         <Toggle
           testId="settings-gatekeeper-enabled"
           label="Enable gatekeeper"
@@ -2446,12 +2455,16 @@ function ModelCombobox({
   );
 }
 
-function GatekeeperStatusBanner({ status }: { status: GatekeeperStatusResponse }) {
+function GatekeeperStatusBanner({ status }: { status: GatekeeperStatusResponse | null }) {
   let icon: ReactNode;
   let toneCls: string;
   let state: string;
 
-  if (!status.configured) {
+  if (!status) {
+    icon = <CircleDot className="h-3.5 w-3.5 animate-pulse opacity-60" strokeWidth={2} />;
+    toneCls = 'text-ink-muted';
+    state = 'checking';
+  } else if (!status.configured) {
     icon = <CircleDot className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />;
     toneCls = 'text-ink-muted';
     state = 'not-configured';
@@ -2465,19 +2478,20 @@ function GatekeeperStatusBanner({ status }: { status: GatekeeperStatusResponse }
     state = 'unreachable';
   }
 
-  const reuseNote = status.reusingPrimary
+  const reuseNote = status?.reusingPrimary
     ? ' · reusing primary client (single-GPU setup)'
     : '';
+  const message = status?.message ?? 'Checking gatekeeper status…';
 
   return (
     <div
       className={`mb-4 inline-flex items-center gap-1.5 text-xs font-medium ${toneCls}`}
       data-testid="settings-gatekeeper-status"
-      data-ok={status.ok}
+      data-ok={status?.ok}
       data-state={state}
     >
       {icon}
-      <span>{status.message}{reuseNote}</span>
+      <span>{message}{reuseNote}</span>
     </div>
   );
 }
