@@ -334,7 +334,7 @@ function HomeRoute() {
               Recent
             </p>
             <Link
-              to="/history"
+              to="/chat"
               className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle transition-colors hover:text-accent"
             >
               View all

@@ -1,7 +1,9 @@
 # Modern Workbench UX research
 
-**Status:** desk research and interactive prototype complete; scenario testing
-with the product owner remains the decision gate before production work.
+**Status:** desk research and interactive prototype complete. On 2026-07-27 the
+product owner authorized the narrow, reversible Wedge 1 after reviewing this
+direction. The five-scenario comparative study remains uncollected and is still
+the gate for workspace persistence and the deeper workbench contracts.
 
 **Verdict:** pursue a **workspace-backed conversation shell with an optional
 right-side workbench**. This combines the strongest parts of the three concepts
@@ -246,6 +248,10 @@ Decision gate:
 - no critical keyboard, focus, contrast, or narrow-layout accessibility defect.
 
 ## Implementation sequence after validation
+
+The production contract for the authorized first wedge is
+[Modern Workbench Wedge 1 implementation](../MODERN_WORKBENCH_WEDGE1_IMPLEMENTATION.md).
+Its scope is intentionally smaller than the complete direction below.
 
 ### Wedge 1: one place for conversations
 

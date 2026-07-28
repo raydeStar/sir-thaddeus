@@ -39,7 +39,8 @@ workspace-backed conversation with an optional right-side workbench. Its
 dependency-free interactive prototype is in
 [`../prototypes/modern-workbench/index.html`](../prototypes/modern-workbench/index.html).
 This is product-quality research, not evidence that model or harness capability
-improved.
+improved. The authorized reversible first step is defined separately in
+[Modern Workbench Wedge 1 implementation](../MODERN_WORKBENCH_WEDGE1_IMPLEMENTATION.md).
 
 ## Source of truth
 

@@ -12,23 +12,25 @@ import {
   MessageSquarePlus,
   Search,
 } from 'lucide-react';
-import { listThreads } from '../lib/chatApi';
 import { listWikiRoots, type WikiRoot } from '../lib/wikiApi';
-import type { ThreadSummary } from '@thaddeus/shared-types';
 import { useCommandPaletteStore } from '../stores/commandPaletteStore';
+import { useChatStore } from '../stores/chatStore';
 import { ThaddeusSignet } from './ThaddeusSignet';
 
 export function WorkbenchSidebar({ versionLabel }: { versionLabel: string }) {
   const showPalette = useCommandPaletteStore((state) => state.show);
-  const [threads, setThreads] = useState<ThreadSummary[]>([]);
+  const threads = useChatStore((state) => state.threads);
+  const loadThreads = useChatStore((state) => state.loadThreads);
   const [roots, setRoots] = useState<WikiRoot[]>([]);
+  const pinnedThreads = threads.filter((thread) => thread.pinned).slice(0, 3);
+  const recentThreads = threads.filter((thread) => !thread.pinned).slice(0, 5);
 
   useEffect(() => {
     let disposed = false;
-    void Promise.all([listThreads(), listWikiRoots()])
-      .then(([nextThreads, nextRoots]) => {
+    void loadThreads();
+    void listWikiRoots()
+      .then((nextRoots) => {
         if (disposed) return;
-        setThreads(nextThreads.slice(0, 5));
         setRoots(nextRoots.slice(0, 5));
       })
       .catch(() => {
@@ -37,7 +39,7 @@ export function WorkbenchSidebar({ versionLabel }: { versionLabel: string }) {
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [loadThreads]);
 
   return (
     <aside
@@ -98,8 +100,17 @@ export function WorkbenchSidebar({ versionLabel }: { versionLabel: string }) {
           <p className="px-2.5 py-1 text-xs text-ink-subtle">No workspaces yet</p>
         )}
 
+        {pinnedThreads.length > 0 ? (
+          <>
+            <SidebarLabel label="Pinned" />
+            {pinnedThreads.map((thread) => (
+              <ThreadLink key={thread.id} thread={thread} pinned />
+            ))}
+          </>
+        ) : null}
+
         <SidebarLabel label="Recent" />
-        {threads.length > 0 ? threads.map((thread) => (
+        {recentThreads.length > 0 ? recentThreads.map((thread) => (
           <Link
             key={thread.id}
             to="/chat/$threadId"
@@ -111,11 +122,17 @@ export function WorkbenchSidebar({ versionLabel }: { versionLabel: string }) {
             <span className="text-[9px] text-ink-subtle">{shortRelative(thread.updatedAt)}</span>
           </Link>
         )) : (
-          <Link to="/chat" className="sidebar-row pl-7">
-            <History className="h-3.5 w-3.5" />
-            Conversation history
-          </Link>
+          <p className="px-2.5 py-1 text-xs text-ink-subtle">No recent conversations</p>
         )}
+        <Link
+          to="/chat"
+          className="sidebar-row pl-7"
+          activeOptions={{ exact: true }}
+          activeProps={{ className: 'bg-canvas-raised text-ink ring-1 ring-inset ring-line' }}
+        >
+          <History className="h-3.5 w-3.5" />
+          All conversations
+        </Link>
 
         <SidebarLabel label="Knowledge" />
         <Link to="/wiki" className="sidebar-row" activeProps={{ className: 'bg-canvas-raised text-ink ring-1 ring-inset ring-line' }}>
@@ -149,6 +166,27 @@ export function WorkbenchSidebar({ versionLabel }: { versionLabel: string }) {
         <span className="font-mono lowercase tracking-wide">local</span>
       </div>
     </aside>
+  );
+}
+
+function ThreadLink({
+  thread,
+  pinned,
+}: {
+  thread: { id: string; title: string; updatedAt: string };
+  pinned?: boolean;
+}) {
+  return (
+    <Link
+      to="/chat/$threadId"
+      params={{ threadId: thread.id }}
+      className="sidebar-row pl-7"
+      activeProps={{ className: 'bg-canvas-raised text-ink ring-1 ring-inset ring-line' }}
+    >
+      {pinned ? <span className="text-[10px] text-accent">●</span> : null}
+      <span className="min-w-0 flex-1 truncate">{thread.title || 'Untitled conversation'}</span>
+      <span className="text-[9px] text-ink-subtle">{shortRelative(thread.updatedAt)}</span>
+    </Link>
   );
 }
 

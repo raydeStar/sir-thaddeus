@@ -45,6 +45,8 @@ interface ChatStoreState {
   loadThreads: () => Promise<void>;
   openThread: (id: string) => Promise<void>;
   newThread: (title?: string) => Promise<ChatThread>;
+  updateThread: (id: string, patch: { title?: string; pinned?: boolean }) => Promise<ChatThread>;
+  deleteThread: (id: string) => Promise<void>;
   send: (
     text: string,
     wikiContext?: WikiChatContextInput,
@@ -144,6 +146,45 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         ],
       }));
       return thread;
+    } catch (e) {
+      set({ error: (e as Error).message });
+      throw e;
+    }
+  },
+
+  updateThread: async (id, patch) => {
+    set({ error: null });
+    try {
+      const thread = await api.patchThread(id, patch);
+      set((state) => ({
+        threads: state.threads.map((summary) => summary.id === id
+          ? {
+              ...summary,
+              title: thread.title,
+              updatedAt: thread.updatedAt,
+              pinned: thread.pinned ?? false,
+            }
+          : summary),
+        activeThread: state.activeThreadId === id ? thread : state.activeThread,
+      }));
+      return thread;
+    } catch (e) {
+      set({ error: (e as Error).message });
+      throw e;
+    }
+  },
+
+  deleteThread: async (id) => {
+    set({ error: null });
+    try {
+      await api.deleteThread(id);
+      set((state) => ({
+        threads: state.threads.filter((thread) => thread.id !== id),
+        activeThreadId: state.activeThreadId === id ? null : state.activeThreadId,
+        activeThread: state.activeThreadId === id ? null : state.activeThread,
+        activeTurn: state.activeThreadId === id ? null : state.activeTurn,
+        activeRun: state.activeThreadId === id ? null : state.activeRun,
+      }));
     } catch (e) {
       set({ error: (e as Error).message });
       throw e;
