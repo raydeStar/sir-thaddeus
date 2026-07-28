@@ -1,6 +1,6 @@
 # Modern Workbench Wedge 1 implementation contract
 
-- **Status:** implemented and locally verified; protected PR verification pending
+- **Status:** implemented; local and protected PR verification passed
 - **Baseline:** `6722ef18b5adcdedb5f7340e1dc493bfffdedf63`
 - **Product-quality lane:** information architecture and conversation retrieval
 - **Primary metric:** one canonical place to find and manage conversations
@@ -160,5 +160,5 @@ Verified on 2026-07-27 from baseline
 
 The optional screen-observe harness was not run because its fixture directory
 was not present. NuGet vulnerability metadata also emitted a network warning;
-the build itself completed with zero errors. Remote protected-branch checks
-remain the final promotion gate.
+the build itself completed with zero errors. The protected PR test gate passed
+in 6m21s.
