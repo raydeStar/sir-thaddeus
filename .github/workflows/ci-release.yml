@@ -127,6 +127,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-package-windows
+          retention-days: 1
           path: |
             artifacts/release/sir-thaddeus-win-x64-*.zip
             artifacts/release/sir-thaddeus-win-x64-*.sha256.txt
@@ -169,6 +170,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-package-linux
+          retention-days: 1
           path: |
             artifacts/release/sir-thaddeus-linux-x64-*.tar.gz
             artifacts/release/sir-thaddeus-linux-x64-*.sha256.txt
@@ -211,6 +213,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-package-macos
+          retention-days: 1
           path: |
             artifacts/release/sir-thaddeus-osx-arm64-*.tar.gz
             artifacts/release/sir-thaddeus-osx-arm64-*.sha256.txt
@@ -247,11 +250,12 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
+          name: "Sir Thaddeus ${{ github.ref_name }}"
           generate_release_notes: true
           make_latest: true
           # Public release surface: only the full bundles. Lite variants stay
-          # built as CI artifacts (downloadable via the Actions tab) but are
-          # not promoted to the Releases page to keep the download UX simple.
+          # as one-day transfer artifacts and are not promoted to the Releases
+          # page, keeping the public download UX simple.
           files: |
             release-assets/*-full.zip
             release-assets/*-full.tar.gz

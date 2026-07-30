@@ -23,6 +23,11 @@ on:
         description: "Release version tag (e.g. v1.2.0)"
         required: true
         type: string
+      release_title:
+        description: "Optional public release title"
+        required: false
+        type: string
+        default: ""
       skip_merge:
         description: "Skip the merge step (tag master as-is)"
         required: false
@@ -130,6 +135,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: promote-package-windows
+          retention-days: 1
           path: |
             artifacts/release/sir-thaddeus-win-x64-*.zip
             artifacts/release/sir-thaddeus-win-x64-*.sha256.txt
@@ -175,6 +181,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: promote-package-linux
+          retention-days: 1
           path: |
             artifacts/release/sir-thaddeus-linux-x64-*.tar.gz
             artifacts/release/sir-thaddeus-linux-x64-*.sha256.txt
@@ -221,6 +228,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: promote-package-macos
+          retention-days: 1
           path: |
             artifacts/release/sir-thaddeus-osx-arm64-*.tar.gz
             artifacts/release/sir-thaddeus-osx-arm64-*.sha256.txt
@@ -344,13 +352,13 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.version }}
-          name: "Sir Thaddeus ${{ inputs.version }}"
+          name: ${{ inputs.release_title || format('Sir Thaddeus {0}', inputs.version) }}
           generate_release_notes: true
           prerelease: false
           make_latest: true
           # Public release surface: only the full bundles. Lite variants stay
-          # built as CI artifacts (downloadable via the Actions tab) but are
-          # not promoted to the Releases page to keep the download UX simple.
+          # as one-day transfer artifacts and are not promoted to the Releases
+          # page, keeping the public download UX simple.
           files: |
             release-assets/*-full.zip
             release-assets/*-full.tar.gz

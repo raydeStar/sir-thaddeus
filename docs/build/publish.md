@@ -120,7 +120,8 @@ least once before the connection went away.
 
 ## CI/publish target notes
 
-Every tagged release and manual promote now builds **full + lite packages for each platform** in parallel after preflight:
+Every tagged release and manual promote builds **full + lite packages for each
+platform** in parallel after preflight:
 
 | Package | Runner | Format | Contents |
 |---|---|---|---|
@@ -128,7 +129,40 @@ Every tagged release and manual promote now builds **full + lite packages for ea
 | `sir-thaddeus-linux-x64-<ver>-full.tar.gz` + `...-lite.tar.gz` | `ubuntu-latest` | tar.gz | Full: Runtime + MCP + VoiceHost + launcher; Lite: Runtime + MCP + launcher |
 | `sir-thaddeus-osx-arm64-<ver>-full.tar.gz` + `...-lite.tar.gz` | `macos-latest` | tar.gz | Full: Runtime + MCP + VoiceHost + launcher; Lite: Runtime + MCP + launcher |
 
-All three end up as GitHub Release assets.
+The full bundle and its SHA-256 checksum for each platform are published as
+durable GitHub Release assets. Lite bundles are retained for one day as
+workflow-transfer artifacts rather than occupying long-lived Actions storage.
+
+### Stable versioned releases
+
+Push a semantic-version tag from the verified `master` commit to run the release
+gate and publish a stable GitHub Release:
+
+```powershell
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+The tag-triggered workflow runs preflight, packages and smoke-tests all three
+platforms, generates release notes, publishes the full bundles and checksums,
+and marks the result as the latest stable release.
+
+The manual **Promote Dev to Production** workflow also accepts an optional
+public release title. Leave it blank to use `Sir Thaddeus <version>`.
+
+Generated notes are grouped by `.github/release.yml`. Apply one appropriate
+area label to user-facing pull requests:
+
+- `area: core`
+- `area: desktop`
+- `area: voice`
+- `area: tools`
+- `area: research`
+- `area: build`
+
+The existing `enhancement`, `bug`, and `documentation` labels provide fallback
+categories. Use `skip-changelog` only for changes that should not appear in
+public notes.
 
 ### Rolling releases
 
@@ -137,25 +171,29 @@ Pushes to `dev` and `master` now publish separate rolling artifacts too:
 - `latest-dev` for the current `dev` branch head
 - `latest` for the current `master` branch head
 
-Each rolling release now carries:
+Each rolling release carries the full bundle and checksum for:
 
 - `sir-thaddeus-win-x64-<branch>-<sha>-full.zip`
-- `sir-thaddeus-win-x64-<branch>-<sha>-lite.zip`
 - `sir-thaddeus-linux-x64-<branch>-<sha>-full.tar.gz`
-- `sir-thaddeus-linux-x64-<branch>-<sha>-lite.tar.gz`
 - `sir-thaddeus-osx-arm64-<branch>-<sha>-full.tar.gz`
-- `sir-thaddeus-osx-arm64-<branch>-<sha>-lite.tar.gz`
+
+Lite bundles remain available only as one-day workflow artifacts.
 
 GitHub's built-in `Source code (zip)` and `Source code (tar.gz)` entries are automatic repository snapshots for the release tag. They are not the packaged app artifacts and are expected to appear separately from the uploaded platform bundles.
 
-### Free-tier minute budget
+### Public-repository usage
 
-- Linux jobs cost 1× → nearly free
-- macOS jobs cost 10× → ~45 min build = 450 equivalent minutes
-- Use the `skip_macos=true` input on the promote workflow for emergency hotfixes to avoid macOS cost
-- Pull requests still do not build release packages
-- Pushes to `dev` and `master` now publish Windows, Linux, and macOS rolling artifacts
-- Tagged releases and promote runs publish the same three-platform layout with versioned names
+- Standard GitHub-hosted runners are unmetered for this public repository.
+- Self-hosted runners are not required for the current release path.
+- Final downloads belong in GitHub Releases rather than long-lived Actions
+  artifacts.
+- Intermediate full and lite package artifacts use one-day retention.
+- Use `skip_macos=true` only when a manual emergency promotion intentionally
+  omits the macOS package.
+- Pushes to `dev` and `master` publish Windows, Linux, and macOS rolling
+  artifacts.
+- Tagged releases and promote runs publish the same three-platform layout with
+  versioned names.
 
 ## Troubleshooting
 
