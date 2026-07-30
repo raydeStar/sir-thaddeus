@@ -630,6 +630,31 @@ calls and latency while tying or losing to unchanged Thaddeus.
   projection; retain it for transfer or full-benchmark confirmation after a
   mechanism survives the development loop.
 
+### Approved-plan capability-menu oracle
+
+- A fresh evaluator-only screen tested whether the user-approved work plan
+  supplies a safer tool-selection signal than earlier lexical selectors. Six
+  multi-step positives, three no-action controls, and one nonplanned parity
+  control ran through raw, unchanged production routing, and a broad
+  plan-derived local capability menu on `lfm2.5-8b-a1b` Q4_K_M.
+- Raw scored `4/10`, unchanged scored `3/10`, and the menu oracle scored
+  `5/10`. The oracle produced two independently verified Wiki-state wins, zero
+  losses, and eight ties, but missed the frozen three-win gate. Both harness
+  arms missed the nonplanned exact-response parity control; every no-action
+  state remained unchanged.
+- The candidate expanded model calls from `12` to `38`, tool calls from `0` to
+  `19`, input tokens from `10,367` to `179,743`, and p50 from `1,733` to
+  `3,314 ms`. P95 improved from `7,862` to `6,444 ms`, and peak VRAM tied at
+  `9,326 MiB`, but the call and token ceilings failed decisively.
+- Close the broad approved-plan capability-menu union. The directional wins
+  show that approved plans contain useful orchestration signal, but the current
+  abstract `Context` and `DurableOutput` capabilities do not identify a precise
+  source or outcome family. Do not tune a narrower menu against these consumed
+  tasks or proceed to step-by-step enforcement.
+- A materially different future attempt belongs in the decision basket:
+  enrich the user-visible approved plan with typed source and outcome families,
+  then run a fresh oracle before changing production tool exposure.
+
 ### Deterministic date-arithmetic headroom and candidate
 
 - A fresh eight-task fixed-date screen covered two cases each for calendar

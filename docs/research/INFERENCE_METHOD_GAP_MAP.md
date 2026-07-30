@@ -1,8 +1,8 @@
 # Inference Method Gap Map
 
-**Reconciled:** July 21, 2026
-**Production baseline:** `8de27f9b`
-**Evaluator baseline:** `eb74f189`
+**Reconciled:** July 30, 2026
+**Production baseline:** `f9050510`
+**Evaluator evidence:** `a033133`
 
 This map ranks research mechanisms against Sir Thaddeus evidence. It does not
 replace the experiment ledger or promotion policy. Model capacity, fixed-model
@@ -45,6 +45,7 @@ The gold arm did not run, and the date family is closed on current evidence.
 | Multi-model/specialist routing | Deferred | No 300-outcome complementary failure map; changing models does not improve the fixed model | Potentially high | Escalation can improve system outcomes | VRAM and routing latency | Strong if disclosed and paired | Attribution confusion and operational complexity | Keep deferred |
 | Broad conversational fast path/router rewrite | Rejected by measurement | Footman made zero LLM calls; optional helpers were 10% of ordinary-turn time; global validation/retry removal reduced quality | Medium | Limited measured upside | Engineering and regression cost | Product latency only | Quality, memory, safety, continuity | Do not reopen without a new measured blocker |
 | Capability-surface context headroom | Causally demonstrated; selector family closed | Repeated 8K attribution measured 8,455 estimated tool-definition tokens across 60 tools and a 12,097-token request budget; a one-read-tool oracle repeated with 4,302 tokens of headroom and passed the contract | High for small contexts | Prevent provider overflow and reduce irrelevant capability burden | Potentially lower prompt and permission cost | Strong for envelope size; weak for safe selection | Prior precedence was unsafe and conservative v3 increased calls | Keep as diagnostic evidence; require a materially different selector before reopening |
+| User-approved plan capability menu | Tested and rejected | A broad plan-derived local menu produced two verified Wiki-state wins and zero losses, but missed its three-win gate; model calls rose `12 -> 38` and input tokens `10,367 -> 179,743` | High in principle | Use explicit user approval as a stronger orchestration signal | Very high for the tested broad union | Strong final-state and no-action controls | Current abstract plan capabilities do not identify precise source or output families | Close broad union; a fresh attempt requires richer user-visible typed plan fields |
 | Fresh representative outcome discovery | Diagnostic complete; no open candidate | V2 found no three-case cluster. V3 scored `19/32` strict and `31/32` valid. A later local document cohort scored `8/12` strict and `11/12` valid, but no category reached three aligned valid failures | High as an evaluation method | Finds current failure regions without committing to architecture | The document cohort used one 12-case invocation and 86.854 seconds | Strong for observed cases, not prevalence | Synthetic mixes can create misleading clusters | Keep accumulating outcomes; require both prevalence and a materially open seam |
 | XLSX cell-coordinate fidelity | Static defect observed; outcome gate rejected | The reader ignores cell references and can collapse absent middle cells, but a fresh 10-case cohort produced zero successful reads and therefore zero representation activations | High when XLSX evidence is reached | Preserve table semantics before model reasoning | Negligible deterministic parsing cost | Strong at the extracted-text layer; unproven for end outcomes | A correct low-level fix can still add no user value when tool selection fails upstream | Defer until three fresh successful XLSX reads expose aligned downstream misses |
 | Audited system-command selection | Existing path adequate; forced selection rejected | A fresh six-positive/four-control run passed all controls; `system_execute` was selected on `5/6` authorized requests and every selected call succeeded. Four strict misses split across one omission, one wrong command, and two response-contract failures | High on local desktop tasks | Execute allowlisted commands with explicit permission and observable output | One tool round plus completion handling | Strong for execution success; mixed for intent and rendering | Raw command output may contain sensitive machine details; forcing a tool cannot fix arguments or synthesis | Keep existing audited path; require three aligned fresh misses at one open layer before another candidate |
@@ -180,6 +181,12 @@ response-contract, path-binding, schema-only file creation, generic
 postcondition, and date-specific candidates paused until ordinary labeled
 outcomes expose a repeated open seam. The 57-outcome census remains below the
 300-outcome complementarity gate for specialist escalation.
+
+The approved-plan capability-menu oracle is also closed. It demonstrated two
+verified wins without a safety loss, but missed its gain floor and multiplied
+calls and tokens. Do not tune a smaller menu against that consumed cohort. A
+future plan-based attempt must first add and independently justify richer
+user-visible typed source and outcome families, then use a fresh oracle.
 
 ## Research basis
 
