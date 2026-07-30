@@ -1,6 +1,6 @@
 # Experiment Catalog
 
-This is a compact index of material Sir Thaddeus experiments through July 22,
+This is a compact index of material Sir Thaddeus experiments through July 30,
 2026. It records reusable conclusions, not hidden benchmark content. Exact
 manifests, commands, artifact hashes, and verdicts live in the sibling private
 `local-benchmark-runner` repository under `experiments/`.
@@ -40,6 +40,7 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Native document-reading outcome discovery v1 | Evaluation infrastructure | **Diagnostic complete; no open candidate** | Bounded binary harness fixtures enabled one 12-case PDF/DOCX/XLSX cohort after all files passed the production readers. Unchanged Thaddeus scored `6/12` strict and `10/12` valid in 83.035 seconds. Field/row/aggregation reached `3/4`, `2/4`, and `1/4`; the low `1/4` XLSX slice mixed two invalid path mutations with one semantic column error and was not a post-hoc gate. No category supplied three aligned valid failures, so no oracle or product behavior ran. Product PR `#263`; evaluator PR `#130`. |
 | XLSX column-fidelity headroom v1 | Evaluation infrastructure | **Rejected at baseline gate; no gold or product candidate** | Static inspection found that omitted XLSX cells can be collapsed because the reader ignores cell references. A fresh six-sparse/four-dense run nevertheless produced `0/10` strict, `7/10` valid, and zero successful reads. Nine turns skipped the sole exposed tool and one changed the path. With zero coordinate-loss activations, the conditional gold arm did not run and the one-off evaluator code was removed. Evaluator PR `#133`. |
 | System-command outcome discovery v1 | Evaluation infrastructure | **Rejected at baseline gate; no product candidate** | A local-only six-positive/four-control run scored `6/10` strict and `10/10` valid in 36.24 seconds. All safety/no-action controls passed; `system_execute` was selected on `5/6` authorized cases and all five calls succeeded. Only one miss was tool-name selection; the others split across wrong command arguments and final-response fidelity. A forced-tool candidate failed its authorization gate. Evaluator PR `#134`. |
+| System-command binding oracle v1 | Evaluation infrastructure | **Rejected at prerequisite; command-binding family closed** | A fresh 30-evaluation screen compared unchanged, tool-name-guided, and gold-command arms. Unchanged selected `system_execute` on only `2/6` positives versus the frozen `5/6` prerequisite; all three arms scored `0/6` strict positives while all four controls passed in every arm. Gold commands therefore did not isolate argument binding, and no product candidate, repeat, or validation was authorized. |
 | Deterministic date arithmetic v1 | Harness capability | **Rejected at development gate; implementation deleted** | Compact gold evidence scored `8/8` versus `1/8` raw and `0/8` unchanged across four date-operation families. The real read-only `date_calculate` candidate then scored `2/8` positives and `4/4` controls with full validity. Both selected positive calls succeeded, but selection coverage was only `2/8` versus the frozen `7/8` gate. No repeat or validation ran; evaluator PR `#135` preserves the evidence. |
 | Deterministic date first-tool selection v2 | Harness capability | **Stopped at prerequisite; no product code** | A fresh disjoint bank put raw and unchanged at `0/8`. Tool-only v1 reached `3/8` positives, `3/6` controls, full validity, and `6/8` positive selection. Only two misses were omissions while three selected calls had wrong operation/argument binding, so selection could not meet its frozen +3 causal gate. Evaluator PR `#136`. |
 | Typed date-argument oracle v3 | Harness capability | **Rejected at baseline; date family closed** | A third disjoint tool-only bank scored `1/6` positives and `3/6` controls with full validity. Positive selection was `4/6`, below the frozen `5/6` binding-dominance prerequisite; three calls had wrong arguments while two recurrences omitted the tool. Gold and product code did not run. Evaluator PR `#137`. |
@@ -199,6 +200,9 @@ Use these repository-relative locations in the sibling
 - System-command outcome discovery:
   `experiments/manifests/system-command-outcome-discovery-v1.yaml` and
   `experiments/verdicts/2026-07-21-system-command-outcome-discovery-v1.md`.
+- System-command binding oracle:
+  `experiments/manifests/system-command-binding-oracle-v1.yaml` and
+  `experiments/verdicts/2026-07-30-system-command-binding-oracle-v1.md`.
 - Tool-semantic attribution:
   `experiments/manifests/tool-semantic-outcome-baseline-v1.yaml` and
   `experiments/verdicts/2026-07-16-tool-semantic-outcome-baseline-v1.md`.
