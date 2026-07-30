@@ -605,6 +605,31 @@ calls and latency while tying or losing to unchanged Thaddeus.
   contains local machine details and remains ignored; evaluator PR `#134`
   records only answer-blind public evidence.
 
+### System-command binding oracle follow-up
+
+- A fresh six-positive/four-control evaluator-only screen compared unchanged,
+  tool-name-guided, and exact-command-argument arms on
+  `lfm2.5-8b-a1b` Q4_K_M. It completed all 30 planned evaluations locally in
+  59.9 seconds of measured arm time.
+- Unchanged selected `system_execute` on only `2/6` positives, below the frozen
+  `5/6` binding-dominance prerequisite. Tool-name guidance and gold command
+  arguments each reached `6/6` selection, but every arm remained `0/6` on
+  strict positive outcomes.
+- All four no-action and metacharacter controls passed in every arm. No
+  stronger-model or judge calls ran. The screen is valid, but its prerequisite
+  failure means the gold arm cannot establish argument binding as the next
+  narrow seam.
+- Close the system-command binding family. No product implementation, repeat,
+  or validation is authorized. The diagnostic suggests mixed selection and
+  final-response failures, but it does not authorize bundling selection,
+  argument rewriting, and projection into one candidate.
+- The requested Unsloth Gemma 4 12B Q4_K_XL artifact was excluded because its
+  LM Studio metadata reported no tool-use training and it returned empty
+  harness responses. Official Google Gemma 4 12B Q4_K_M passed a direct
+  `system_execute` schema smoke but exceeded the bounded development-time
+  projection; retain it for transfer or full-benchmark confirmation after a
+  mechanism survives the development loop.
+
 ### Deterministic date-arithmetic headroom and candidate
 
 - A fresh eight-task fixed-date screen covered two cases each for calendar
@@ -686,11 +711,11 @@ calls and latency while tying or losing to unchanged Thaddeus.
   untested. Reopen only after at least three fresh successful XLSX reads expose
   aligned downstream errors; do not force the tool or tune the consumed prompts
   merely to reach the reader.
-- Whether audited system execution can expose a future repeated argument or
-  postcondition cluster remains open, but current routing is not the blocker:
-  the tool was selected on `5/6` authorized cases and every selected call
-  succeeded. Do not force the tool globally or reopen exact-response handling
-  from this heterogeneous four-miss slice.
+- Audited system execution did not expose a stable argument-binding cluster.
+  Historical discovery selected the tool on `5/6`, while the fresh binding
+  screen selected it on only `2/6`; exact gold commands still produced `0/6`
+  strict positives. Close the family rather than forcing the tool globally or
+  bundling selection, binding, and response projection.
 - Date specialization is closed on current evidence. Three disjoint slices did
   not establish one dominant layer across discovery, semantic arguments, and
   response fidelity. Do not add a bundled date parser/router/projector merely

@@ -527,6 +527,18 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
                     _ = Task.Run(() => RespondPermissionAsync(pendingId), cancellationToken);
                 }
 
+                // The production runtime deliberately pauses consequential turns
+                // for user review. The harness is the evaluator-owned user for an
+                // isolated test, so approve exactly the emitted plan version. This
+                // preserves optimistic concurrency and never bypasses the runtime's
+                // normal plan or permission boundaries.
+                if (TryReadPendingPlanApproval(doc.RootElement, out var runId, out var planVersion))
+                {
+                    _ = Task.Run(
+                        () => RespondPlanApprovalAsync(runId, planVersion),
+                        cancellationToken);
+                }
+
                 // Always push to the per-turn event channel if one is active.
                 _events?.Writer.TryWrite(doc);
             }
@@ -553,6 +565,52 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             // Best-effort: a permission-respond failure shouldn't crash
             // the WS reader.
         }
+    }
+
+    private async Task RespondPlanApprovalAsync(string runId, long planVersion)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(runId) || planVersion < 1 || _http is null) return;
+
+            using var response = await _http.PostAsJsonAsync(
+                $"api/runs/{Uri.EscapeDataString(runId)}/plan/approve",
+                new { expectedVersion = planVersion },
+                JsonOptions);
+            // Best-effort, matching permission auto-approval. A conflict or
+            // transport failure remains visible as an incomplete harness turn.
+        }
+        catch
+        {
+            // The run itself remains the authority for failure reporting.
+        }
+    }
+
+    internal static bool TryReadPendingPlanApproval(
+        JsonElement root,
+        out string runId,
+        out long planVersion)
+    {
+        runId = string.Empty;
+        planVersion = 0;
+        if (!root.TryGetProperty("type", out var type) ||
+            !string.Equals(type.GetString(), "chat.run.state", StringComparison.Ordinal) ||
+            !root.TryGetProperty("payload", out var payload) ||
+            !payload.TryGetProperty("state", out var state) ||
+            !string.Equals(state.GetString(), "awaitingapproval", StringComparison.OrdinalIgnoreCase) ||
+            !payload.TryGetProperty("runId", out var runIdElement) ||
+            runIdElement.GetString() is not { Length: > 0 } parsedRunId ||
+            !payload.TryGetProperty("plan", out var plan) ||
+            !plan.TryGetProperty("version", out var version) ||
+            !version.TryGetInt64(out var parsedVersion) ||
+            parsedVersion < 1)
+        {
+            return false;
+        }
+
+        runId = parsedRunId;
+        planVersion = parsedVersion;
+        return true;
     }
 
     internal static string NormalizePermissionDecision(string? value)

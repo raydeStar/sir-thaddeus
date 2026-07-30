@@ -14,6 +14,44 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void Pending_plan_approval_uses_the_emitted_plan_version()
+    {
+        using var document = JsonDocument.Parse(
+            """
+            {
+              "type": "chat.run.state",
+              "payload": {
+                "runId": "run_123",
+                "state": "awaitingapproval",
+                "version": 4,
+                "plan": { "planId": "plan_123", "version": 2 }
+              }
+            }
+            """);
+
+        Assert.True(HybridRuntimeHostAdapter.TryReadPendingPlanApproval(
+            document.RootElement,
+            out var runId,
+            out var planVersion));
+        Assert.Equal("run_123", runId);
+        Assert.Equal(2, planVersion);
+    }
+
+    [Theory]
+    [InlineData("""{"type":"chat.run.state","payload":{"runId":"run_1","state":"running","plan":{"version":1}}}""")]
+    [InlineData("""{"type":"chat.run.state","payload":{"runId":"run_1","state":"awaitingapproval"}}""")]
+    [InlineData("""{"type":"permission.request","payload":{"runId":"run_1","state":"awaitingapproval","plan":{"version":1}}}""")]
+    public void Non_pending_or_incomplete_events_do_not_approve_plans(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+
+        Assert.False(HybridRuntimeHostAdapter.TryReadPendingPlanApproval(
+            document.RootElement,
+            out _,
+            out _));
+    }
+
+    [Fact]
     public void Preflight_state_allows_observed_generated_fields_but_rejects_dirty_state()
     {
         using var observed = JsonDocument.Parse(
