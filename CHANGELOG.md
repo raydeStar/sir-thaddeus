@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+_No entries yet._
+
+## 1.0.0 — 2026-07-30 — Hello, world!
+
+The first stable public GitHub release of Sir Thaddeus.
+
 ### Agent quality and routing
 
 - Immediate Wiki root creation now keeps the configured library location
@@ -57,10 +63,8 @@
 - Rolling `master` builds now run Windows, Linux, and macOS package smoke gates
   before the `latest` prerelease is published.
 
-## 1.0.0 — 2026-05-08
-
-The v1.0 release. The hybrid Shell + Runtime + workspace surface is now
-the product Sir Thaddeus ships as. Scope is locked in
+The v1 product line was prepared on 2026-05-08. The hybrid Shell + Runtime +
+workspace surface is the product Sir Thaddeus ships as. Scope is locked in
 [`V1_SCOPE.md`](docs/archive/V1_SCOPE.md); the release-readiness gate is in
 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
 

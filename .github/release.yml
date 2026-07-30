@@ -1,0 +1,48 @@
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+    authors:
+      - dependabot
+      - dependabot[bot]
+
+  categories:
+    - title: Core
+      labels:
+        - "area: core"
+
+    - title: Desktop
+      labels:
+        - "area: desktop"
+
+    - title: Voice
+      labels:
+        - "area: voice"
+
+    - title: Tools and capabilities
+      labels:
+        - "area: tools"
+
+    - title: Research and benchmarks
+      labels:
+        - "area: research"
+
+    - title: Documentation
+      labels:
+        - documentation
+
+    - title: Build and maintenance
+      labels:
+        - "area: build"
+
+    - title: Improvements
+      labels:
+        - enhancement
+
+    - title: Fixes
+      labels:
+        - bug
+
+    - title: Other changes
+      labels:
+        - "*"

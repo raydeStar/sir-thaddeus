@@ -117,6 +117,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: build-package-windows-${{ env.BUILD_ARTIFACT_SUFFIX }}
+          retention-days: 1
           path: |
             artifacts/release/sir-thaddeus-win-x64-*.zip
             artifacts/release/sir-thaddeus-win-x64-*.sha256.txt
@@ -164,6 +165,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: build-package-linux-${{ env.BUILD_ARTIFACT_SUFFIX }}
+          retention-days: 1
           path: |
             artifacts/release/sir-thaddeus-linux-x64-*.tar.gz
             artifacts/release/sir-thaddeus-linux-x64-*.sha256.txt
@@ -211,6 +213,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: build-package-macos-${{ env.BUILD_ARTIFACT_SUFFIX }}
+          retention-days: 1
           path: |
             artifacts/release/sir-thaddeus-osx-arm64-*.tar.gz
             artifacts/release/sir-thaddeus-osx-arm64-*.sha256.txt
@@ -381,8 +384,8 @@ jobs:
           prerelease: true
           make_latest: false
           # Keep the public rolling release surface readable. Lite bundles and
-          # contents manifests remain CI artifacts, but the Releases page shows
-          # only the normal full downloads and archive checksums.
+          # contents manifests are short-lived transfer artifacts, while the
+          # Releases page keeps the normal full downloads and checksums.
           files: |
             release-assets/*-full.zip
             release-assets/*-full.tar.gz
