@@ -703,6 +703,36 @@ calls and latency while tying or losing to unchanged Thaddeus.
   test a materially different verified execution contract on fresh tasks.
   Evaluator PR `#142` preserves the manifest, artifacts, and verdict.
 
+### Verified source receipt continuation oracle
+
+- A second fresh ten-task, four-arm development slice tested the materially
+  different follow-up: a bounded runtime-style receipt containing an externally
+  verified source observation plus the still-pending user-approved outcome.
+  The receipt named no tools, changed no tool menu, preserved normal
+  permissions, and could not read state setup, scorers, expected state, or
+  canaries.
+- Raw minimal and same-prompt direct each scored `4/10`. Unchanged and the
+  receipt candidate each scored `3/10`, with `0/6` verified state-changing
+  positives, `3/3` no-action controls, `0/1` casual exact-response parity, and
+  `10/10` validity. Paired candidate versus unchanged was zero wins, zero
+  losses, and ten ties.
+- Every candidate positive received zero model-visible tools, made zero tool
+  calls, and left external Wiki state unchanged. One turn rendered the correct
+  proposed Digest Markdown in its response but did not create the page. This
+  was not independently verified task completion.
+- Resource ceilings passed: calls rose `13 -> 14`, input tokens rose `1.311x`,
+  output tokens rose `1.047x`, p95 fell to `0.897x`, and peak VRAM fell to
+  `0.991x`. Those costs cannot rescue a zero-win candidate, and both harness
+  arms also failed the frozen casual-parity control.
+- Reject before repeat or validation. A prompt-level receipt can safely carry
+  evidence and pending intent, but it does not create an executable
+  continuation when the production path exposes no tools. Close further
+  prompt labels, packets, and menus on this seam. A future architecture oracle
+  must exercise a real continuation inside an already active tool loop after a
+  source operation succeeds, or move to the separately governed
+  trajectory-data and adapted-model lane. Evaluator PR `#143` preserves the
+  manifest, artifacts, and verdict.
+
 ### Deterministic date-arithmetic headroom and candidate
 
 - A fresh eight-task fixed-date screen covered two cases each for calendar
