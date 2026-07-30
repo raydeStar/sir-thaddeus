@@ -758,7 +758,7 @@ calls and latency while tying or losing to unchanged Thaddeus.
   eligibility evidence, not a benchmark loss. Evaluator PR `#144` preserves
   the frozen manifest, run, and verdict.
 
-### Verified fixed-catalog trajectory-data Phase A
+### Verified fixed-catalog trajectory-data Phases A and B
 
 - The materially distinct learning lane now has an evaluator-only,
   deterministic verified-data pipeline grounded in the current Sir Thaddeus
@@ -774,12 +774,25 @@ calls and latency while tying or losing to unchanged Thaddeus.
   and abstention verification. Two independent builds were byte-identical.
   The answer-bearing JSONL remains ignored; the tracked public manifest
   contains hashes and counts only.
-- This is infrastructure acceptance, not a training-ready corpus or model
-  gain. Positive families currently use only four linguistic templates each.
-  A separately predeclared Phase B must expand to roughly 3,000-5,000 verified
-  records with broader paraphrase, distractor, ambiguity, missing-resource,
-  permission-sensitive, and multi-step coverage before an adapter pilot is
-  justified. Evaluator PR `#145` is merged and green.
+- Phase A is infrastructure acceptance, not a model gain. Its four positive
+  templates per family were deliberately insufficient for training.
+  Evaluator PR `#145` is merged and green.
+- The separately frozen Phase B expansion is now complete. It produced
+  `4,096/4,096` schema-, execution-, prerequisite-flow-, and exact-state-
+  verified records: 3,072 train, 512 development, and 512 validation across
+  sixteen balanced families. The set includes direct commitment, conditional
+  source-to-action, read-only discovery, versioned and five-call workflows,
+  missing-resource stops, ambiguity, temporal deferral, negation,
+  hypothetical/explanation-only requests, and permission-bypass refusals.
+- Every Phase B family has 32 structural prompt signatures and nine
+  deterministic tool-order variants in every split. Entities, paths, exact
+  prompts, and scenario ids are split-disjoint. Two independent builds were
+  byte-identical; Phase A's accepted files and dataset hash remain unchanged.
+- The Phase B answer-bearing JSONL remains ignored. Its tracked manifest is
+  answer-blind, and the full evaluator passed `585` tests with one skip.
+  Evaluator PR `#146` is merged and green. This makes the data infrastructure
+  eligible for a separately predeclared QLoRA/SFT pilot; adapter learning,
+  generalization, and benchmark gain remain untested.
 
 ### Deterministic date-arithmetic headroom and candidate
 
