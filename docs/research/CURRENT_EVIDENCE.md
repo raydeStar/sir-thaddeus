@@ -655,6 +655,29 @@ calls and latency while tying or losing to unchanged Thaddeus.
   enrich the user-visible approved plan with typed source and outcome families,
   then run a fresh oracle before changing production tool exposure.
 
+### Typed approved-plan source/outcome oracle
+
+- The decision-basket follow-up used ten entirely fresh tasks and four frozen
+  arms: raw minimal, unchanged production routing, typed metadata with
+  production routing, and typed metadata with a family-derived menu. The
+  user-visible vocabulary covered local-file, attached-Wiki, existing-Wiki,
+  calculation, and no-source inputs plus Wiki-root-create, Wiki-page-create,
+  Wiki-page-update, and no-mutation outcomes.
+- Every arm scored `4/10` strict with `0/6` positive outcomes, `3/3` no-action
+  controls, `1/1` casual parity, and full validity. Typed metadata alone and
+  the family menu each produced zero paired wins and zero losses versus
+  unchanged.
+- The family menu increased model calls from `13` to `21` (`1.615x`) and input
+  tokens from `11,019` to `31,808` (`2.887x`), breaching both frozen hard
+  ceilings. It selected useful source tools on several cases and completed one
+  Wiki update transport, but no positive independently verified final state.
+- Reject before repeat or validation. Do not add these fields to production for
+  routing, tune narrower labels against the consumed cohort, or reinterpret
+  safe activation as task completion. The traces place the remaining failure
+  in multi-step evidence binding and execution progression, not broad-menu
+  discovery. A future plan-based mechanism requires a materially different
+  externally verified execution contract.
+
 ### Deterministic date-arithmetic headroom and candidate
 
 - A fresh eight-task fixed-date screen covered two cases each for calendar
