@@ -678,6 +678,31 @@ calls and latency while tying or losing to unchanged Thaddeus.
   discovery. A future plan-based mechanism requires a materially different
   externally verified execution contract.
 
+### Structured attachment evidence packet oracle
+
+- A fresh ten-task, four-arm development slice compared raw minimal,
+  same-prompt direct, unchanged production routing, and an evaluator-declared
+  bounded packet containing only explicit attachment payloads. The packet was
+  escaped, capped at `2,000` characters per attachment and `4,000` total, and
+  marked as untrusted data rather than instructions.
+- Raw, same-prompt direct, and unchanged each scored `4/10`. The packet scored
+  `7/10`, producing three extraction wins, zero losses, all four controls, and
+  `10/10` validity. Packet presence was confirmed on all nine attachment cases
+  and absent on the missing-attachment control.
+- The gain stopped at extraction. All three attachment-to-Wiki tasks exposed
+  zero model-visible tools, made zero tool calls, returned empty final
+  responses, and left external state unchanged. The packet therefore did not
+  demonstrate orchestration or an independently verified state-changing
+  outcome.
+- Candidate model calls increased from `14` to `17` (`1.214x`), breaching the
+  frozen non-increase hard gate. Input tokens rose `1.316x`; output tokens fell
+  to `0.879x`; p50 rose `1.026x`; p95 fell to `0.588x`; peak VRAM was unchanged.
+- Reject before repeat or validation. Preserve the extraction signal as
+  diagnostic evidence, but do not ship the packet, relax its resource gate, or
+  tune it against the consumed tasks. Any next orchestration experiment must
+  test a materially different verified execution contract on fresh tasks.
+  Evaluator PR `#142` preserves the manifest, artifacts, and verdict.
+
 ### Deterministic date-arithmetic headroom and candidate
 
 - A fresh eight-task fixed-date screen covered two cases each for calendar
