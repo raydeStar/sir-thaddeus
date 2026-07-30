@@ -733,6 +733,54 @@ calls and latency while tying or losing to unchanged Thaddeus.
   trajectory-data and adapted-model lane. Evaluator PR `#143` preserves the
   manifest, artifacts, and verdict.
 
+### Active tool-loop post-source continuation prerequisite
+
+- A fresh ten-task LFM 2.5 8B Q4_K_M prerequisite tested the remaining
+  architecture-shaped seam before any product behavior was written. Both
+  unchanged and proposed candidate arms were frozen to receive the same narrow
+  source and authorized Wiki outcome tools.
+- Unchanged Thaddeus made a successful non-mutating source call on only `3/6`
+  positives versus the frozen `4/6` requirement. Two of those trajectories
+  already completed the requested mutation and strict verified state, leaving
+  only `1/6` in the exact source-success/outcome-stall condition the proposed
+  continuation could affect versus the required `3/6`.
+- Overall strict was `6/10`: `2/6` positive outcomes, `3/3` no-action controls,
+  and `1/1` casual parity, with `10/10` validity. The unchanged run used 29
+  model calls, 13 tool calls, 45,720 input tokens, 6,739 output tokens,
+  `5,143/5,871 ms` p50/p95, and 17,148 MiB peak VRAM.
+- Reject at prerequisite without product code, candidate arm, repeat, or
+  validation. Three positive failures never entered the tool loop; a late
+  continuation cannot repair initial tool commitment, while two successful
+  source trajectories already reached the outcome.
+- The requested Gemma 4 12B Q4_K_XL artifact answered a no-tool probe but LM
+  Studio returned HTTP 400 whenever tools were supplied because its packaged
+  Jinja template could not render the function contract. This is model
+  eligibility evidence, not a benchmark loss. Evaluator PR `#144` preserves
+  the frozen manifest, run, and verdict.
+
+### Verified fixed-catalog trajectory-data Phase A
+
+- The materially distinct learning lane now has an evaluator-only,
+  deterministic verified-data pipeline grounded in the current Sir Thaddeus
+  C# contracts for `file_read`, `wiki_root_create`,
+  `wiki_page_create_by_name`, and `wiki_page_update_by_name`, with Wiki read
+  tools present as distractors.
+- Phase A generated 512 records: 384 train, 64 development, and 64 validation,
+  balanced across file-to-root, file-to-page-create, file-to-page-update, and
+  no-tool abstention. Split scenario ids, entities, file paths, and exact
+  prompts are disjoint.
+- All `512/512` records passed exact catalog/argument shape, deterministic
+  execution, read-before-write ordering, exact final-state, collateral-state,
+  and abstention verification. Two independent builds were byte-identical.
+  The answer-bearing JSONL remains ignored; the tracked public manifest
+  contains hashes and counts only.
+- This is infrastructure acceptance, not a training-ready corpus or model
+  gain. Positive families currently use only four linguistic templates each.
+  A separately predeclared Phase B must expand to roughly 3,000-5,000 verified
+  records with broader paraphrase, distractor, ambiguity, missing-resource,
+  permission-sensitive, and multi-step coverage before an adapter pilot is
+  justified. Evaluator PR `#145` is merged and green.
+
 ### Deterministic date-arithmetic headroom and candidate
 
 - A fresh eight-task fixed-date screen covered two cases each for calendar
