@@ -27,11 +27,11 @@ Desktop and headless chat use the same ordered responsibilities:
 7. Apply search fallback only when search is available and applicable.
 8. Persist automatic memory asynchronously and compose the final response.
 
-The desktop composition is owned by
-`src/Thaddeus.Runtime/Chat/LmStudioAssistant.Pipeline.cs`. The headless runtime
-maintains a parity composition for harness and terminal execution. Composition
-tests should verify security and ordering invariants rather than optional
-experiments.
+The canonical stage order is owned by
+`packages/agent/SirThaddeus.Agent/Pipeline/ProductionChatPipelineFactory.cs`.
+Desktop and headless construct their host-specific tool loop and boundary
+adapters, then call that shared factory. Composition tests verify security and
+ordering invariants rather than optional experiments.
 
 ## Supported deterministic selection
 
@@ -303,14 +303,14 @@ behavior.
 
 - Keep pipeline composition separate from request lifecycle and streaming code.
 - Prefer one implementation of a routing rule shared by desktop and headless
-  paths; parity-only composition should remain small and directly tested.
+  paths. Do not reintroduce host-local copies of the production stage list.
 - Split a touched production file when it combines unrelated responsibilities
   or cannot be reviewed confidently as one unit. Avoid mechanical splitting of
   unrelated legacy subsystems in the same behavior change.
-- The active desktop lifecycle and pipeline composition are split between
-  `LmStudioAssistant.cs` and `LmStudioAssistant.Pipeline.cs`. The transitional
-  headless host remains a documented legacy hotspot; retire or decompose it in
-  a dedicated parity-focused change.
+- `LmStudioAssistant.cs` owns the active desktop lifecycle, while
+  `LmStudioAssistant.Pipeline.cs` owns desktop-specific adapters. The
+  transitional headless entry point still owns console-specific startup and
+  adapters, but it no longer owns a second orchestration contract.
 - Keep benchmark datasets, expected answers, suite identifiers, and promotion
   thresholds outside production assemblies.
 
