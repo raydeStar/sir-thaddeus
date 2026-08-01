@@ -216,6 +216,11 @@ Use these repository-relative locations in the sibling
 - Typed approved-plan source/outcome oracle:
   `experiments/manifests/typed-approved-plan-oracle-v1.yaml` and
   `experiments/verdicts/2026-07-30-typed-approved-plan-oracle-v1.md`.
+- Capability certification and specialization campaign:
+  `CAPABILITY_CERTIFICATION_AND_SPECIALIZATION_2026-08-01.md`, with evaluator
+  manifests and verdicts dated `2026-08-01` for Wiki rename operation
+  certification, LFM8 provider protocol, explicit request-target conflict, and
+  route-specific tool specialization.
 - Active tool-loop continuation prerequisite:
   `experiments/manifests/approved-plan-in-loop-continuation-v1.yaml` and
   `experiments/verdicts/2026-07-30-approved-plan-in-loop-continuation-v1.md`.

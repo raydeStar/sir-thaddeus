@@ -678,6 +678,30 @@ calls and latency while tying or losing to unchanged Thaddeus.
   discovery. A future plan-based mechanism requires a materially different
   externally verified execution contract.
 
+### Capability certification and route-specific specialization campaign
+
+- Per-operation certification correctly rejected Wiki rename for LFM2.5 1.2B
+  Q4_K_M: the fresh screen scored 5/8 and both explicit target-conflict cases
+  attempted wrong-target mutations. No repeat or product exposure ran.
+- A provider-supported LFM2.5 8B diagnostic established that LM Studio can
+  serialize exact update and rename calls under automatic tool choice.
+  `tool_choice: required` remained unreliable and is not a product repair.
+- A deterministic pre-model request/selected-target recognizer scored 10/12
+  against 9/12 unchanged, but produced only one paired win and falsely
+  activated on a read-only control. Existing post-call typed-target protection
+  already preserved all six conflict final states; reject the extra guard.
+- A route-specific action-only LFM2.5 1.2B QLoRA candidate cleanly kept six
+  missing-resource and six ordinary controls away from the specialist, but
+  scored 0/12 strict and 0/12 valid on fresh selected-target Wiki updates.
+  Native base was also 0/12 strict but 6/12 valid. Reject before repeat and
+  leave validation sealed.
+- Retain per-operation certification, existing post-call identity guards, and
+  external prerequisite state. The next materially distinct lane should bind
+  a real user-selected identity and deterministic evidence end to end, leaving
+  only a bounded content decision to the model.
+- Full writeup:
+  `CAPABILITY_CERTIFICATION_AND_SPECIALIZATION_2026-08-01.md`.
+
 ### Structured attachment evidence packet oracle
 
 - A fresh ten-task, four-arm development slice compared raw minimal,
