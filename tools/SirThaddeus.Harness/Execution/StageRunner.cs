@@ -88,7 +88,7 @@ internal sealed class StageRunner
 
         try
         {
-            var llm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildPrimary(settings.Settings));
+            using var llm = LlmClientFactory.Create(RuntimeLlmOptionsFactory.BuildPrimary(settings.Settings));
             var router = new DefaultRouter(llm, new DeterministicUtilityEngineAdapter());
             var classifier = new RequestClassifier(router);
 

@@ -1,8 +1,9 @@
 namespace SirThaddeus.LlmClient;
 
 /// <summary>
-/// Abstraction for any OpenAI-compatible chat completions endpoint.
-/// Swappable between LM Studio, Ollama, OpenAI, or any compatible provider.
+/// Provider-neutral chat model contract consumed by orchestration.
+/// Implementations may use an OpenAI-compatible endpoint, a bounded local CLI,
+/// or another transport selected by <see cref="LlmClientFactory"/>.
 /// </summary>
 public interface ILlmClient
 {

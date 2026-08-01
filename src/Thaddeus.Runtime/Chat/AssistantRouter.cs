@@ -144,8 +144,8 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         TurnRunCoordinator? runCoordinator)
     {
         var cacheLock = new object();
-        LmStudioClient? cached = null;
-        LmStudioClient? gatekeeperCached = null;
+        IConfigurableLlmClient? cached = null;
+        IConfigurableLlmClient? gatekeeperCached = null;
         IFootmanRouter? footmanCached = null;
         IPersonalityRuntime? personalityCached = null;
         IMemoryContextProvider? memoryProviderCached = null;
@@ -173,7 +173,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     var options = ToClientOptions(llm);
                     if (cached is null)
                     {
-                        cached = new LmStudioClient(options, logger: loggerFactory.CreateLogger<LmStudioClient>());
+                        cached = LlmClientFactory.Create(options, loggerFactory: loggerFactory);
                     }
                     else
                     {
@@ -218,7 +218,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                             var options = gatekeeperPolicy.ToClientOptions();
                             if (gatekeeperCached is null)
                             {
-                                gatekeeperCached = new LmStudioClient(options, logger: loggerFactory.CreateLogger<LmStudioClient>());
+                                gatekeeperCached = LlmClientFactory.Create(options, loggerFactory: loggerFactory);
                             }
                             else
                             {

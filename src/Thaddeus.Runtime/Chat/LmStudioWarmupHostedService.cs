@@ -45,7 +45,7 @@ public sealed class LmStudioWarmupHostedService : BackgroundService
         }
 
         var options = AssistantRouter.ToClientOptions(doc.Llm);
-        using var client = new LmStudioClient(options, logger: _loggerFactoryShim);
+        using var client = LlmClientFactory.Create(options);
         var result = await client.WarmupAsync(stoppingToken).ConfigureAwait(false);
         _registry.SetStartupSnapshot(result.Snapshot);
 
@@ -76,7 +76,4 @@ public sealed class LmStudioWarmupHostedService : BackgroundService
         => string.Equals(llm.Provider, "stub", StringComparison.OrdinalIgnoreCase)
            || string.IsNullOrWhiteSpace(llm.BaseUrl)
            || string.IsNullOrWhiteSpace(llm.ModelId);
-
-    private static readonly Microsoft.Extensions.Logging.ILogger<LmStudioClient> _loggerFactoryShim =
-        Microsoft.Extensions.Logging.Abstractions.NullLogger<LmStudioClient>.Instance;
 }

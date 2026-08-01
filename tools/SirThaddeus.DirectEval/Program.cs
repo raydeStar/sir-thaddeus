@@ -48,7 +48,7 @@ internal static class Program
             var personality = new PersonalityRuntime(
                 settings.ActivePersonalityId,
                 SettingsManager.ResolvePersonalityProfilesDirectory(settings));
-            using var llm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildPrimary(settings));
+            using var llm = LlmClientFactory.Create(RuntimeLlmOptionsFactory.BuildPrimary(settings));
             var results = new List<DirectEvalItemResult>(request.Items.Count);
             var effectiveLocation = settings.GetEffectiveUserLocation(settings.ActiveProfileId);
             var basePrompt = ProductionPromptComposer.ComposeBaseSystemPrompt(
