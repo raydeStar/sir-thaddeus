@@ -134,6 +134,13 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
                 "root_name": "Research",
                 "page_title": "Plan"
               },
+              "wiki_selection_rewrite": {
+                "root_name": "Research",
+                "page_title": "Plan",
+                "selected_text": "before",
+                "instruction": "Ground this in the research notes.",
+                "scope": "root"
+              },
               "observations": [
                 { "type": "wiki", "root_names": ["Research"] },
                 { "type": "files", "paths": ["notes/input.txt"] }
@@ -153,6 +160,11 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         Assert.Equal("page", test.WikiContext!.Mode);
         Assert.Equal("Research", test.WikiContext.RootName);
         Assert.Equal("Plan", test.WikiContext.PageTitle);
+        Assert.Equal("Research", test.WikiSelectionRewrite!.RootName);
+        Assert.Equal("Plan", test.WikiSelectionRewrite.PageTitle);
+        Assert.Equal("before", test.WikiSelectionRewrite.SelectedText);
+        Assert.Equal("Ground this in the research notes.", test.WikiSelectionRewrite.Instruction);
+        Assert.Equal("root", test.WikiSelectionRewrite.Scope);
         Assert.Equal("wiki", test.Observations[0].Type);
         Assert.Equal("Research", test.Observations[0].RootNames.Single());
         Assert.Equal("notes/input.txt", test.Observations[1].Paths.Single());

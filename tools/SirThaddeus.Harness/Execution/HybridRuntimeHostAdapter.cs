@@ -159,12 +159,16 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
 
         var workStopwatch = Stopwatch.StartNew();
         var usageBefore = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
-        var (finalText, success, error, messageId) =
-            await RunChatAsync(
-                test.UserMessage,
-                test.WikiContext,
-                test.WikiMutationTarget,
-                cancellationToken).ConfigureAwait(false);
+        var (finalText, success, error, messageId, endpointEvidence) =
+            test.WikiSelectionRewrite is null
+                ? AddEmptyEvidence(await RunChatAsync(
+                    test.UserMessage,
+                    test.WikiContext,
+                    test.WikiMutationTarget,
+                    cancellationToken).ConfigureAwait(false))
+                : await RunWikiSelectionRewriteAsync(
+                    test.WikiSelectionRewrite,
+                    cancellationToken).ConfigureAwait(false);
         var fullToolEvidence = await GetHarnessToolEvidenceAsync(messageId, cancellationToken)
             .ConfigureAwait(false);
         var usageAfter = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
@@ -183,7 +187,18 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         {
             preflightStep
         };
-        finalSteps.AddRange(steps.Select((step, index) => step with { StepIndex = index + 2 }));
+        if (!string.IsNullOrWhiteSpace(endpointEvidence))
+        {
+            finalSteps.Add(new TraceStep
+            {
+                StepIndex = finalSteps.Count + 1,
+                StepType = "wiki_selection_rewrite",
+                StartedAt = DateTimeOffset.UtcNow,
+                Content = endpointEvidence
+            });
+        }
+        var nextStepIndex = finalSteps.Count + 1;
+        finalSteps.AddRange(steps.Select((step, index) => step with { StepIndex = index + nextStepIndex }));
         finalSteps.Add(new TraceStep
         {
             StepIndex = finalSteps.Count + 1,
@@ -985,6 +1000,63 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             }
         }
         return (finalText, false, "WebSocket closed before turn completed", string.Empty);
+    }
+
+    private static (string FinalText, bool Success, string? Error, string MessageId, string EndpointEvidence)
+        AddEmptyEvidence((string FinalText, bool Success, string? Error, string MessageId) result) =>
+            (result.FinalText, result.Success, result.Error, result.MessageId, string.Empty);
+
+    private async Task<(string FinalText, bool Success, string? Error, string MessageId, string EndpointEvidence)>
+        RunWikiSelectionRewriteAsync(
+            HarnessWikiSelectionRewriteSetup setup,
+            CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(setup.SelectedText))
+            throw new InvalidOperationException("Harness Wiki selection rewrite requires selected_text.");
+        if (string.IsNullOrWhiteSpace(setup.Instruction))
+            throw new InvalidOperationException("Harness Wiki selection rewrite requires instruction.");
+
+        var resolved = await ResolveWikiContextAsync(
+            new HarnessWikiContextSetup
+            {
+                Mode = "page",
+                RootName = setup.RootName,
+                PageTitle = setup.PageTitle,
+            },
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Harness Wiki selection rewrite page could not be resolved.");
+        var pageId = resolved.PageId
+            ?? throw new InvalidOperationException("Harness Wiki selection rewrite page id was missing.");
+
+        Debug.Assert(_http is not null);
+        using var pageResponse = await _http!.GetAsync(
+            $"api/wiki/pages/{Uri.EscapeDataString(pageId)}",
+            cancellationToken).ConfigureAwait(false);
+        pageResponse.EnsureSuccessStatusCode();
+        using var pageDocument = JsonDocument.Parse(
+            await pageResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        var expectedVersion = pageDocument.RootElement.GetProperty("page").GetProperty("version").GetInt64();
+
+        using var response = await _http.PostAsJsonAsync(
+            $"api/wiki/pages/{Uri.EscapeDataString(pageId)}/selection/rewrite",
+            new
+            {
+                selectedText = setup.SelectedText,
+                instruction = setup.Instruction,
+                expectedVersion,
+                scope = string.IsNullOrWhiteSpace(setup.Scope) ? "root" : setup.Scope.Trim(),
+            },
+            JsonOptions,
+            cancellationToken).ConfigureAwait(false);
+        var responseText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        using var draftDocument = JsonDocument.Parse(responseText);
+        var draft = draftDocument.RootElement;
+        var replacementText = draft.GetProperty("replacementText").GetString() ?? string.Empty;
+        var messageId = draft.GetProperty("messageId").GetString()
+            ?? throw new InvalidOperationException("Wiki selection rewrite response did not include a message id.");
+
+        return (replacementText, true, null, messageId, responseText);
     }
 
     private async Task<ResolvedWikiContext?> ResolveWikiContextAsync(

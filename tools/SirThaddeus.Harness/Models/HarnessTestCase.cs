@@ -95,9 +95,41 @@ public sealed record HarnessTestCase
     [YamlMember(Alias = "wiki_mutation_target")]
     public HarnessWikiMutationTargetSetup? WikiMutationTarget { get; init; }
 
+    /// <summary>
+    /// Optional evaluator-owned request to exercise the production Wiki
+    /// selected-text rewrite endpoint directly. This measures the endpoint's
+    /// preview contract without routing the request through general chat.
+    /// </summary>
+    [JsonPropertyName("wiki_selection_rewrite")]
+    [YamlMember(Alias = "wiki_selection_rewrite")]
+    public HarnessWikiSelectionRewriteSetup? WikiSelectionRewrite { get; init; }
+
     [JsonPropertyName("observations")]
     [YamlMember(Alias = "observations")]
     public List<HarnessObservationRequest> Observations { get; init; } = [];
+}
+
+public sealed record HarnessWikiSelectionRewriteSetup
+{
+    [JsonPropertyName("root_name")]
+    [YamlMember(Alias = "root_name")]
+    public string RootName { get; init; } = "";
+
+    [JsonPropertyName("page_title")]
+    [YamlMember(Alias = "page_title")]
+    public string PageTitle { get; init; } = "";
+
+    [JsonPropertyName("selected_text")]
+    [YamlMember(Alias = "selected_text")]
+    public string SelectedText { get; init; } = "";
+
+    [JsonPropertyName("instruction")]
+    [YamlMember(Alias = "instruction")]
+    public string Instruction { get; init; } = "";
+
+    [JsonPropertyName("scope")]
+    [YamlMember(Alias = "scope")]
+    public string Scope { get; init; } = "root";
 }
 
 /// <summary>
