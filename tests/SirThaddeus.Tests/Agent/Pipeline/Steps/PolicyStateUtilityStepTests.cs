@@ -50,6 +50,40 @@ public sealed class PolicyStateUtilityStepTests
         Assert.Equal(0, mcp.CallCount);
     }
 
+    [Theory]
+    [InlineData("Do not inspect whether safe mode is active now.")]
+    [InlineData("Hypothetically, suppose panic mode were active.")]
+    [InlineData("Check the system permission next month as future work.")]
+    [InlineData("Explain permission modes without looking at runtime policy.")]
+    [InlineData("Please turn screen permission off.")]
+    public async Task Removes_only_read_state_tool_for_explicit_noncurrent_boundaries(string prompt)
+    {
+        var mcp = new StubMcp(StateJson);
+        var context = Context(prompt) with
+        {
+            ToolDefs =
+            [
+                .. Context(prompt).ToolDefs,
+                new ToolDefinition
+                {
+                    Function = new FunctionDefinition
+                    {
+                        Name = "policy.set_panic_mode",
+                        Description = "set state",
+                        Parameters = new { },
+                    },
+                },
+            ],
+        };
+
+        var result = await new PolicyStateUtilityStep(mcp).ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.DoesNotContain(next.ToolDefs, def => def.Function?.Name == "policy.get_state");
+        Assert.Contains(next.ToolDefs, def => def.Function?.Name == "policy.set_panic_mode");
+        Assert.Equal(0, mcp.CallCount);
+    }
+
     [Fact]
     public async Task Fails_closed_when_typed_state_is_invalid()
     {

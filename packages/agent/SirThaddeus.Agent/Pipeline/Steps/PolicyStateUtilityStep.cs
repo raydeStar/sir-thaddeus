@@ -18,7 +18,13 @@ public sealed class PolicyStateUtilityStep : ITurnStep
         @"\b(?:do\s+not|don't|without\s+(?:checking|looking|inspecting)|hypothetical(?:ly)?|suppose|tomorrow|later|not\s+now|yesterday|last\s+(?:week|month|tuesday)|what\s+does|what\s+(?:does|is).+mean|explain|describe)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex MutationPattern = new(
-        @"^\s*(?:please\s+)?(?:set|change|disable|enable|turn\s+(?:on|off)|switch\s+(?:on|off))\b",
+        @"^\s*(?:please\s+)?(?:set|change|disable|enable|turn\b.{0,40}\b(?:on|off)|switch\b.{0,40}\b(?:on|off))\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex DeferredBoundaryPattern = new(
+        @"\b(?:next\s+(?:week|month|time)|another\s+day|future\s+work|inspect\s+nothing|no\s+(?:lookup|inspection)|if\s+we\s+(?:inspect|check|look))\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex PolicySubjectPattern = new(
+        @"\b(?:panic(?:\s+mode)?|safe[- ]?mode|budgets?|permission|runtime\s+policy|policy\.get_state|policy\s+(?:state|field|tool))\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex CurrentCuePattern = new(
         @"\b(?:current(?:ly)?|right\s+now|now|live|active|runtime\s+policy|set\s+to)\b",
@@ -44,7 +50,24 @@ public sealed class PolicyStateUtilityStep : ITurnStep
 
         var reason = "tool_unavailable";
         PolicyRequest request = default;
-        if (!HasTool(context) || !TryClassify(context.UserText, out request, out reason))
+        if (!HasTool(context))
+        {
+            LogActivation(context, false, reason);
+            return new StepResult.Continue(context);
+        }
+
+        if (ShouldPruneReadStateTool(context.UserText))
+        {
+            LogBoundaryPrune(context);
+            return new StepResult.Continue(context with
+            {
+                ToolDefs = context.ToolDefs
+                    .Where(def => !string.Equals(def.Function?.Name, ToolName, StringComparison.OrdinalIgnoreCase))
+                    .ToArray(),
+            });
+        }
+
+        if (!TryClassify(context.UserText, out request, out reason))
         {
             LogActivation(context, false, reason);
             return new StepResult.Continue(context);
@@ -214,6 +237,10 @@ public sealed class PolicyStateUtilityStep : ITurnStep
     }
 
     private static bool IsCompound(string text) => Regex.IsMatch(text, @"\b(?:and\s+then|and\s+(?:explain|calculate|compute|also)|both)\b", RegexOptions.IgnoreCase);
+    private static bool ShouldPruneReadStateTool(string? text) =>
+        !string.IsNullOrWhiteSpace(text) &&
+        PolicySubjectPattern.IsMatch(text) &&
+        (BoundaryPattern.IsMatch(text) || MutationPattern.IsMatch(text) || DeferredBoundaryPattern.IsMatch(text));
     private static void AddIf(List<PolicyField> fields, bool condition, PolicyField field) { if (condition) fields.Add(field); }
     private static void AddPermission(List<PolicyField> fields, string text, string group, PolicyField field)
     {
@@ -222,6 +249,7 @@ public sealed class PolicyStateUtilityStep : ITurnStep
     }
     private static bool HasTool(TurnContext context) => context.ToolDefs.Any(def => string.Equals(def.Function?.Name, ToolName, StringComparison.OrdinalIgnoreCase));
     private void LogActivation(TurnContext context, bool activated, string reason) => _log?.Invoke("EXPERIMENT_ACTIVATION", $"thread_id={context.ThreadId} turn_id={context.MessageId} event=policy_state_deterministic_utility decision={(activated ? "activated" : "inactive")} reason={reason}");
+    private void LogBoundaryPrune(TurnContext context) => _log?.Invoke("EXPERIMENT_ACTIVATION", $"thread_id={context.ThreadId} turn_id={context.MessageId} event=policy_state_negative_routing decision=activated reason=explicit_noncurrent_boundary");
     private static StepResult TerminateFailure(string error, ToolCallRecord? record = null) => new StepResult.Terminate(new AgentResponse { Text = "I couldn't read the live runtime policy just now.", Success = false, Error = error, ToolCallsMade = record is null ? [] : [record], LlmRoundTrips = 0 });
     private static string Truncate(string text, int length) => text.Length <= length ? text : text[..length];
 
