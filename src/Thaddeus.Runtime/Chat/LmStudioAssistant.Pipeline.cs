@@ -60,6 +60,10 @@ public sealed partial class LmStudioAssistant
             // safety short-circuit byte-for-byte.
             new SafetyBoundaryStep(() => PersonalityRuntime?.Snapshot.Profile.Id),
 
+            // Audited read-only projection for explicit questions about one
+            // live runtime policy field. Ambiguous requests fall through.
+            new PolicyStateUtilityStep(mcp, sink, latencyLog),
+
             // Utility fast-path. Deterministic matches (unit conversion,
             // percent-of, simple arithmetic, classic reasoning tripwires)
             // terminate the turn before any LLM round-trip or feature
