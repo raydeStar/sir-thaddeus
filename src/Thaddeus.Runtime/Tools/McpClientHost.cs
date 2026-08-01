@@ -31,6 +31,7 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
     private readonly ILogger<McpClientHost> _logger;
     private readonly IAuditLogger _audit;
     private readonly ISettingsStore _settings;
+    private readonly string? _settingsPath;
     private readonly string? _wikiLibraryPath;
     private StdioMcpToolClient? _inner;
     private Task? _startupTask;
@@ -49,6 +50,7 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
         _logger = logger;
         _audit = audit;
         _settings = settings;
+        _settingsPath = (settings as JsonFileSettingsStore)?.FilePath;
         _wikiLibraryPath = (wiki as LocalWikiStore)?.LibraryDirectory;
         _settings.Changed += OnSettingsChanged;
     }
@@ -97,7 +99,7 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
                 return;
             }
 
-            var env = BuildEnv(doc, _wikiLibraryPath);
+            var env = BuildEnv(doc, _wikiLibraryPath, _settingsPath);
             _envFingerprint = FingerprintEnv(env);
 
             var asm = Assembly.GetExecutingAssembly();
@@ -144,7 +146,7 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
         if (Volatile.Read(ref _disposed) != 0)
             return;
 
-        var newEnv = BuildEnv(doc, _wikiLibraryPath);
+        var newEnv = BuildEnv(doc, _wikiLibraryPath, _settingsPath);
         var newFp = FingerprintEnv(newEnv);
         if (string.Equals(newFp, _envFingerprint, StringComparison.Ordinal)) return;
 
@@ -159,13 +161,16 @@ public sealed class McpClientHost : IMcpToolClient, IHostedService, IAsyncDispos
     /// </summary>
     internal static Dictionary<string, string> BuildEnv(
         SettingsDocument doc,
-        string? wikiLibraryPath = null)
+        string? wikiLibraryPath = null,
+        string? settingsPath = null)
     {
         var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["ST_MEMORY_DB_PATH"] = RuntimeMcpEnvironmentBuilder.ResolveMemoryDbPathFromEnvironment()
         };
         var files = doc.Files;
+        if (!string.IsNullOrWhiteSpace(settingsPath))
+            env["ST_SETTINGS_PATH"] = Path.GetFullPath(settingsPath);
         if (!string.IsNullOrWhiteSpace(wikiLibraryPath))
             env["ST_WIKI_LIBRARY_PATH"] = Path.GetFullPath(wikiLibraryPath);
 
