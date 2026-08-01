@@ -196,6 +196,59 @@ test.describe('legible workbench UX', () => {
     await expect(page.getByTestId('chat-incognito-toggle')).toHaveAttribute('aria-pressed', 'false');
   });
 
+  test('Wiki write target is visibly separate from context and reaches the turn contract', async ({ page, context }) => {
+    const baseUrl = process.env.RUNTIME_BASE_URL!;
+    const token = process.env.RUNTIME_TOKEN!;
+    const headers = { Authorization: `Bearer ${token}` };
+    await context.setExtraHTTPHeaders(headers);
+
+    const rootResponse = await context.request.post(`${baseUrl}/api/wiki/roots`, {
+      headers,
+      data: { name: `Write target proof ${Date.now()}` },
+    });
+    expect(rootResponse.ok()).toBeTruthy();
+    const root = await rootResponse.json() as { id: string; name: string };
+    const pageResponse = await context.request.post(
+      `${baseUrl}/api/wiki/roots/${encodeURIComponent(root.id)}/pages`,
+      { headers, data: { title: 'Approved page', markdown: 'Safe' } },
+    );
+    expect(pageResponse.ok()).toBeTruthy();
+    const created = await pageResponse.json() as { page: { id: string } };
+
+    const threadResponse = await context.request.post(`${baseUrl}/api/threads`, {
+      headers,
+      data: { title: 'Write target contract proof' },
+    });
+    const thread = await threadResponse.json() as { id: string };
+    let submitted: {
+      wikiContext?: unknown;
+      wikiMutationTarget?: { mode?: string; pageId?: string };
+    } | null = null;
+    await page.route(
+      `${baseUrl}/api/threads/${encodeURIComponent(thread.id)}/messages`,
+      async (route) => {
+        submitted = route.request().postDataJSON() as typeof submitted;
+        await route.fulfill({ status: 200, contentType: 'application/x-ndjson', body: '' });
+      },
+    );
+
+    await page.goto(`${baseUrl}/chat/${thread.id}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('chat-wiki-context')).toBeEnabled();
+    await expect(page.getByTestId('chat-wiki-mutation-target')).toBeEnabled();
+    await page.getByTestId('chat-wiki-mutation-target').selectOption(`page:${created.page.id}`);
+    await expect(page.getByTestId('chat-wiki-mutation-target-active')).toContainText('Write target');
+    await expect(page.getByTestId('chat-wiki-mutation-target-active')).toContainText('Approved page');
+    await expect(page.getByTestId('chat-wiki-context')).toHaveValue('');
+
+    await page.getByTestId('chat-input').fill('Update the approved page.');
+    await page.getByTestId('chat-send').click();
+    await expect.poll(() => submitted?.wikiMutationTarget).toEqual({
+      mode: 'page',
+      pageId: created.page.id,
+    });
+    expect(submitted?.wikiContext).toBeUndefined();
+  });
+
   test('global search opens a local Wiki page in the side workbench', async ({ page, context }) => {
     const baseUrl = process.env.RUNTIME_BASE_URL!;
     const token = process.env.RUNTIME_TOKEN!;

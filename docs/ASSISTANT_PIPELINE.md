@@ -92,6 +92,28 @@ selected Wiki scope, and stays inactive when no Wiki context is attached. It is
 a prompt-load and evidence-selection seam, not implicit retrieval or a general
 conversation router.
 
+## Explicit Wiki mutation targets
+
+Wiki reference context and Wiki write authorization are separate user-visible
+controls. For a turn that may change Wiki state, the user can select one
+existing root or page as the write target without attaching it as evidence.
+The runtime resolves that selection to typed root/page identity before model
+execution; display names are supplied to the model, while opaque identifiers
+remain runtime-owned.
+
+Immediately before the audited MCP boundary, every proposed Wiki mutation is
+checked against that typed identity. An exact target match proceeds through the
+normal permission policy. A mismatch, ambiguous argument shape, new-root
+creation, or mutation whose containment cannot be proven returns the structured
+`wiki_mutation_target_mismatch` failure and performs no side effect. Read-only
+Wiki tools and non-Wiki capabilities are unaffected. With no selected target,
+the guard is inactive and existing behavior is unchanged.
+
+This contract does not infer authorization from prose, repair tool arguments,
+choose a substitute resource, bypass permission prompts, or turn attached Wiki
+context into write scope. Desktop and headless paths carry the same typed turn
+field, and activation is observable through content-free experiment diagnostics.
+
 ## Evidence-backed answer-only projection
 
 After tool execution and sanitization, an explicit answer-only request may be

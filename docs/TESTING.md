@@ -305,6 +305,22 @@ after state setup, and fails closed on missing or ambiguous names. Supported
 modes are `none`, `all`, `root`, and `page`. It does not perform implicit
 retrieval or expose expected outcomes to the assistant.
 
+`wiki_mutation_target` independently exercises the explicit write-target
+surface. It accepts an existing named root or page, resolves that evaluator
+name to disposable runtime identity after state setup, and sends only the typed
+turn contract to the product. It does not attach evidence or disclose expected
+state:
+
+```yaml
+wiki_mutation_target:
+  mode: page
+  root_name: Research
+  page_title: Plan
+```
+
+Use `mode: root` with `root_name` and omit `page_title` for a root-scoped write
+target. Missing or ambiguous targets fail closed before the assistant turn.
+
 Run these fixtures with `--target v2`. Setup and observation scope are recorded
 in `input.json` for reproducibility. Expected state and scorer predicates stay
 outside the product repository. The harness tool allowlist is authoritative for
