@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
+using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.SharedTypes;
 
@@ -64,6 +65,32 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
 
         Assert.NotNull(observed);
         Assert.Equal(updated.Shortcuts, observed!.Shortcuts);
+    }
+
+    [Fact]
+    public async Task ReplaceAsync_round_trips_model_capability_certificates_by_value()
+    {
+        var defaults = SettingsDocument.Defaults();
+        var certificate = new ModelCapabilityCertificate(
+            ModelCapabilityPolicy.WikiWriteCapability,
+            "certified",
+            ModelCapabilityPolicy.CreateConfigurationFingerprint(defaults.Llm, defaults.Llm.ModelId),
+            defaults.Llm.ModelId,
+            defaults.Llm.ModelId,
+            ModelCapabilityPolicy.ProbeVersion,
+            4,
+            1234,
+            DateTimeOffset.UtcNow,
+            [new ModelCapabilityProbeResult("exact_page_update", true, "pass")]);
+        var updated = defaults with
+        {
+            ModelCapabilities = new ModelCapabilitySettings("auto", [certificate]),
+        };
+
+        await NewStore().ReplaceAsync(updated, CancellationToken.None);
+        var roundTripped = await NewStore().GetAsync(CancellationToken.None);
+
+        Assert.Equal(updated, roundTripped);
     }
 
     [Fact]

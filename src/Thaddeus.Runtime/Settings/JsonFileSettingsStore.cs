@@ -124,6 +124,7 @@ public sealed class JsonFileSettingsStore : ISettingsStore
         var permissions = document.Permissions ?? defaults.Permissions!;
         var files = document.Files ?? defaults.Files!;
         var memory = document.Memory ?? defaults.Memory!;
+        var modelCapabilities = document.ModelCapabilities ?? defaults.ModelCapabilities!;
         var hasLegacyMissingAdvancedLlmFields = llm.MaxTokens <= 0 || llm.ContextWindowTokens <= 0;
         var ttsProvider = NormalizeTtsProvider(voice.TtsProvider, defaults.Voice.TtsProvider, voice.PiperVoicePath);
         return document with
@@ -203,8 +204,26 @@ public sealed class JsonFileSettingsStore : ISettingsStore
                     : defaults.Files!.MaxDefaultCharsPerRead,
             },
             Memory = memory,
+            ModelCapabilities = modelCapabilities with
+            {
+                WikiWriteMode = NormalizeCapabilityMode(modelCapabilities.WikiWriteMode),
+                WikiWriteCertificates = modelCapabilities.WikiWriteCertificates is { Count: > 0 }
+                    ? modelCapabilities.WikiWriteCertificates
+                        .OrderByDescending(certificate => certificate.TestedAt)
+                        .Take(20)
+                        .ToArray()
+                    : null,
+            },
         };
     }
+
+    private static string NormalizeCapabilityMode(string? mode) =>
+        mode?.Trim().ToLowerInvariant() switch
+        {
+            "auto" => "auto",
+            "off" => "off",
+            _ => "on",
+        };
 
     private static IReadOnlyList<string> NormalizeAllowedRoots(IReadOnlyList<string>? roots)
     {

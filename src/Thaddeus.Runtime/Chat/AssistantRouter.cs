@@ -292,6 +292,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                     MemoryContextProvider = memoryProvider,
                     MemoryStore = memoryStore,
                     MemoryEnabled = doc.Memory?.Enabled ?? true,
+                    WikiWriteEnabled = ModelCapabilityPolicy.IsWikiWriteEnabled(doc, llmRuntime.GetSnapshot()),
                     SearchFallbackExecutor = searchFallback,
                     GuardrailsPipeline = guardrails,
                     CompletionValidator = validator,

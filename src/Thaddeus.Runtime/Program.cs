@@ -253,6 +253,7 @@ public static class Program
 
             // Gate that wraps every MCP call with the user's permission policy.
             builder.Services.AddSingleton<ToolPermissionGate>();
+            builder.Services.AddSingleton<ModelCapabilityCertificationService>();
 
             // One-shot, idempotent migrator that copies any legacy memos
             // (JSON files in the legacy memo directory) into the user's wiki. Runs

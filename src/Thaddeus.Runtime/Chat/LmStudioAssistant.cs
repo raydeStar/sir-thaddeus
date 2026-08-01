@@ -113,6 +113,13 @@ public sealed partial class LmStudioAssistant : IAssistant
     public bool MemoryEnabled { get; init; } = true;
 
     /// <summary>
+    /// Whether model-visible Wiki mutation tools are exposed for this
+    /// configuration. This only narrows discovery; permission and target
+    /// guards remain authoritative when enabled.
+    /// </summary>
+    public bool WikiWriteEnabled { get; init; } = true;
+
+    /// <summary>
     /// Optional search-fallback executor for <c>SearchFallbackStep</c>.
     /// Replaces refusal-shaped drafts with a search-backed retry. Null =
     /// weak drafts pass through unchanged.
@@ -295,6 +302,13 @@ public sealed partial class LmStudioAssistant : IAssistant
         // model will just answer from knowledge.
         var toolDiscoveryStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         var toolDefs = await BuildToolDefinitionsAsync(ct).ConfigureAwait(false);
+        if (!WikiWriteEnabled)
+        {
+            toolDefs = toolDefs
+                .Where(definition =>
+                    ToolCapabilityRegistry.ResolveCapability(definition.Function.Name) is not ToolCapability.WikiWrite)
+                .ToList();
+        }
         if (options.EphemeralMemory || !MemoryEnabled)
         {
             toolDefs = toolDefs

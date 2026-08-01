@@ -193,6 +193,78 @@ public sealed record UiPreferencesSettings(
 /// <summary>Master policy for durable assistant memory.</summary>
 public sealed record RuntimeMemorySettings(bool Enabled);
 
+/// <summary>User policy for model-dependent capabilities.</summary>
+public sealed record ModelCapabilitySettings(
+    string WikiWriteMode = "on",
+    IReadOnlyList<ModelCapabilityCertificate>? WikiWriteCertificates = null)
+{
+    public bool Equals(ModelCapabilitySettings? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return string.Equals(WikiWriteMode, other.WikiWriteMode, StringComparison.Ordinal)
+            && CertificatesEqual(WikiWriteCertificates, other.WikiWriteCertificates);
+    }
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(WikiWriteMode, StringComparer.Ordinal);
+        if (WikiWriteCertificates is not null)
+        {
+            foreach (var certificate in WikiWriteCertificates)
+            {
+                hash.Add(certificate.Capability, StringComparer.Ordinal);
+                hash.Add(certificate.Status, StringComparer.Ordinal);
+                hash.Add(certificate.ConfigurationFingerprint, StringComparer.Ordinal);
+                hash.Add(certificate.TestedAt);
+            }
+        }
+        return hash.ToHashCode();
+    }
+
+    private static bool CertificatesEqual(
+        IReadOnlyList<ModelCapabilityCertificate>? left,
+        IReadOnlyList<ModelCapabilityCertificate>? right)
+    {
+        if (left is null || left.Count == 0) return right is null || right.Count == 0;
+        if (right is null || left.Count != right.Count) return false;
+        for (var index = 0; index < left.Count; index++)
+        {
+            var a = left[index];
+            var b = right[index];
+            if (!string.Equals(a.Capability, b.Capability, StringComparison.Ordinal) ||
+                !string.Equals(a.Status, b.Status, StringComparison.Ordinal) ||
+                !string.Equals(a.ConfigurationFingerprint, b.ConfigurationFingerprint, StringComparison.Ordinal) ||
+                !string.Equals(a.ConfiguredModelId, b.ConfiguredModelId, StringComparison.Ordinal) ||
+                !string.Equals(a.ReportedModelId, b.ReportedModelId, StringComparison.Ordinal) ||
+                !string.Equals(a.ProbeVersion, b.ProbeVersion, StringComparison.Ordinal) ||
+                a.ModelCalls != b.ModelCalls ||
+                a.ElapsedMilliseconds != b.ElapsedMilliseconds ||
+                a.TestedAt != b.TestedAt ||
+                !a.Probes.SequenceEqual(b.Probes))
+                return false;
+        }
+        return true;
+    }
+}
+
+/// <summary>Cached result of an explicit synthetic capability retest.</summary>
+public sealed record ModelCapabilityCertificate(
+    string Capability,
+    string Status,
+    string ConfigurationFingerprint,
+    string ConfiguredModelId,
+    string? ReportedModelId,
+    string ProbeVersion,
+    int ModelCalls,
+    long ElapsedMilliseconds,
+    DateTimeOffset TestedAt,
+    IReadOnlyList<ModelCapabilityProbeResult> Probes);
+
+/// <summary>One deterministic check within a capability certificate.</summary>
+public sealed record ModelCapabilityProbeResult(string Id, bool Passed, string Reason);
+
 /// <summary>Top-level settings document.</summary>
 public sealed record SettingsDocument(
     LlmSettings Llm,
@@ -206,7 +278,8 @@ public sealed record SettingsDocument(
     UiPreferencesSettings? UiPrefs = null,
     PermissionsSettings? Permissions = null,
     FilesSettings? Files = null,
-    RuntimeMemorySettings? Memory = null)
+    RuntimeMemorySettings? Memory = null,
+    ModelCapabilitySettings? ModelCapabilities = null)
 {
     /// <summary>Defaults applied when no settings file exists yet.</summary>
     public static SettingsDocument Defaults() => new(
@@ -299,5 +372,7 @@ public sealed record SettingsDocument(
             .ToArray(),
             DisableAllFileAccess: false,
             MaxDefaultCharsPerRead: 4000),
-        Memory: new RuntimeMemorySettings(Enabled: true));
+        Memory: new RuntimeMemorySettings(Enabled: true),
+        // Preserve existing behavior until the user explicitly selects Auto.
+        ModelCapabilities: new ModelCapabilitySettings(WikiWriteMode: "on"));
 }
