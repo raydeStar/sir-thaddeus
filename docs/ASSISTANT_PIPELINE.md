@@ -61,6 +61,23 @@ call. Ambiguous or non-current requests continue through the ordinary pipeline;
 the utility does not change memory, personality, permissions, safety,
 validation, retry, or streaming composition.
 
+## Live runtime policy utility
+
+After the safety boundary, an explicit question about one current runtime
+policy field can terminate through a deterministic read-only utility. Eligible
+fields are panic mode, safe mode, budget enablement and limits, and the six
+tool-group permission values. The step calls the existing audited
+`policy.get_state` MCP tool, validates its typed JSON response, and renders only
+the requested Boolean, number, or permission word. It performs no model call
+and contains no configured policy values.
+
+The recognizer requires one current field and rejects compound, conceptual,
+hypothetical, historical, deferred, future, negated, and mutation requests.
+For an explicit non-current boundary request, only `policy.get_state` is
+withheld from the model's tool menu for that turn; mutation tools and all other
+capabilities remain available. Desktop and headless runtimes compose the same
+step after safety and before other deterministic or model-backed utilities.
+
 When that same deterministic policy recognizes a Wiki-root request as
 informational, hypothetical, negated, or deferred, `wiki_root_create` is not
 advertised to the model for the turn. Read-only Wiki tools remain available,
