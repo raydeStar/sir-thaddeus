@@ -13,7 +13,7 @@ import type {
 } from '@thaddeus/shared-types';
 import { ChatTurnEventTypes } from '@thaddeus/shared-types';
 import * as api from '../lib/chatApi';
-import type { WikiChatContextInput } from '../lib/chatApi';
+import type { WikiChatContextInput, WikiMutationTargetInput } from '../lib/chatApi';
 import { buildRuntimeWebSocketUrl, readRuntimeMetadata } from '../lib/runtime';
 import { useMemoryRecallStore } from './memoryRecallStore';
 import { useToolActivityStore } from './toolActivityStore';
@@ -50,7 +50,7 @@ interface ChatStoreState {
   send: (
     text: string,
     wikiContext?: WikiChatContextInput,
-    options?: { ephemeralMemory?: boolean },
+    options?: { ephemeralMemory?: boolean; wikiMutationTarget?: WikiMutationTargetInput },
   ) => Promise<void>;
   retryLatestResponse: (options?: { ephemeralMemory?: boolean }) => Promise<void>;
   pauseActiveRun: () => Promise<void>;

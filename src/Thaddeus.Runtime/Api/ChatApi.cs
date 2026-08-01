@@ -88,9 +88,13 @@ public static class ChatApi
             var latencyTrace = RoutingLatencyTrace.Start(id, turnLogger);
 
             WikiChatContextPrompt prompt;
+            SirThaddeus.Agent.Pipeline.WikiMutationTarget? mutationTarget;
             try
             {
                 prompt = await wikiContext.BuildAsync(req.Text, req.WikiContext, ct).ConfigureAwait(false);
+                mutationTarget = await wikiContext.ResolveMutationTargetAsync(
+                    req.WikiMutationTarget,
+                    ct).ConfigureAwait(false);
             }
             catch (ArgumentException ex)
             {
@@ -157,7 +161,7 @@ public static class ChatApi
                 StartAssistantTurn(
                     id, prompt.Prompt, assistant, machine, activity, loggerFactory,
                     runs, run.RunId, activityEntry,
-                    new AssistantTurnOptions(req.EphemeralMemory),
+                    new AssistantTurnOptions(req.EphemeralMemory, mutationTarget),
                     latencyTrace);
 
                 return Results.Json(
@@ -490,6 +494,7 @@ public sealed record PatchThreadRequest(string? Title, bool? Pinned);
 public sealed record AppendMessageRequest(
     string Text,
     WikiChatContextRequest? WikiContext = null,
+    WikiMutationTargetRequest? WikiMutationTarget = null,
     bool EphemeralMemory = false);
 public sealed record RetryMessageRequest(bool EphemeralMemory = false);
 
@@ -550,6 +555,7 @@ public sealed record ThreadListResponse(IReadOnlyList<ThreadSummary> Threads);
 [JsonSerializable(typeof(AppendMessageRequest))]
 [JsonSerializable(typeof(RetryMessageRequest))]
 [JsonSerializable(typeof(WikiChatContextRequest))]
+[JsonSerializable(typeof(WikiMutationTargetRequest))]
 [JsonSerializable(typeof(WikiChatContextPrompt))]
 [JsonSerializable(typeof(WikiChatContextAttachment))]
 [JsonSerializable(typeof(WikiChatEvidenceSource))]

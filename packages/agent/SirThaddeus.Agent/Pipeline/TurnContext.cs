@@ -44,6 +44,12 @@ public sealed record TurnContext
     /// </summary>
     public TurnMemoryAccess MemoryAccess { get; init; } = TurnMemoryAccess.Enabled;
 
+    /// <summary>
+    /// Existing Wiki state explicitly selected by the user as the only
+    /// mutation scope for this turn. Null preserves ordinary tool behavior.
+    /// </summary>
+    public WikiMutationTarget? WikiMutationTarget { get; init; }
+
     /// <summary>Deterministic heuristic signals over the user message.
     /// Populated by a feature-extractor step. Null before that step runs.</summary>
     public RoutingFeatures? Features { get; init; }
