@@ -22,4 +22,19 @@ public sealed class McpClientHostTests
 
         Assert.False(env.ContainsKey("ST_WIKI_LIBRARY_PATH"));
     }
+
+    [Fact]
+    public void BuildEnv_UsesCurrentRuntimeSettingsForMcpTools()
+    {
+        var settingsPath = Path.Combine(
+            Path.GetTempPath(),
+            "thaddeus-runtime-settings",
+            "runtime-settings.json");
+
+        var env = McpClientHost.BuildEnv(
+            SettingsDocument.Defaults(),
+            settingsPath: settingsPath);
+
+        Assert.Equal(Path.GetFullPath(settingsPath), env["ST_SETTINGS_PATH"]);
+    }
 }
