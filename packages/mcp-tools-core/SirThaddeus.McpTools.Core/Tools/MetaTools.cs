@@ -178,13 +178,17 @@ public static class MetaTools
             var runtime = root.TryGetProperty("runtimeSafety", out var runtimeEl)
                 ? runtimeEl
                 : default;
-            var budgets = root.TryGetProperty("toolBudgets", out var budgetEl)
-                ? budgetEl
-                : default;
+            var budgets = root.TryGetProperty("toolBudgets", out var legacyBudgetEl)
+                ? legacyBudgetEl
+                : root.TryGetProperty("limits", out var currentLimitsEl)
+                    ? currentLimitsEl
+                    : default;
             var perms = root.TryGetProperty("mcp", out var mcpEl) &&
-                        mcpEl.TryGetProperty("permissions", out var permEl)
-                ? permEl
-                : default;
+                        mcpEl.TryGetProperty("permissions", out var legacyPermEl)
+                ? legacyPermEl
+                : root.TryGetProperty("permissions", out var currentPermEl)
+                    ? currentPermEl
+                    : default;
 
             return JsonSerializer.Serialize(new
             {
