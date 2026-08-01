@@ -82,7 +82,8 @@ public class LmStudioAssistantTests : IDisposable
             string reply = "hello world from model",
             Exception? throwOnCall = null,
             IReadOnlyList<McpToolInfo>? tools = null,
-            bool offlineMode = false)
+            bool offlineMode = false,
+            bool wikiWriteEnabled = true)
     {
         var store = new JsonFileThreadStore(_root, NullLogger<JsonFileThreadStore>.Instance);
         var bus = new EventBus(NullLogger<EventBus>.Instance);
@@ -95,10 +96,29 @@ public class LmStudioAssistantTests : IDisposable
         {
             DeltaDelay = TimeSpan.Zero,
             OfflineMode = offlineMode,
+            WikiWriteEnabled = wikiWriteEnabled,
         };
         var captured = new List<RuntimeEvent<object?>>();
         bus.Subscribe((evt, _) => { captured.Add(evt); return Task.CompletedTask; });
         return (store, assistant, captured, fake);
+    }
+
+    [Fact]
+    public async Task RespondAsync_hides_wiki_write_tools_when_capability_is_disabled()
+    {
+        var tools = new[]
+        {
+            new McpToolInfo { Name = "wiki_page_read", Description = "read", InputSchema = new { type = "object" } },
+            new McpToolInfo { Name = "wiki_page_update_by_name", Description = "write", InputSchema = new { type = "object" } },
+        };
+        var (store, assistant, _, fake) = NewSut(tools: tools, wikiWriteEnabled: false);
+        var thread = await store.CreateAsync("t", CancellationToken.None);
+
+        await assistant.RespondAsync(thread.Id, "read the page", CancellationToken.None);
+
+        var visible = fake.ToolCalls.Single().Select(tool => tool.Function.Name).ToArray();
+        Assert.Contains("wiki_page_read", visible);
+        Assert.DoesNotContain("wiki_page_update_by_name", visible);
     }
 
     [Fact]

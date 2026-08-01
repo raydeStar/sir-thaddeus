@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Thaddeus.Runtime.Chat;
 using Thaddeus.Runtime.Settings;
 using Thaddeus.SharedTypes;
 
@@ -48,6 +49,22 @@ public static class SettingsApi
             var saved = await store.ReplaceAsync(merged, ct).ConfigureAwait(false);
             return Results.Json(MaskSecrets(saved), SettingsJsonContext.Default.SettingsDocument);
         });
+
+        // Reading status is cache-only. Retest is the sole endpoint allowed to
+        // send the bounded synthetic capability prompts to the configured LLM.
+        app.MapGet("/api/settings/model-capabilities/wiki-write",
+            async (ModelCapabilityCertificationService certification, CancellationToken ct) =>
+            {
+                var status = await certification.GetWikiWriteStatusAsync(ct).ConfigureAwait(false);
+                return Results.Json(status, SettingsJsonContext.Default.ModelCapabilityStatus);
+            });
+
+        app.MapPost("/api/settings/model-capabilities/wiki-write/retest",
+            async (ModelCapabilityCertificationService certification, CancellationToken ct) =>
+            {
+                var status = await certification.RetestWikiWriteAsync(ct).ConfigureAwait(false);
+                return Results.Json(status, SettingsJsonContext.Default.ModelCapabilityStatus);
+            });
 
         // POST /api/settings/test-llm — probes an OpenAI-compatible endpoint
         // (LM Studio, Ollama with the OpenAI shim, OpenAI itself, ...) for its
@@ -381,6 +398,9 @@ public sealed record GatekeeperStatusResponse(
 [JsonSerializable(typeof(TestLlmRequest))]
 [JsonSerializable(typeof(TestLlmResponse))]
 [JsonSerializable(typeof(GatekeeperStatusResponse))]
+[JsonSerializable(typeof(ModelCapabilityStatus))]
+[JsonSerializable(typeof(ModelCapabilityCertificate))]
+[JsonSerializable(typeof(ModelCapabilityProbeResult))]
 // Per-tool overrides map on PermissionsSettings — register the concrete
 // dictionary so the source generator emits converter metadata for it.
 [JsonSerializable(typeof(Dictionary<string, string>))]

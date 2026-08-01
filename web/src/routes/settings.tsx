@@ -32,12 +32,15 @@ import {
   getRuntimeInfo,
   stopRuntime,
   getGatekeeperStatus,
+  getWikiWriteCapabilityStatus,
+  retestWikiWriteCapability,
   type TestLlmResponse,
   type AudioDevicesResponse,
   type PiperVoiceEntry,
   type VoiceHostHealthResponse,
   type RuntimeInfo,
   type GatekeeperStatusResponse,
+  type ModelCapabilityStatusResponse,
 } from '../lib/settingsApi';
 import { readRuntimeMetadata } from '../lib/runtime';
 import { acquireMicStream, clearMicResolutionCache, stopMicStream } from '../lib/micCapture';
@@ -173,6 +176,8 @@ function SettingsRoute() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestLlmResponse | null>(null);
   const [gatekeeperStatus, setGatekeeperStatus] = useState<GatekeeperStatusResponse | null>(null);
+  const [wikiWriteStatus, setWikiWriteStatus] = useState<ModelCapabilityStatusResponse | null>(null);
+  const [capabilityTesting, setCapabilityTesting] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     if (typeof window === 'undefined') return 'general';
     const fromQuery = new URLSearchParams(window.location.search).get('tab') as TabId | null;
@@ -266,6 +271,45 @@ function SettingsRoute() {
     doc?.llm.reusePrimaryForGatekeeperOnSharedEndpoint,
     savedAt,
   ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getWikiWriteCapabilityStatus()
+      .then((status) => {
+        if (!cancelled) setWikiWriteStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setWikiWriteStatus(null);
+      });
+    return () => { cancelled = true; };
+  }, [savedAt, doc?.llm.provider, doc?.llm.baseUrl, doc?.llm.modelId, doc?.llm.contextWindowTokens, doc?.llm.temperature]);
+
+  const onCapabilityRetest = async () => {
+    if (!doc || capabilityTesting) return;
+    setCapabilityTesting(true);
+    try {
+      const status = await retestWikiWriteCapability();
+      setWikiWriteStatus(status);
+      if (status.certificate) {
+        setDoc({
+          ...doc,
+          modelCapabilities: {
+            wikiWriteMode: doc.modelCapabilities?.wikiWriteMode ?? 'on',
+            wikiWriteCertificates: [
+              status.certificate,
+              ...(doc.modelCapabilities?.wikiWriteCertificates ?? []).filter(
+                (certificate) => certificate.configurationFingerprint !== status.certificate?.configurationFingerprint,
+              ),
+            ],
+          },
+        });
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCapabilityTesting(false);
+    }
+  };
 
   const preset = useMemo(
     () => (doc ? findPreset(doc.llm.provider, doc.llm.baseUrl) : PROVIDER_PRESETS[0]),
@@ -376,6 +420,9 @@ function SettingsRoute() {
                 testing={testing}
                 testResult={testResult}
                 gatekeeperStatus={gatekeeperStatus}
+                wikiWriteStatus={wikiWriteStatus}
+                capabilityTesting={capabilityTesting}
+                onCapabilityRetest={onCapabilityRetest}
               />
             ) : null}
             {activeTab === 'audio' ? <AudioTab doc={doc} setDoc={setDoc} /> : null}
@@ -440,6 +487,7 @@ function withDefaults(doc: SettingsDocument): SettingsDocument {
     location: doc.location ?? DEFAULT_LOCATION,
     limits: doc.limits ?? DEFAULT_LIMITS,
     uiPrefs: doc.uiPrefs ?? DEFAULT_UI_PREFS,
+    modelCapabilities: doc.modelCapabilities ?? { wikiWriteMode: 'on', wikiWriteCertificates: [] },
   };
 }
 
@@ -642,6 +690,9 @@ function ModelsTab({
   testing,
   testResult,
   gatekeeperStatus,
+  wikiWriteStatus,
+  capabilityTesting,
+  onCapabilityRetest,
 }: {
   doc: SettingsDocument;
   setDoc: (d: SettingsDocument) => void;
@@ -651,6 +702,9 @@ function ModelsTab({
   testing: boolean;
   testResult: TestLlmResponse | null;
   gatekeeperStatus: GatekeeperStatusResponse | null;
+  wikiWriteStatus: ModelCapabilityStatusResponse | null;
+  capabilityTesting: boolean;
+  onCapabilityRetest: () => void;
 }) {
   return (
     <div className="space-y-6" role="tabpanel" aria-labelledby="settings-tab-models">
@@ -734,6 +788,89 @@ function ModelsTab({
             )}
           />
         </Field>
+      </Section>
+
+      <Section
+        title="Model capability certification"
+        description="Quick synthetic checks determine which tool families this exact model configuration can use safely. Tests never execute a tool."
+      >
+        <Field label="Targeted Wiki writes">
+          <Select
+            testId="settings-capability-wiki-write-mode"
+            value={doc.modelCapabilities?.wikiWriteMode ?? 'on'}
+            onChange={(mode) =>
+              setDoc({
+                ...doc,
+                modelCapabilities: {
+                  wikiWriteMode: mode as 'auto' | 'on' | 'off',
+                  wikiWriteCertificates: doc.modelCapabilities?.wikiWriteCertificates ?? [],
+                },
+              })
+            }
+            options={[
+              { value: 'auto', label: 'Auto (use certificate)' },
+              { value: 'on', label: 'On (user override)' },
+              { value: 'off', label: 'Off' },
+            ]}
+          />
+          <p className="mt-1.5 text-xs text-ink-muted">
+            On never bypasses normal confirmation, permissions, revision checks, or the selected-target guard.
+          </p>
+        </Field>
+
+        <div
+          data-testid="settings-capability-wiki-write-status"
+          className="rounded-xl border border-line bg-canvas-sunken/50 p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-ink">
+                {formatCapabilityStatus(wikiWriteStatus?.status ?? 'untested')}
+              </div>
+              <p className="mt-1 text-xs text-ink-muted">
+                {wikiWriteStatus?.message ?? 'Status has not loaded yet.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onCapabilityRetest}
+              disabled={capabilityTesting}
+              data-testid="settings-capability-wiki-write-retest"
+              className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3.5 py-1.5 text-sm font-medium text-ink shadow-soft transition hover:bg-accent-soft disabled:opacity-50"
+            >
+              {capabilityTesting ? (
+                <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+              ) : (
+                <RefreshCw className="h-4 w-4" strokeWidth={1.75} />
+              )}
+              {capabilityTesting ? 'Testing…' : 'Retest capability'}
+            </button>
+          </div>
+          {wikiWriteStatus?.certificate ? (
+            <div className="mt-3 space-y-2">
+              <div className="text-[11px] text-ink-subtle">
+                {wikiWriteStatus.certificate.modelCalls} model calls ·{' '}
+                {(wikiWriteStatus.certificate.elapsedMilliseconds / 1000).toFixed(1)}s · fingerprint{' '}
+                <code>{wikiWriteStatus.certificate.configurationFingerprint.slice(0, 12)}</code>
+              </div>
+              <ul className="grid gap-1 sm:grid-cols-2">
+                {wikiWriteStatus.certificate.probes.map((probe) => (
+                  <li key={probe.id} className="flex items-start gap-1.5 text-[11px] text-ink-muted">
+                    {probe.passed ? (
+                      <Check className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" strokeWidth={2} />
+                    ) : (
+                      <X className="mt-0.5 h-3 w-3 shrink-0 text-rose-500" strokeWidth={2} />
+                    )}
+                    <span>{formatProbeId(probe.id)}: {probe.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <p className="mt-3 text-[11px] text-ink-subtle">
+            Retest uses the saved model settings and has a four-call, 60-second ceiling.
+          </p>
+        </div>
       </Section>
 
       <Section
@@ -2577,6 +2714,24 @@ function normalizeTtsProvider(provider: string | null | undefined): string {
   if (value === 'piper') return 'piper';
   if (value === 'stub' || value === 'disabled' || value === 'none') return 'stub';
   return 'kokoro-sharp';
+}
+
+function formatCapabilityStatus(status: ModelCapabilityStatusResponse['status']): string {
+  return status === 'certified'
+    ? 'Certified'
+    : status === 'limited'
+      ? 'Limited'
+      : status === 'unsupported'
+        ? 'Unsupported'
+        : status === 'stale'
+          ? 'Retest needed'
+          : status === 'error'
+            ? 'Test failed'
+            : 'Untested';
+}
+
+function formatProbeId(id: string): string {
+  return id.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function defaultVoiceForTtsProvider(provider: string, current: string | null | undefined): string | null {

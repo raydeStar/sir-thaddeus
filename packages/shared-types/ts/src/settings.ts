@@ -106,6 +106,33 @@ export interface RuntimeMemorySettings {
   enabled: boolean;
 }
 
+export type ModelCapabilityMode = 'auto' | 'on' | 'off';
+export type ModelCapabilityStatus = 'certified' | 'limited' | 'unsupported' | 'error';
+
+export interface ModelCapabilityProbeResult {
+  id: string;
+  passed: boolean;
+  reason: string;
+}
+
+export interface ModelCapabilityCertificate {
+  capability: string;
+  status: ModelCapabilityStatus;
+  configurationFingerprint: string;
+  configuredModelId: string;
+  reportedModelId?: string | null;
+  probeVersion: string;
+  modelCalls: number;
+  elapsedMilliseconds: number;
+  testedAt: string;
+  probes: ModelCapabilityProbeResult[];
+}
+
+export interface ModelCapabilitySettings {
+  wikiWriteMode: ModelCapabilityMode;
+  wikiWriteCertificates?: ModelCapabilityCertificate[] | null;
+}
+
 export interface SettingsDocument {
   llm: LlmSettings;
   voice: VoiceSettings;
@@ -119,4 +146,5 @@ export interface SettingsDocument {
   permissions?: PermissionsSettings | null;
   files?: FilesSettings | null;
   memory?: RuntimeMemorySettings | null;
+  modelCapabilities?: ModelCapabilitySettings | null;
 }

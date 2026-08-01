@@ -32,6 +32,9 @@ test.describe('settings smoke', () => {
     await page.getByTestId('settings-tab-models').click();
     const modelInput = page.getByTestId('settings-llm-model');
     await modelInput.fill('llama3.1:70b');
+    await expect(page.getByTestId('settings-capability-wiki-write-mode')).toBeVisible();
+    await expect(page.getByTestId('settings-capability-wiki-write-status')).toBeVisible();
+    await expect(page.getByTestId('settings-capability-wiki-write-retest')).toBeVisible();
 
     // The gatekeeper status banner must render (regardless of reachability).
     // Its `data-state` is one of: checking / active / unreachable /

@@ -1,5 +1,11 @@
 # Assistant Pipeline
 
+Model-dependent tool families can be narrowed before the normal pipeline by
+the user-controlled capability certificate policy. See
+[MODEL_CAPABILITY_CERTIFICATION.md](MODEL_CAPABILITY_CERTIFICATION.md) for the
+`Auto / On / Off` contract, fingerprint limits, probe budget, and current Wiki
+write evidence. Certification never replaces permissions or target guards.
+
 This document is the production contract for Sir Thaddeus chat orchestration.
 It describes behavior that is active on the default desktop and headless paths,
 the diagnostics that are intentionally supported, and the experiments that have

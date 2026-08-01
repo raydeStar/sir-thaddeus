@@ -50,6 +50,48 @@ export async function getGatekeeperStatus(): Promise<GatekeeperStatusResponse> {
   return asJson<GatekeeperStatusResponse>(res);
 }
 
+export interface ModelCapabilityProbeResult {
+  id: string;
+  passed: boolean;
+  reason: string;
+}
+
+export interface ModelCapabilityCertificate {
+  capability: string;
+  status: 'certified' | 'limited' | 'unsupported' | 'error';
+  configurationFingerprint: string;
+  configuredModelId: string;
+  reportedModelId: string | null;
+  probeVersion: string;
+  modelCalls: number;
+  elapsedMilliseconds: number;
+  testedAt: string;
+  probes: ModelCapabilityProbeResult[];
+}
+
+export interface ModelCapabilityStatusResponse {
+  capability: string;
+  mode: 'auto' | 'on' | 'off';
+  status: 'untested' | 'stale' | 'certified' | 'limited' | 'unsupported' | 'error';
+  enabled: boolean;
+  current: boolean;
+  configurationFingerprint: string;
+  message: string | null;
+  certificate: ModelCapabilityCertificate | null;
+}
+
+export async function getWikiWriteCapabilityStatus(): Promise<ModelCapabilityStatusResponse> {
+  const res = await runtimeFetch(token(), '/api/settings/model-capabilities/wiki-write');
+  return asJson<ModelCapabilityStatusResponse>(res);
+}
+
+export async function retestWikiWriteCapability(): Promise<ModelCapabilityStatusResponse> {
+  const res = await runtimeFetch(token(), '/api/settings/model-capabilities/wiki-write/retest', {
+    method: 'POST',
+  });
+  return asJson<ModelCapabilityStatusResponse>(res);
+}
+
 export interface AudioDeviceInfo {
   deviceNumber: number;
   productName: string;
