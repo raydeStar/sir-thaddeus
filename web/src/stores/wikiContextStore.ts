@@ -8,12 +8,16 @@ import { create } from 'zustand';
  */
 interface WikiContextStoreState {
   value: string;
+  mutationTargetValue: string;
   setValue: (value: string) => void;
+  setMutationTargetValue: (value: string) => void;
   clear: () => void;
 }
 
 export const useWikiContextStore = create<WikiContextStoreState>((set) => ({
   value: '',
+  mutationTargetValue: '',
   setValue: (value) => set({ value }),
-  clear: () => set({ value: '' }),
+  setMutationTargetValue: (mutationTargetValue) => set({ mutationTargetValue }),
+  clear: () => set({ value: '', mutationTargetValue: '' }),
 }));

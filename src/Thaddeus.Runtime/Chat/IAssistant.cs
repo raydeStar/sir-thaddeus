@@ -1,3 +1,4 @@
+using SirThaddeus.Agent.Pipeline;
 using Thaddeus.SharedTypes;
 
 namespace Thaddeus.Runtime.Chat;
@@ -25,4 +26,6 @@ public interface IAssistant
         RespondAsync(threadId, userText, ct);
 }
 
-public sealed record AssistantTurnOptions(bool EphemeralMemory = false);
+public sealed record AssistantTurnOptions(
+    bool EphemeralMemory = false,
+    WikiMutationTarget? WikiMutationTarget = null);

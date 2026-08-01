@@ -4,7 +4,11 @@ import { ArrowLeft, Check, Clipboard, EyeOff, Loader2, Mic, Plus, RotateCcw, Sen
 import { useChatStore } from '../stores/chatStore';
 import { Markdown } from '../components/Markdown';
 import { SourceCards } from '../components/SourceCards';
-import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
+import {
+  ChatComposer,
+  type WikiContextSelection,
+  type WikiMutationTargetSelection,
+} from '../components/ChatComposer';
 import { PermissionPauseCard } from '../components/PermissionModal';
 import { SteerableProgressCard } from '../components/SteerableProgressCard';
 import { WorkReceipt } from '../components/WorkReceipt';
@@ -165,7 +169,11 @@ function ChatThreadRoute() {
     }
   }, []);
 
-  const onSubmit = async (text: string, wikiContext?: WikiContextSelection) => {
+  const onSubmit = async (
+    text: string,
+    wikiContext?: WikiContextSelection,
+    wikiMutationTarget?: WikiMutationTargetSelection,
+  ) => {
     if (sending || blockedByPermission || blockedByPlan) return;
     if (steeringMode && activeRun) {
       await redirectActiveRun(text);
@@ -178,7 +186,7 @@ function ChatThreadRoute() {
     }
     setVoiceTranscript(null);
     setDraft('');
-    await send(text, wikiContext, { ephemeralMemory });
+    await send(text, wikiContext, { ephemeralMemory, wikiMutationTarget });
   };
 
   const toggleOfflineMode = useCallback(async () => {

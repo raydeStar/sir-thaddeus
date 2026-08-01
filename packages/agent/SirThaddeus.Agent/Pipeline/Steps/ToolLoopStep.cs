@@ -1589,6 +1589,22 @@ public sealed class ToolLoopStep : ITurnStep
         IDictionary<string, ToolCallOutcome> pureComputeResults,
         CancellationToken ct)
     {
+        var targetDecision = WikiMutationTargetGuard.Evaluate(
+            context.WikiMutationTarget,
+            toolName,
+            args);
+        if (targetDecision.Active)
+        {
+            LogWikiMutationTargetActivation(context, toolName, targetDecision);
+            if (!targetDecision.Allowed)
+            {
+                return new ToolCallOutcome(
+                    WikiMutationTargetGuard.BuildBlockedResult(context.WikiMutationTarget!),
+                    Ok: false,
+                    Error: "wiki_mutation_target_mismatch");
+            }
+        }
+
         // Permission gate first — denial skips both interceptors and MCP.
         if (_permissionGate is not null)
         {
@@ -1657,6 +1673,23 @@ public sealed class ToolLoopStep : ITurnStep
         {
             return new ToolCallOutcome($"Error: {ex.Message}", Ok: false, Error: ex.Message);
         }
+    }
+
+    private void LogWikiMutationTargetActivation(
+        TurnContext context,
+        string toolName,
+        WikiMutationTargetDecision decision)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=explicit_wiki_mutation_target " +
+            "decision=activated " +
+            $"outcome={(decision.Allowed ? "allowed" : "blocked")} " +
+            $"tool={toolName} reason={decision.Reason}");
     }
 
     private static bool TryExtractStructuredToolError(string payload, out string error)

@@ -91,6 +91,88 @@ public class ToolLoopStepTests
     }
 
     [Fact]
+    public async Task Wiki_mutation_target_blocks_mismatched_write_before_mcp()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool(
+                "wiki_page_update_by_name",
+                "{\"rootName\":\"Project Archive\",\"pageTitle\":\"Overview\",\"markdown\":\"wrong\"}"),
+            LlmReply.Final("I stopped because that was outside the selected target."));
+        var mcpCalled = false;
+        var mcp = new StubMcp(_ =>
+        {
+            mcpCalled = true;
+            return "should not run";
+        });
+        var logEntries = new List<(string Event, string Message)>();
+        var step = BuildStep(llm, mcp: mcp, log: (name, message) => logEntries.Add((name, message)));
+        var previousTrace = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+        Environment.SetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE", "1");
+        try
+        {
+            var context = NewContext() with
+            {
+                ToolDefs = [ToolDefinitionFor("wiki_page_update_by_name")],
+                WikiMutationTarget = new WikiMutationTarget(
+                    WikiMutationTargetKind.Page,
+                    "root-1",
+                    "Project",
+                    "page-1",
+                    "Plan"),
+            };
+
+            var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+            var next = Assert.IsType<StepResult.Continue>(result).Next;
+            Assert.False(mcpCalled);
+            var call = Assert.Single(next.ToolCallsMade);
+            Assert.False(call.Success);
+            Assert.Contains("wiki_mutation_target_mismatch", call.Result, StringComparison.Ordinal);
+            Assert.Contains(logEntries, entry =>
+                entry.Event == "EXPERIMENT_ACTIVATION" &&
+                entry.Message.Contains("event=explicit_wiki_mutation_target", StringComparison.Ordinal) &&
+                entry.Message.Contains("decision=activated", StringComparison.Ordinal) &&
+                entry.Message.Contains("outcome=blocked", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE", previousTrace);
+        }
+    }
+
+    [Fact]
+    public async Task Wiki_mutation_target_allows_exact_write_to_reach_mcp()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool(
+                "wiki_page_update_by_name",
+                "{\"rootName\":\"Project\",\"pageTitle\":\"Plan\",\"markdown\":\"right\"}"),
+            LlmReply.Final("Updated."));
+        var mcpCalled = false;
+        var mcp = new StubMcp(_ =>
+        {
+            mcpCalled = true;
+            return "{\"ok\":true,\"version\":2}";
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var context = NewContext() with
+        {
+            ToolDefs = [ToolDefinitionFor("wiki_page_update_by_name")],
+            WikiMutationTarget = new WikiMutationTarget(
+                WikiMutationTargetKind.Page,
+                "root-1",
+                "Project",
+                "page-1",
+                "Plan"),
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        Assert.IsType<StepResult.Continue>(result);
+        Assert.True(mcpCalled);
+    }
+
+    [Fact]
     public async Task Interceptor_claims_call_and_MCP_is_not_invoked()
     {
         // An interceptor that owns the tool name short-circuits MCP —

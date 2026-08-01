@@ -1,4 +1,5 @@
 using System.Text;
+using SirThaddeus.Agent.Pipeline;
 using SirThaddeus.Wiki;
 using Thaddeus.Runtime.Wiki;
 
@@ -54,6 +55,43 @@ public sealed class WikiChatContextService
         var prompt = BuildPagePrompt(trimmedUserText, document);
         var attachment = new WikiChatContextAttachment("page", document.Page.Id, document.Page.Title);
         return new WikiChatContextPrompt(prompt, attachment);
+    }
+
+    public async Task<WikiMutationTarget?> ResolveMutationTargetAsync(
+        WikiMutationTargetRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Mode))
+            return null;
+
+        var mode = request.Mode.Trim();
+        if (mode.Equals("root", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(request.RootId))
+                throw new ArgumentException("Wiki root mutation target requires a root id.", nameof(request));
+            var tree = await _wiki.GetTreeAsync(request.RootId.Trim(), cancellationToken).ConfigureAwait(false)
+                ?? throw new KeyNotFoundException($"Wiki root '{request.RootId}' not found.");
+            return new WikiMutationTarget(
+                WikiMutationTargetKind.Root,
+                tree.Root.Id,
+                tree.Root.Name);
+        }
+
+        if (!mode.Equals("page", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Wiki mutation target must be an existing root or page.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.PageId))
+            throw new ArgumentException("Wiki page mutation target requires a page id.", nameof(request));
+
+        var document = await _wiki.GetPageAsync(request.PageId.Trim(), cancellationToken).ConfigureAwait(false)
+            ?? throw new KeyNotFoundException($"Wiki page '{request.PageId}' not found.");
+        var rootTree = await _wiki.GetTreeAsync(document.Page.RootId, cancellationToken).ConfigureAwait(false)
+            ?? throw new KeyNotFoundException($"Wiki root '{document.Page.RootId}' not found.");
+        return new WikiMutationTarget(
+            WikiMutationTargetKind.Page,
+            rootTree.Root.Id,
+            rootTree.Root.Name,
+            document.Page.Id,
+            document.Page.Title);
     }
 
     private async Task<WikiChatContextPrompt> BuildAllRootsContextAsync(
@@ -269,6 +307,11 @@ public sealed record WikiChatContextRequest(
     string? PageId = null,
     string? RootId = null,
     string? FolderId = null);
+
+public sealed record WikiMutationTargetRequest(
+    string? Mode,
+    string? PageId = null,
+    string? RootId = null);
 
 public sealed record WikiChatContextPrompt(
     string Prompt,

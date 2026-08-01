@@ -3,7 +3,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronRight, Loader2, MessageSquare, Mic, Square, Unplug } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { useRuntimeStore } from '../stores/runtimeStore';
-import { ChatComposer, type WikiContextSelection } from '../components/ChatComposer';
+import {
+  ChatComposer,
+  type WikiContextSelection,
+  type WikiMutationTargetSelection,
+} from '../components/ChatComposer';
 import { acquireMicStream, isStreamLive, prepareMicCapture, stopMicStream } from '../lib/micCapture';
 import { trimSilenceToWav } from '../lib/audioTrim';
 import { transcribeSpeech, warmVoiceHost } from '../lib/voiceApi';
@@ -71,7 +75,11 @@ function HomeRoute() {
     void prepareMicCapture().catch(() => undefined);
   }, []);
 
-  const start = useCallback(async (text: string, wikiContext?: WikiContextSelection) => {
+  const start = useCallback(async (
+    text: string,
+    wikiContext?: WikiContextSelection,
+    wikiMutationTarget?: WikiMutationTargetSelection,
+  ) => {
     if (busy) return;
     setBusy(true);
     setLocalError(null);
@@ -83,7 +91,7 @@ function HomeRoute() {
         search: { focusMessageId: undefined },
       });
       await useChatStore.getState().openThread(t.id);
-      await send(text, wikiContext);
+      await send(text, wikiContext, { wikiMutationTarget });
       setDraft('');
     } catch (e) {
       // Surface the failure so the user doesn't hit Send and see nothing

@@ -160,7 +160,11 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         var workStopwatch = Stopwatch.StartNew();
         var usageBefore = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
         var (finalText, success, error, messageId) =
-            await RunChatAsync(test.UserMessage, test.WikiContext, cancellationToken).ConfigureAwait(false);
+            await RunChatAsync(
+                test.UserMessage,
+                test.WikiContext,
+                test.WikiMutationTarget,
+                cancellationToken).ConfigureAwait(false);
         var fullToolEvidence = await GetHarnessToolEvidenceAsync(messageId, cancellationToken)
             .ConfigureAwait(false);
         var usageAfter = await GetLlmUsageAsync(cancellationToken).ConfigureAwait(false);
@@ -910,6 +914,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         RunChatAsync(
             string userMessage,
             HarnessWikiContextSetup? wikiContextSetup,
+            HarnessWikiMutationTargetSetup? wikiMutationTargetSetup,
             CancellationToken cancellationToken)
     {
         Debug.Assert(_http is not null);
@@ -933,9 +938,12 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             ?? throw new InvalidOperationException("thread.id missing in response");
 
         var wikiContext = await ResolveWikiContextAsync(wikiContextSetup, cancellationToken).ConfigureAwait(false);
+        var wikiMutationTarget = await ResolveWikiMutationTargetAsync(
+            wikiMutationTargetSetup,
+            cancellationToken).ConfigureAwait(false);
         using var msgResp = await _http.PostAsJsonAsync(
             $"api/threads/{threadId}/messages",
-            new { text = userMessage, wikiContext },
+            new { text = userMessage, wikiContext, wikiMutationTarget },
             JsonOptions,
             cancellationToken).ConfigureAwait(false);
         msgResp.EnsureSuccessStatusCode();
@@ -1024,6 +1032,30 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         return new ResolvedWikiContext("page", PageId: pageId, RootId: rootId);
     }
 
+    private async Task<ResolvedWikiMutationTarget?> ResolveWikiMutationTargetAsync(
+        HarnessWikiMutationTargetSetup? setup,
+        CancellationToken cancellationToken)
+    {
+        if (setup is null || string.IsNullOrWhiteSpace(setup.Mode) ||
+            setup.Mode.Equals("none", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var resolved = await ResolveWikiContextAsync(
+            new HarnessWikiContextSetup
+            {
+                Mode = setup.Mode,
+                RootName = setup.RootName,
+                PageTitle = setup.PageTitle,
+            },
+            cancellationToken).ConfigureAwait(false);
+        if (resolved is null || resolved.Mode is not ("root" or "page"))
+            throw new InvalidOperationException("Harness Wiki mutation target must resolve to a root or page.");
+        return new ResolvedWikiMutationTarget(
+            resolved.Mode,
+            resolved.PageId,
+            resolved.RootId);
+    }
+
     internal static string ResolveUniqueNamedId(
         JsonElement values,
         string requestedName,
@@ -1049,6 +1081,11 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         string? PageId = null,
         string? RootId = null,
         string? FolderId = null);
+
+    private sealed record ResolvedWikiMutationTarget(
+        string Mode,
+        string? PageId = null,
+        string? RootId = null);
 
     private string ResolveAuditFilePath()
     {
@@ -1081,6 +1118,7 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
             await RunChatAsync(
                 "Reply with only the word ok.",
                 wikiContextSetup: null,
+                wikiMutationTargetSetup: null,
                 cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }

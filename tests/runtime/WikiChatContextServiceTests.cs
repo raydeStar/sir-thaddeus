@@ -158,6 +158,49 @@ public sealed class WikiChatContextServiceTests : IDisposable
                 CancellationToken.None));
     }
 
+    [Fact]
+    public async Task ResolveMutationTargetAsync_resolves_existing_page_with_root_identity()
+    {
+        var pageId = await CreatePageAsync("Launch Plan", "# Launch Plan");
+
+        var target = await _service.ResolveMutationTargetAsync(
+            new WikiMutationTargetRequest("page", PageId: pageId),
+            CancellationToken.None);
+
+        Assert.NotNull(target);
+        Assert.Equal(SirThaddeus.Agent.Pipeline.WikiMutationTargetKind.Page, target!.Kind);
+        Assert.Equal("Harness Wiki", target.RootName);
+        Assert.Equal("Launch Plan", target.PageTitle);
+        Assert.Equal(pageId, target.PageId);
+    }
+
+    [Fact]
+    public async Task ResolveMutationTargetAsync_resolves_existing_root_and_rejects_unsupported_scope()
+    {
+        var root = await _wiki.CreateRootAsync("Operations", null, CancellationToken.None);
+
+        var target = await _service.ResolveMutationTargetAsync(
+            new WikiMutationTargetRequest("root", RootId: root.Id),
+            CancellationToken.None);
+
+        Assert.NotNull(target);
+        Assert.Equal(SirThaddeus.Agent.Pipeline.WikiMutationTargetKind.Root, target!.Kind);
+        Assert.Equal(root.Id, target.RootId);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.ResolveMutationTargetAsync(
+                new WikiMutationTargetRequest("folder", RootId: root.Id),
+                CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ResolveMutationTargetAsync_fails_closed_for_missing_target()
+    {
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            _service.ResolveMutationTargetAsync(
+                new WikiMutationTargetRequest("page", PageId: "missing"),
+                CancellationToken.None));
+    }
+
     private async Task<string> CreatePageAsync(string title, string markdown)
     {
         var root = await _wiki.CreateRootAsync("Harness Wiki", null, CancellationToken.None);

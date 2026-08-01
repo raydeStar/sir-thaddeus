@@ -14,6 +14,10 @@ export type WikiChatContextInput =
   | { mode: 'folder'; rootId: string; folderId: string }
   | { mode: 'page'; pageId: string };
 
+export type WikiMutationTargetInput =
+  | { mode: 'root'; rootId: string }
+  | { mode: 'page'; pageId: string };
+
 function token(): string {
   return readRuntimeMetadata().token;
 }
@@ -44,7 +48,7 @@ export async function appendMessage(
   threadId: string,
   text: string,
   wikiContext?: WikiChatContextInput,
-  options?: { ephemeralMemory?: boolean },
+  options?: { ephemeralMemory?: boolean; wikiMutationTarget?: WikiMutationTargetInput },
 ): Promise<{ thread: ChatThread; run: TurnRunSnapshot }> {
   const res = await runtimeFetch(token(), `/api/threads/${encodeURIComponent(threadId)}/messages`, {
     method: 'POST',
@@ -52,6 +56,7 @@ export async function appendMessage(
     body: JSON.stringify({
       text,
       wikiContext,
+      wikiMutationTarget: options?.wikiMutationTarget,
       ephemeralMemory: options?.ephemeralMemory ?? false,
     }),
   });

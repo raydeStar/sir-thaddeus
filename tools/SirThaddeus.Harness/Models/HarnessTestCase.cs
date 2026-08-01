@@ -91,6 +91,10 @@ public sealed record HarnessTestCase
     [YamlMember(Alias = "wiki_context")]
     public HarnessWikiContextSetup? WikiContext { get; init; }
 
+    [JsonPropertyName("wiki_mutation_target")]
+    [YamlMember(Alias = "wiki_mutation_target")]
+    public HarnessWikiMutationTargetSetup? WikiMutationTarget { get; init; }
+
     [JsonPropertyName("observations")]
     [YamlMember(Alias = "observations")]
     public List<HarnessObservationRequest> Observations { get; init; } = [];
@@ -102,6 +106,25 @@ public sealed record HarnessTestCase
 /// frozen fixtures while exercising the same attachment API as the desktop UI.
 /// </summary>
 public sealed record HarnessWikiContextSetup
+{
+    [JsonPropertyName("mode")]
+    [YamlMember(Alias = "mode")]
+    public string Mode { get; init; } = "none";
+
+    [JsonPropertyName("root_name")]
+    [YamlMember(Alias = "root_name")]
+    public string? RootName { get; init; }
+
+    [JsonPropertyName("page_title")]
+    [YamlMember(Alias = "page_title")]
+    public string? PageTitle { get; init; }
+}
+
+/// <summary>
+/// Evaluator-owned, user-visible Wiki mutation target. Names are resolved to
+/// disposable runtime identifiers after state setup and are never scorer data.
+/// </summary>
+public sealed record HarnessWikiMutationTargetSetup
 {
     [JsonPropertyName("mode")]
     [YamlMember(Alias = "mode")]

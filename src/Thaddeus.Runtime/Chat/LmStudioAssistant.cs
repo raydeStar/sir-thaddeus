@@ -260,6 +260,13 @@ public sealed partial class LmStudioAssistant : IAssistant
                 messageId,
                 latencyTrace.LocalWikiEvidencePacketActivated ? "activated" : "inactive");
         }
+        if (options.WikiMutationTarget is { } selectedWikiTarget && latencyTrace is not null)
+        {
+            _logger.LogInformation(
+                "EXPERIMENT_ACTIVATION turn_id={TurnId} event=explicit_wiki_mutation_target decision=activated phase=turn target_kind={TargetKind}",
+                messageId,
+                selectedWikiTarget.Kind.ToString().ToLowerInvariant());
+        }
         await _publisher.PublishStartAsync(threadId, messageId, ct).ConfigureAwait(false);
         RoutingLatencyTrace.Mark(_logger, latencyTrace, "assistant_turn_start_event");
 
@@ -273,6 +280,14 @@ public sealed partial class LmStudioAssistant : IAssistant
                 preferredUnits: PreferredUnits,
                 offlineMode: OfflineMode)),
         };
+        if (options.WikiMutationTarget is { } mutationTarget)
+        {
+            llmMessages.Add(LlmChatMessage.System(
+                "[USER-SELECTED WIKI WRITE TARGET]\n" +
+                $"The user explicitly limited Wiki mutations for this turn to the {mutationTarget.Kind.ToString().ToLowerInvariant()} " +
+                $"'{mutationTarget.DisplayName}'. Use its exact displayed names for by-name tools. " +
+                "Do not mutate another Wiki resource, do not substitute a similar target, and stop if the requested work cannot be completed inside this scope."));
+        }
         llmMessages.AddRange(BuildHistory(thread, userText));
 
         // Fetch available tools from the MCP server and shape them for the
@@ -333,6 +348,7 @@ public sealed partial class LmStudioAssistant : IAssistant
             IsAutomationRun = false,
             LlmMessages = llmMessages,
             ToolDefs = toolDefs,
+            WikiMutationTarget = options.WikiMutationTarget,
             MemoryAccess = options.EphemeralMemory
                 ? TurnMemoryAccess.Ephemeral
                 : MemoryEnabled

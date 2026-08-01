@@ -11,15 +11,17 @@ import {
   Loader2,
   PencilLine,
   Search,
+  ShieldCheck,
   Sparkles,
   X,
   type LucideIcon,
 } from 'lucide-react';
 import { getWikiTree, listWikiRoots } from '../lib/wikiApi';
-import type { WikiChatContextInput } from '../lib/chatApi';
+import type { WikiChatContextInput, WikiMutationTargetInput } from '../lib/chatApi';
 import { useWikiContextStore } from '../stores/wikiContextStore';
 
 export type WikiContextSelection = WikiChatContextInput;
+export type WikiMutationTargetSelection = WikiMutationTargetInput;
 
 export interface WikiContextOption {
   value: string;
@@ -35,7 +37,11 @@ export interface ChatComposerProps {
   value: string;
   onChange: (next: string) => void;
   /** Submit handler. Receives the trimmed draft and the selected wiki context. */
-  onSubmit: (text: string, wikiContext?: WikiContextSelection) => void | Promise<void>;
+  onSubmit: (
+    text: string,
+    wikiContext?: WikiContextSelection,
+    wikiMutationTarget?: WikiMutationTargetSelection,
+  ) => void | Promise<void>;
   /** Disable the input + submit while a turn is in flight. */
   sending: boolean;
   /** Placeholder for the textarea. */
@@ -111,6 +117,8 @@ export function ChatComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wikiContextValue = useWikiContextStore((s) => s.value);
   const setWikiContextValue = useWikiContextStore((s) => s.setValue);
+  const mutationTargetValue = useWikiContextStore((s) => s.mutationTargetValue);
+  const setMutationTargetValue = useWikiContextStore((s) => s.setMutationTargetValue);
   const [wikiContextOptions, setWikiContextOptions] = useState<WikiContextOption[]>([]);
   const [wikiContextLoading, setWikiContextLoading] = useState(false);
   const [highlightedCommandIndex, setHighlightedCommandIndex] = useState(0);
@@ -119,6 +127,14 @@ export function ChatComposer({
   const selectedWikiContextOption = useMemo(
     () => wikiContextOptions.find((o) => o.value === wikiContextValue) ?? null,
     [wikiContextOptions, wikiContextValue],
+  );
+  const mutationTargetOptions = useMemo(
+    () => wikiContextOptions.filter((option) => option.mode === 'root' || option.mode === 'page'),
+    [wikiContextOptions],
+  );
+  const selectedMutationTargetOption = useMemo(
+    () => mutationTargetOptions.find((option) => option.value === mutationTargetValue) ?? null,
+    [mutationTargetOptions, mutationTargetValue],
   );
 
   const slashCommandState = useMemo(() => parseSlashCommand(value), [value]);
@@ -207,7 +223,11 @@ export function ChatComposer({
 
   const submit = async () => {
     if (!canSend) return;
-    await onSubmit(value.trim(), selectionFor(selectedWikiContextOption));
+    await onSubmit(
+      value.trim(),
+      selectionFor(selectedWikiContextOption),
+      mutationTargetFor(selectedMutationTargetOption),
+    );
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -370,6 +390,74 @@ export function ChatComposer({
           </div>
         ) : null}
 
+        {showWikiContext ? (
+          <div
+            className={`relative flex min-w-0 max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors duration-150 ${
+              selectedMutationTargetOption
+                ? 'border-amber-400/60 bg-amber-500/10 text-ink'
+                : 'border-line bg-canvas text-ink-muted hover:border-line-strong hover:text-ink'
+            } ${
+              sending || wikiContextLoading || mutationTargetOptions.length === 0
+                ? 'cursor-not-allowed opacity-60'
+                : ''
+            }`}
+            data-testid="chat-wiki-mutation-target-active"
+            title={
+              selectedMutationTargetOption
+                ? `Wiki writes limited to ${selectedMutationTargetOption.title}`
+                : 'Choose an existing Wiki root or page as the write target'
+            }
+          >
+            <ShieldCheck
+              className={`h-3.5 w-3.5 shrink-0 ${selectedMutationTargetOption ? 'text-amber-600' : 'text-ink-subtle'}`}
+              strokeWidth={1.8}
+              aria-hidden
+            />
+            {selectedMutationTargetOption ? (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 text-ink-subtle">Write target</span>
+                <span className="min-w-0 truncate font-medium text-ink">{selectedMutationTargetOption.title}</span>
+              </span>
+            ) : (
+              <span className="min-w-0 truncate font-medium">Limit Wiki writes</span>
+            )}
+            {selectedMutationTargetOption ? null : (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-subtle" strokeWidth={1.8} aria-hidden />
+            )}
+            <select
+              value={mutationTargetValue}
+              onChange={(event) => setMutationTargetValue(event.target.value)}
+              disabled={sending || wikiContextLoading || mutationTargetOptions.length === 0}
+              aria-label="Wiki write target"
+              data-testid="chat-wiki-mutation-target"
+              className="absolute inset-0 cursor-pointer opacity-0 disabled:cursor-not-allowed"
+            >
+              <option value="">No Wiki write target</option>
+              {mutationTargetOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {wikiContextOptionLabel(option)}
+                </option>
+              ))}
+            </select>
+            {selectedMutationTargetOption ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setMutationTargetValue('');
+                }}
+                className="relative z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink"
+                aria-label="Clear Wiki write target"
+                title="Clear Wiki write target"
+                disabled={sending}
+              >
+                <X className="h-3 w-3" strokeWidth={2} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="ml-auto flex items-center gap-1">
           {rightActions}
           <Link
@@ -420,6 +508,14 @@ function selectionFor(option: WikiContextOption | null): WikiContextSelection | 
     return { mode: 'folder', rootId: option.rootId, folderId: option.folderId };
   }
   if (option.mode === 'page' && option.pageId) return { mode: 'page', pageId: option.pageId };
+  return undefined;
+}
+
+function mutationTargetFor(
+  option: WikiContextOption | null,
+): WikiMutationTargetSelection | undefined {
+  if (option?.mode === 'root' && option.rootId) return { mode: 'root', rootId: option.rootId };
+  if (option?.mode === 'page' && option.pageId) return { mode: 'page', pageId: option.pageId };
   return undefined;
 }
 
