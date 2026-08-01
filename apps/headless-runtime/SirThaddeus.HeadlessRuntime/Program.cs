@@ -333,6 +333,9 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         // before memory, personality, LLM, or tools are touched.
         new SafetyBoundaryStep(() => currentSettings.ActivePersonalityId),
 
+        // Keep explicit single-field live policy reads aligned with desktop.
+        new PolicyStateUtilityStep(agentMcp),
+
         // Utility fast-path — deterministic answers never touch the
         // LLM or personality wrapping.
         new UtilityFastPathStep(),

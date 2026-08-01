@@ -279,6 +279,10 @@ public class LmStudioAssistantTests : IDisposable
 
         Assert.True(toolLoopIndex >= 0, "ToolLoop step must be present in the chat pipeline.");
         Assert.Equal(1, stepNames.Count(name => name == "ToolLoop"));
+        Assert.Equal("SafetyBoundary", stepNames[0]);
+        Assert.Equal("PolicyStateUtility", stepNames[1]);
+        Assert.True(stepNames.IndexOf("PolicyStateUtility") < stepNames.IndexOf("UtilityFastPath"));
+        Assert.True(stepNames.IndexOf("PolicyStateUtility") < toolLoopIndex);
 
         var permissionGateField = typeof(SirThaddeus.Agent.Pipeline.Steps.ToolLoopStep)
             .GetField("_permissionGate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
