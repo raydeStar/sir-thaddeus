@@ -325,139 +325,33 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         }
     });
 
-    var pipeline = new ChatPipeline(
-        new ITurnStep[]
-        {
-        // Safety boundary runs FIRST. High-risk illicit-instruction
-        // prompts short-circuit to a canned safe-redirect response
-        // before memory, personality, LLM, or tools are touched.
-        new SafetyBoundaryStep(() => currentSettings.ActivePersonalityId),
-
-        // Keep explicit single-field live policy reads aligned with desktop.
-        new PolicyStateUtilityStep(agentMcp),
-
-        // Utility fast-path — deterministic answers never touch the
-        // LLM or personality wrapping.
-        new UtilityFastPathStep(),
-
-        // Benign fallback: canned replies for trivial benign prompts
-        // (greetings, hash-table probes). Only fires when the prompt
-        // isn't tool-eligible.
-        new BenignFallbackStep(),
-
-        // Personality wraps the base system prompt. Sits early so every
-        // subsequent injection (logic-puzzle scaffold, memory, onboarding)
-        // appends on top of the personality-framed prompt.
-        new PersonalityInjectionStep(personalityRuntime),
-
-        new FeatureExtractorStep(),
-        new LogicPuzzleScaffoldStep(),
-
-        // Memory context injects [REMEMBERED CONTEXT] block for the LLM.
-        // Also sets TurnContext.IsNewUser from the provider's onboarding
-        // signal so the next step can fire on cold starts. No-op when
-        // memoryProvider is null (memory disabled in settings).
-        new MemoryContextStep(memoryProvider, ctx => new MemoryContextRequest
+    var pipeline = ProductionChatPipelineFactory.Build(new ProductionChatPipelineOptions
+    {
+        Mcp = agentMcp,
+        EventSink = sink,
+        LogEvent = pipelineLog,
+        ResolveActiveProfileId = () => currentSettings.ActivePersonalityId,
+        PersonalityRuntime = personalityRuntime,
+        MemoryContextProvider = memoryProvider,
+        MemoryRequestBuilder = ctx => new MemoryContextRequest
         {
             UserMessage = ctx.UserText ?? string.Empty,
             ConversationId = ctx.ThreadId,
             MemoryEnabled = currentSettings.Memory.Enabled,
             ActiveProfileId = currentSettings.ActiveProfileId,
-        }),
-
-        // Onboarding injection: appends the cold-introduction suffix
-        // when the memory provider signals no profile facts are known
-        // yet. No-op on warm users / when memory is off.
-        new OnboardingInjectionStep(ctx => ctx.IsNewUser
-            ? OnboardingMode.Cold
-            : OnboardingMode.NotNeeded),
-
-        // Dialogue state: appends [CONVERSATION CONTEXT] with carry-over
-        // topic/location/time. Read-only — writes happen inside the
-        // legacy context anchoring service (still on the orchestrator
-        // for now). Singleton accessor matches the v1 store semantics.
-        new DialogueStateStep(dialogueAccessor),
-
-        // Existence-check nudge: when the user asks "does X exist" /
-        // "was X released" etc., remind the model to verify via
-        // web_search before answering from (stale) training memory.
-        // No-op on other prompt shapes.
-        new ExistenceVerificationHintStep(),
-
-        new FootmanRouterStep(footmanRouter, sink),
-
-        // Guardrails: short-circuits the turn with a first-principles
-        // scaffold when the prompt looks reasoning-shaped. Runs after
-        // the footman so it can still see the narrowed tool view, but
-        // before the tool loop so a clean scaffold answer beats a
-        // half-loop.
-        new GuardrailsStep(guardrails),
-
-        // Freshness router (Layer A of the confidence system): when the
-        // user asks a structurally fresh question (existence, current-
-        // state, recent release, live price), force tool_choice=web_search
-        // on the FIRST tool-loop round. Complements the earlier hint —
-        // the hint motivates, this enforces. Pattern-gated so casual
-        // chat and opinion prompts pass through untouched.
-        new FreshnessRouterStep(),
-
-        toolLoop,
-        new PostProcessStep(sanitize, "PostProcess:Sanitize"),
-
-        // Completion validation + targeted repair: catches refusal-ish
-        // or incomplete drafts after sanitize and runs one focused
-        // repair pass. Fail-open — validator/repair exceptions don't
-        // abort the turn.
-        new CompletionValidationStep(completionValidator, repairLoop, pipelineLog),
-
-        // Search fallback: runs after sanitizer so the refusal check
-        // sees the final draft. Builds the full request including
-        // history + tool calls; no-op when the draft doesn't look like
-        // a refusal.
-        new SearchFallbackStep(
-            searchFallback,
-            buildRequest: ctx =>
-            {
-                if (!ctx.ToolDefs.Any(def =>
-                        string.Equals(def.Function?.Name, ToolNames.WebSearch, StringComparison.OrdinalIgnoreCase)))
-                {
-                    return null;
-                }
-
-                var draft = ctx.AssistantDraft ?? string.Empty;
-                if (LooksLikeCompletedWeatherNewsEvidenceDraft(draft))
-                    return null;
-
-                var refusal = RefusalDetector.HasRefusalOrUncertaintySignals(draft, draft);
-                // Layer B: a draft that hedges its own confidence on a
-                // factual question (e.g. "I believe ... as of my training
-                // data") is indistinguishable from stale-memory guessing.
-                // Trigger the same search-fallback so we ground the answer.
-                var hedged = HedgeSignalDetector.ShouldVerify(draft, ctx.UserText);
-                if (!refusal && !hedged)
-                    return null;
-
-                return new SearchFallbackRequest
-                {
-                    UserMessage = ctx.UserText ?? string.Empty,
-                    History = ctx.LlmMessages.ToList(),
-                    ToolCallsMade = ctx.ToolCallsMade.ToList(),
-                    HasRefusalOrUncertaintySignals = true,
-                };
-            }),
-
-        new PostProcessStep(sanitize, "PostProcess:SearchFallbackSanitize"),
-
-        // Auto-memory: fire-and-forget user + assistant chunk writes after
-        // post-process so the stored chunks match what the user sees.
-        // Null when memory is disabled in settings — the step becomes a no-op.
-        new AutoMemoryExtractStep(
-            autoMemoryExtractor,
-            activeProfileIdGetter: _ => currentSettings.ActiveProfileId),
-
-            new ResponseComposerStep(),
         },
-        logEvent: pipelineLog);
+        IncludeCoreMemoryStep = false,
+        DialogueStateAccessor = dialogueAccessor,
+        FootmanRouter = footmanRouter,
+        GuardrailsPipeline = guardrails,
+        ToolLoop = toolLoop,
+        Sanitize = sanitize,
+        CompletionValidator = completionValidator,
+        CompletionRepairLoop = repairLoop,
+        SearchFallbackExecutor = searchFallback,
+        AutoMemoryExtractor = autoMemoryExtractor,
+        ActiveProfileIdGetter = _ => currentSettings.ActiveProfileId,
+    });
 
     // The CLI's system prompt gets a location block prepended — matches
     // the UI runtime's BuildLocationBlock so the LLM sees "your home is
@@ -489,20 +383,6 @@ static string ApplyHeadlessQualityGuards(string text, TurnContext context)
         return weatherPlan;
 
     return text;
-}
-
-static bool LooksLikeCompletedWeatherNewsEvidenceDraft(string draft)
-{
-    if (string.IsNullOrWhiteSpace(draft))
-        return false;
-
-    var lower = draft.ToLowerInvariant();
-    return lower.Contains("weather in ", StringComparison.Ordinal) &&
-           lower.Contains("local news in ", StringComparison.Ordinal) &&
-           (lower.Contains("current conditions are", StringComparison.Ordinal) ||
-            lower.Contains("live forecast lookup returned", StringComparison.Ordinal)) &&
-           (lower.Contains("live search returned", StringComparison.Ordinal) ||
-            lower.Contains("live search did not return", StringComparison.Ordinal));
 }
 
 static string? TryBuildToolPingSummary(TurnContext context)
