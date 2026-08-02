@@ -142,6 +142,7 @@ try {
     $global:adapterLmsArguments = @()
     function global:lms {
         $global:adapterLmsArguments = @($args)
+        Write-Error 'Model unloaded.' -ErrorAction Continue
         $global:LASTEXITCODE = 0
     }
     Stop-ModelProvider -ProviderSession ([pscustomobject]@{

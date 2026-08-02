@@ -320,9 +320,23 @@ function Initialize-LmStudioModel {
 function Remove-LmStudioModel {
     param([Parameter(Mandatory = $true)][string]$ModelId)
 
-    & lms unload $ModelId 2>&1 | ForEach-Object { Write-Host $_.ToString() }
-    if ($LASTEXITCODE -ne 0) {
-        throw "LM Studio failed to unload adapter-owned model '$ModelId' (exit $LASTEXITCODE)."
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativePreference = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $previousNativePreference = if ($null -ne $nativePreference) { $nativePreference.Value } else { $null }
+    try {
+        # The CLI can print a successful unload on stderr. The native exit code,
+        # not the PowerShell stream chosen by the CLI, is authoritative.
+        $ErrorActionPreference = 'Continue'
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        & lms unload $ModelId 2>&1 | ForEach-Object { Write-Host $_.ToString() }
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $previousNativePreference }
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) {
+        throw "LM Studio failed to unload adapter-owned model '$ModelId' (exit $exitCode)."
     }
 }
 
