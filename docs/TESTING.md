@@ -215,6 +215,10 @@ controls require a fresh model load; intake fails rather than reusing a model
 whose loaded context cannot be attributed. A model loaded by intake is unloaded
 on cleanup, while a pre-existing model is left untouched.
 
+The managed llama.cpp default is `127.0.0.1:18080`, deliberately separate from
+Sir Thaddeus's default SearXNG endpoint on port `8080`. Plan generation fails
+when an explicit native port collides with the configured SearXNG authority.
+
 The v2 hybrid adapter builds both `Thaddeus.Runtime` and the separately launched
 `SirThaddeus.McpServer` before its first case. This is required for experiments
 that change MCP tool implementations; rebuilding only the runtime can otherwise

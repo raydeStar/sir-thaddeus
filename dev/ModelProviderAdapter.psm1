@@ -62,6 +62,30 @@ function Quote-NativeValue {
     return '"' + $Value + '"'
 }
 
+function Test-SameEndpointAuthority {
+    param(
+        [Parameter(Mandatory = $true)][string]$Left,
+        [Parameter(Mandatory = $true)][string]$Right
+    )
+
+    $leftUri = $null
+    $rightUri = $null
+    if (-not [Uri]::TryCreate($Left, [UriKind]::Absolute, [ref]$leftUri) -or
+        -not [Uri]::TryCreate($Right, [UriKind]::Absolute, [ref]$rightUri) -or
+        $null -eq $leftUri -or $null -eq $rightUri) {
+        return $false
+    }
+
+    $leftHost = $leftUri.Host.ToLowerInvariant()
+    $rightHost = $rightUri.Host.ToLowerInvariant()
+    if ($leftHost -in @('localhost', '127.0.0.1', '::1')) { $leftHost = 'loopback' }
+    if ($rightHost -in @('localhost', '127.0.0.1', '::1')) { $rightHost = 'loopback' }
+
+    return $leftUri.Scheme -eq $rightUri.Scheme -and
+        $leftHost -eq $rightHost -and
+        $leftUri.Port -eq $rightUri.Port
+}
+
 function New-ModelProviderPlan {
     [CmdletBinding()]
     param(
@@ -140,7 +164,7 @@ function New-ModelProviderPlan {
             $executablePath = Resolve-RequiredFile -Path $LlamaServerPath -Label 'LlamaServerPath'
             $executableSha256 = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash.ToLowerInvariant()
             $resolvedModelPath = Resolve-RequiredFile -Path $ModelPath -Label 'ModelPath'
-            if ($Port -eq 0) { $Port = 8080 }
+            if ($Port -eq 0) { $Port = 18080 }
             if ($ContextWindowTokens -eq 0) { $ContextWindowTokens = 16384 }
             if ($Parallel -eq 0) { $Parallel = 1 }
             $BaseUrl = "http://127.0.0.1:$Port"
@@ -202,6 +226,14 @@ function New-ModelIntakeSettings {
     $settings = Get-Content -LiteralPath $resolvedTemplate -Raw -Encoding UTF8 | ConvertFrom-Json
     if (-not ($settings.PSObject.Properties.Name -contains 'llm') -or $null -eq $settings.llm) {
         $settings | Add-Member -NotePropertyName llm -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+    if ($ProviderPlan.backend -eq 'llamacpp' -and
+        ($settings.PSObject.Properties.Name -contains 'webSearch') -and
+        $null -ne $settings.webSearch -and
+        ($settings.webSearch.PSObject.Properties.Name -contains 'searxngBaseUrl') -and
+        -not [string]::IsNullOrWhiteSpace([string]$settings.webSearch.searxngBaseUrl) -and
+        (Test-SameEndpointAuthority -Left $ProviderPlan.base_url -Right ([string]$settings.webSearch.searxngBaseUrl))) {
+        throw "The managed llama.cpp endpoint '$($ProviderPlan.base_url)' collides with webSearch.searxngBaseUrl '$($settings.webSearch.searxngBaseUrl)'. Choose another -Port."
     }
 
     Set-JsonProperty -Object $settings.llm -Name provider -Value $ProviderPlan.provider

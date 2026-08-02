@@ -93,6 +93,9 @@ quantization, context, prompt, sampling configuration, and item set.
   `provider-plan.json`;
 - artifact directories include both model and backend identity so paired arms
   cannot overwrite one another even when they start in the same second;
+- managed llama.cpp defaults to loopback port `18080` rather than llama.cpp's
+  upstream `8080` default, because Sir Thaddeus already reserves `8080` for
+  SearXNG; settings generation also rejects an explicit authority collision;
 - cleanup targets only the captured process object. No name-based or broad
   process termination is used.
 
