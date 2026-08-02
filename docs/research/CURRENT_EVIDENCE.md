@@ -425,6 +425,37 @@ calls and latency while tying or losing to unchanged Thaddeus.
   negative activation failed the 12/12 validity boundary. Do not tune another
   lexical recovery detector against that consumed suite.
 
+### Typed unresolved Wiki targets and folder containment
+
+- Typed by-name Wiki target-resolution failures can remove unproductive model
+  loops. A neutral v2 exactly repeated four development wins with zero losses;
+  its disjoint slice improved `1/16` to `6/16`, reduced calls `55 -> 35`, and
+  reduced tokens `87,212 -> 61,202`. It still terminally intercepted one
+  explicit no-action request and one read-only request, so it was rejected.
+- Requiring a tool-specific explicit user mutation request removed those
+  non-action activations. V3 development and exact repeat each improved `3/12`
+  to `7/12` with the same four wins, zero losses, and calls `42 -> 30`.
+  Disjoint validation improved `4/18 -> 8/18`, reduced calls `61 -> 43`, and
+  reduced tokens `82,419 -> 64,382`, but missed the frozen five-win floor and
+  intercepted one valid rename after the model parsed `Working as Approved` as
+  the existing page title. The tool error proved only that the model's attempted
+  arguments did not resolve. Neutral wording did not make the stop safe.
+- Do not add another lexical rename parser, prompt patch, or permissive label
+  resolver. Existing rename safety evidence and this fresh semantic-misbinding
+  control close that path without a materially different authorization and
+  binding design.
+- Requiring `folderName` for explicit immediate folder-qualified page creation
+  is a sound fail-closed constraint after tool commitment. On a corrected fresh
+  attempted-tool slice it improved verified containment `6/10 -> 8/10` with two
+  wins, zero losses, `6/6` intended activations, `0/4` control activations, and
+  preserved both root-level creates. It missed the four-win floor because two
+  positives omitted the tool, while calls increased `33 -> 36` and tokens
+  increased `36,063 -> 37,560`.
+- Close schema-only folder containment. Schema shape can constrain a selected
+  call but cannot create tool commitment. Reopen only if a fresh oracle isolates
+  commitment as the dominant layer; do not bundle forcing, parsing, and response
+  projection to rescue consumed tasks.
+
 ### Wiki page rename routing and label tolerance
 
 - Deterministic rename selection established that the small model can use a
