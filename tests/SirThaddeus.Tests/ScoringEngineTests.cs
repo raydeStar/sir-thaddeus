@@ -31,6 +31,31 @@ public class ScoringEngineTests
     }
 
     [Fact]
+    public void Score_HardFailsRuntimeEmptyResponseFallback()
+    {
+        var scorer = new ScoringEngine();
+        var test = BasicTest("empty_response_fallback", "Solve the requested task.") with
+        {
+            MinScore = 0.5
+        };
+        var response = new AgentResponse
+        {
+            Text = "(The model returned an empty response.)",
+            Success = true
+        };
+
+        var score = scorer.Score(test, response, [], judgeResult: null);
+
+        Assert.False(score.Passed);
+        Assert.False(score.HardPass);
+        Assert.Equal(0.0, score.OverallScore);
+        Assert.Contains(score.DeterministicChecks, check =>
+            check.Name == "final_response_present" && !check.Passed && check.Severity == "hard");
+        Assert.Contains(score.HardGateFailures, failure =>
+            failure.Contains("empty-response fallback", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Score_FailsCharmingButWrongResponse()
     {
         var scorer = new ScoringEngine();
