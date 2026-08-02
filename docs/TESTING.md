@@ -196,6 +196,8 @@ Validate a provider plan without starting a server or making a model call:
   -LlamaServerPath <path-to-llama-server.exe> `
   -ModelPath <path-to-model.gguf> `
   -ContextWindowTokens 16384 `
+  -GpuOffload max `
+  -Parallel 1 `
   -PlanOnly
 ```
 
@@ -206,6 +208,12 @@ hash to a plan-only artifact as well. See
 [the backend adapter decision](research/LOCAL_INFERENCE_BACKEND_ADAPTER_2026-08-01.md)
 for commands, evidence, and the boundary between infrastructure promotion and
 backend benchmark claims.
+
+For a paired backend comparison, pass the same `-ContextWindowTokens`,
+`-GpuOffload`, and `-Parallel` values to both arms. Explicit LM Studio load
+controls require a fresh model load; intake fails rather than reusing a model
+whose loaded context cannot be attributed. A model loaded by intake is unloaded
+on cleanup, while a pre-existing model is left untouched.
 
 The v2 hybrid adapter builds both `Thaddeus.Runtime` and the separately launched
 `SirThaddeus.McpServer` before its first case. This is required for experiments

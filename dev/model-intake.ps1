@@ -54,6 +54,12 @@ param(
     [ValidateRange(0, 1048576)]
     [int]$ContextWindowTokens = 0,
 
+    [ValidateSet('', 'auto', 'max', 'off')]
+    [string]$GpuOffload = '',
+
+    [ValidateRange(0, 64)]
+    [int]$Parallel = 0,
+
     [ValidateRange(1, 3600)]
     [int]$StartupTimeoutSeconds = 120,
 
@@ -187,7 +193,8 @@ $providerPlan = $null
 $providerPlanPath = $null
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $safeModel = $ModelId -replace '[^A-Za-z0-9._-]', '_'
-$outputDirectory = Join-Path $RepoRoot "artifacts/model-intake/$stamp-$safeModel"
+$safeBackend = $Backend -replace '[^A-Za-z0-9._-]', '_'
+$outputDirectory = Join-Path $RepoRoot "artifacts/model-intake/$stamp-$safeModel-$safeBackend"
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
@@ -224,6 +231,8 @@ try {
             -ModelPath $ModelPath `
             -Port $Port `
             -ContextWindowTokens $ContextWindowTokens `
+            -GpuOffload $GpuOffload `
+            -Parallel $Parallel `
             -StartupTimeoutSeconds $StartupTimeoutSeconds `
             -HashModel:$shouldHashModel
         New-ModelIntakeSettings `
