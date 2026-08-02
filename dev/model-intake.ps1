@@ -126,7 +126,8 @@ function Get-NewestSummaryPath {
     $file = Get-ChildItem -LiteralPath $RepeatSummaryDir -Filter "*-$Suite.json" -File |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
-    return if ($null -eq $file) { '' } else { $file.FullName }
+    if ($null -eq $file) { return '' }
+    return $file.FullName
 }
 
 function Invoke-SuiteMeasurement {
