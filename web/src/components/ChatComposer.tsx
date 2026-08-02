@@ -484,7 +484,7 @@ export function ChatComposer({
             title={
               mutationOperationValue
                 ? `${operationLabel(mutationOperationValue)} on ${selectedMutationTargetOption.title} for this submission`
-                : 'Optionally bind one Wiki operation to the selected write target'
+                : 'Read-only until you explicitly choose one Wiki write operation'
             }
           >
             <ShieldCheck
@@ -493,7 +493,7 @@ export function ChatComposer({
               aria-hidden
             />
             <span className="min-w-0 truncate font-medium">
-              {mutationOperationValue ? operationLabel(mutationOperationValue) : 'Automatic operation'}
+              {mutationOperationValue ? operationLabel(mutationOperationValue) : 'Read only'}
             </span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-subtle" strokeWidth={1.8} aria-hidden />
             <select
@@ -504,7 +504,7 @@ export function ChatComposer({
               data-testid="chat-wiki-bound-operation"
               className="absolute inset-0 cursor-pointer opacity-0 disabled:cursor-not-allowed"
             >
-              <option value="">Automatic operation</option>
+              <option value="">Read only</option>
               {mutationOperationOptions.map((operation) => (
                 <option key={operation} value={operation}>
                   {operationLabel(operation)}
@@ -605,7 +605,7 @@ function operationLabel(value: string): string {
     case 'page_rename': return 'Rename selected page';
     case 'page_delete': return 'Delete selected page';
     case 'root_rename': return 'Rename selected root';
-    default: return 'Automatic operation';
+    default: return 'Read only';
   }
 }
 

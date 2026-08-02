@@ -299,10 +299,10 @@ public sealed partial class LmStudioAssistant : IAssistant
         else if (options.WikiMutationTarget is { } mutationTarget)
         {
             llmMessages.Add(LlmChatMessage.System(
-                "[USER-SELECTED WIKI WRITE TARGET]\n" +
-                $"The user explicitly limited Wiki mutations for this turn to the {mutationTarget.Kind.ToString().ToLowerInvariant()} " +
-                $"'{mutationTarget.DisplayName}'. Use its exact displayed names for by-name tools. " +
-                "Do not mutate another Wiki resource, do not substitute a similar target, and stop if the requested work cannot be completed inside this scope."));
+                "[USER-SELECTED WIKI READ-ONLY TARGET]\n" +
+                $"The user selected the Wiki {mutationTarget.Kind.ToString().ToLowerInvariant()} " +
+                $"'{mutationTarget.DisplayName}', but did not approve a write operation for this submission. " +
+                "Wiki read tools remain available; no Wiki mutation is authorized."));
         }
         llmMessages.AddRange(BuildHistory(thread, userText));
 

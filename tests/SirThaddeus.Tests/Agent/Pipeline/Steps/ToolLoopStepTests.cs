@@ -91,7 +91,7 @@ public class ToolLoopStepTests
     }
 
     [Fact]
-    public async Task Wiki_mutation_target_blocks_mismatched_write_before_mcp()
+    public async Task Wiki_mutation_target_without_operation_blocks_write_before_mcp()
     {
         var llm = new FakeLlm(
             LlmReply.Tool(
@@ -127,12 +127,11 @@ public class ToolLoopStepTests
             Assert.False(mcpCalled);
             var call = Assert.Single(next.ToolCallsMade);
             Assert.False(call.Success);
-            Assert.Contains("wiki_mutation_target_mismatch", call.Result, StringComparison.Ordinal);
+            Assert.Contains("wiki_explicit_operation_required", call.Result, StringComparison.Ordinal);
             Assert.Contains(logEntries, entry =>
                 entry.Event == "EXPERIMENT_ACTIVATION" &&
-                entry.Message.Contains("event=explicit_wiki_mutation_target", StringComparison.Ordinal) &&
-                entry.Message.Contains("decision=activated", StringComparison.Ordinal) &&
-                entry.Message.Contains("outcome=blocked", StringComparison.Ordinal));
+                entry.Message.Contains("event=wiki_explicit_operation_gate", StringComparison.Ordinal) &&
+                entry.Message.Contains("decision=activated", StringComparison.Ordinal));
         }
         finally
         {
@@ -141,12 +140,12 @@ public class ToolLoopStepTests
     }
 
     [Fact]
-    public async Task Wiki_mutation_target_allows_exact_write_to_reach_mcp()
+    public async Task Wiki_mutation_target_with_approved_operation_allows_bound_write_to_reach_mcp()
     {
         var llm = new FakeLlm(
             LlmReply.Tool(
                 "wiki_page_update_by_name",
-                "{\"rootName\":\"Project\",\"pageTitle\":\"Plan\",\"markdown\":\"right\"}"),
+                "{\"markdown\":\"right\"}"),
             LlmReply.Final("Updated."));
         var mcpCalled = false;
         var mcp = new StubMcp(_ =>
@@ -163,13 +162,49 @@ public class ToolLoopStepTests
                 "root-1",
                 "Project",
                 "page-1",
-                "Plan"),
+                "Plan",
+                WikiMutationOperation.PageUpdate),
         };
 
         var result = await step.ExecuteAsync(context, CancellationToken.None);
 
         Assert.IsType<StepResult.Continue>(result);
         Assert.True(mcpCalled);
+    }
+
+    [Fact]
+    public async Task Selected_target_without_operation_projects_reads_only_and_logs_activation()
+    {
+        var llm = new FakeLlm(LlmReply.Final("No write operation is approved."));
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, log: (eventName, message) => logs.Add((eventName, message)));
+        var context = NewContext() with
+        {
+            ToolDefs =
+            [
+                ToolDefinitionFor("wiki_page_read"),
+                ToolDefinitionFor("wiki_page_update_by_name"),
+                ToolDefinitionFor("web_search"),
+            ],
+            WikiMutationTarget = new WikiMutationTarget(
+                WikiMutationTargetKind.Page,
+                "root-1",
+                "Project",
+                "page-1",
+                "Plan"),
+        };
+
+        await step.ExecuteAsync(context, CancellationToken.None);
+
+        var advertised = Assert.Single(llm.ReceivedTools)!;
+        Assert.Equal(
+            ["wiki_page_read", "web_search"],
+            advertised.Select(tool => tool.Function.Name));
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_explicit_operation_gate", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
     }
 
     [Fact]

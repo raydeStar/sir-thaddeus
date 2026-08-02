@@ -130,7 +130,7 @@ public sealed class ToolLoopStep : ITurnStep
                 "label the previous terms first, then call calculator for each derived term."));
         }
 
-        if (context.WikiMutationTarget?.Operation is null &&
+        if (context.WikiMutationTarget is null &&
             string.IsNullOrWhiteSpace(context.ForcedTool))
         {
             forcedToolForNextRound = WikiRootCreateSelectionPolicy.TrySelect(
@@ -199,6 +199,22 @@ public sealed class ToolLoopStep : ITurnStep
                 // advertising another mutation opportunity.
                 tools = null;
                 forcedTool = null;
+            }
+            var explicitOperationProjection = WikiExplicitOperationToolPolicy.Project(
+                context.WikiMutationTarget,
+                tools ?? []);
+            if (explicitOperationProjection.Active)
+            {
+                tools = explicitOperationProjection.Tools;
+                if (!string.IsNullOrWhiteSpace(forcedTool) &&
+                    ToolCapabilityRegistry.ResolveCapability(forcedTool) == ToolCapability.WikiWrite)
+                {
+                    forcedTool = null;
+                }
+            }
+            if (round == 0)
+            {
+                LogWikiExplicitOperationGateActivation(context, explicitOperationProjection);
             }
             if (tools is not null)
             {
@@ -378,6 +394,9 @@ public sealed class ToolLoopStep : ITurnStep
                 var toolName = call.Function.Name;
                 var rawArgs = call.Function.Arguments ?? "{}";
                 var args = ApplyArgsRewriters(context, toolName, rawArgs);
+                var explicitOperationDecision = WikiExplicitOperationToolPolicy.EvaluateCall(
+                    context.WikiMutationTarget,
+                    toolName);
                 var boundEffectBinding = WikiBoundEffectContract.Bind(
                     context.WikiMutationTarget,
                     toolName,
@@ -429,8 +448,14 @@ public sealed class ToolLoopStep : ITurnStep
                     .ConfigureAwait(false);
 
                 var sw = Stopwatch.StartNew();
-                var outcome = boundEffectBinding.Active && !boundEffectBinding.Allowed
+                var outcome = explicitOperationDecision.Active && !explicitOperationDecision.Allowed
                     ? new ToolCallOutcome(
+                        WikiExplicitOperationToolPolicy.BuildBlockedResult(
+                            context.WikiMutationTarget!),
+                        Ok: false,
+                        Error: "wiki_explicit_operation_required")
+                    : boundEffectBinding.Active && !boundEffectBinding.Allowed
+                        ? new ToolCallOutcome(
                         WikiBoundEffectContract.BuildBlockedResult(
                             context.WikiMutationTarget!,
                             boundEffectBinding.Reason),
@@ -675,6 +700,21 @@ public sealed class ToolLoopStep : ITurnStep
             "event=wiki_bound_effect " +
             $"decision={(projection.Active && projection.ToolAvailable ? "activated" : "inactive")} " +
             $"reason={projection.Reason}");
+    }
+
+    private void LogWikiExplicitOperationGateActivation(
+        TurnContext context,
+        WikiExplicitOperationProjection projection)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_explicit_operation_gate " +
+            $"decision={(projection.Active ? "activated" : "inactive")} " +
+            $"withheld_write_tools={projection.WithheldWriteCount}");
     }
 
     private void LogWikiRootDefaultLocationActivation(TurnContext context, bool activated)
