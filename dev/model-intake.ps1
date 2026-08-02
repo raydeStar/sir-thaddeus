@@ -139,10 +139,25 @@ function Invoke-SuiteMeasurement {
 
     $arguments = @('-Suite', $Suite, '-Repeats', $RepeatCount)
     if ($script:HarnessBuildPrepared) { $arguments += '-SkipBuild' }
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $RepeatScript @arguments 2>&1 |
-        ForEach-Object { Write-Host $_.ToString() }
-    if ($LASTEXITCODE -ne 0) {
-        throw "harness-repeat failed for suite '$Suite' with exit code $LASTEXITCODE."
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativePreference = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $previousNativePreference = if ($null -ne $nativePreference) { $nativePreference.Value } else { $null }
+    try {
+        # Harness phase markers are deliberately written to stderr. Capture the
+        # native exit code explicitly so PowerShell 7 does not turn ordinary
+        # progress diagnostics into a terminating NativeCommandError.
+        $ErrorActionPreference = 'Continue'
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $RepeatScript @arguments 2>&1 |
+            ForEach-Object { Write-Host $_.ToString() }
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $previousNativePreference }
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) {
+        throw "harness-repeat failed for suite '$Suite' with exit code $exitCode."
     }
     $script:HarnessBuildPrepared = $true
 
@@ -246,6 +261,10 @@ try {
         $providerPlan | Add-Member -NotePropertyName ready_utc -NotePropertyValue $null -Force
         $providerPlan | Add-Member -NotePropertyName stdout_path -NotePropertyValue $null -Force
         $providerPlan | Add-Member -NotePropertyName stderr_path -NotePropertyValue $null -Force
+        $providerPlan | Add-Member -NotePropertyName ownership_verified -NotePropertyValue $false -Force
+        $providerPlan | Add-Member -NotePropertyName provider_observation -NotePropertyValue $null -Force
+        $providerPlan | Add-Member -NotePropertyName cleanup_verified -NotePropertyValue $false -Force
+        $providerPlan | Add-Member -NotePropertyName cleanup_utc -NotePropertyValue $null -Force
         $providerPlanPath = Join-Path $outputDirectory 'provider-plan.json'
         [IO.File]::WriteAllText($providerPlanPath, ($providerPlan | ConvertTo-Json -Depth 10), $utf8NoBom)
 
@@ -261,6 +280,8 @@ try {
 
         $providerSession = Start-ModelProvider -ProviderPlan $providerPlan -LogDirectory $outputDirectory
         $providerPlan.ready_utc = (Get-Date).ToUniversalTime().ToString('O')
+        $providerPlan.ownership_verified = [bool]$providerSession.ownership_verified
+        $providerPlan.provider_observation = $providerSession.provider_observation
         if ($null -ne $providerSession.process) {
             $providerPlan.process_id = $providerSession.process.Id
             $providerPlan.stdout_path = $providerSession.stdout_path
@@ -341,7 +362,20 @@ try {
     Write-Host "Report:    $reportPath" -ForegroundColor Green
 }
 finally {
-    Stop-ModelProvider -ProviderSession $providerSession
+    $cleanupFailure = $null
+    try {
+        Stop-ModelProvider -ProviderSession $providerSession
+        if ($null -ne $providerSession -and $null -ne $providerPlan) {
+            $providerPlan.cleanup_verified = [bool]$providerSession.cleanup_verified
+            $providerPlan.cleanup_utc = (Get-Date).ToUniversalTime().ToString('O')
+        }
+    }
+    catch {
+        $cleanupFailure = $_
+    }
+    if ($null -ne $providerPlan -and -not [string]::IsNullOrWhiteSpace([string]$providerPlanPath)) {
+        [IO.File]::WriteAllText($providerPlanPath, ($providerPlan | ConvertTo-Json -Depth 12), $utf8NoBom)
+    }
     $env:ST_SETTINGS_PATH = $previousSettingsPath
     $env:ST_HARNESS_SKIP_PREWARM = $previousSkipPrewarm
     $env:ST_HARNESS_DISABLE_FASTPATH = $previousDisableFastPath
@@ -350,4 +384,5 @@ finally {
         Remove-Item -LiteralPath $temporarySettings -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $tempRoot -Force -ErrorAction SilentlyContinue
     }
+    if ($null -ne $cleanupFailure) { throw $cleanupFailure }
 }

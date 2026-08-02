@@ -36,6 +36,14 @@ function Assert-Throws {
 
 try {
     Import-Module $modulePath -Force
+    $adapterModule = Get-Module ModelProviderAdapter
+    $nullablePropertyObject = [pscustomobject]@{ seed = $true }
+    & $adapterModule {
+        param($Object)
+        Set-JsonProperty -Object $Object -Name nullable -Value $null
+    } $nullablePropertyObject
+    Assert-True ($nullablePropertyObject.PSObject.Properties.Name -contains 'nullable') 'Null telemetry property was not added.'
+    Assert-True ($null -eq $nullablePropertyObject.nullable) 'Null telemetry property did not remain null.'
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     $fakeServer = Join-Path $tempRoot 'llama-server.exe'
     $fakeModel = Join-Path $tempRoot 'model.gguf'
@@ -60,6 +68,7 @@ try {
         -GpuOffload max `
         -Parallel 1
     Assert-Equal 'http://127.0.0.1:1234' $lmStudio.base_url 'LM Studio default endpoint changed.'
+    Assert-Equal 'http://127.0.0.1:1234/api/v1/models' $lmStudio.native_models_endpoint 'LM Studio native loaded-instance endpoint changed.'
     Assert-Equal 'lmstudio' $lmStudio.provider 'LM Studio provider identity changed.'
     Assert-Equal 16384 $lmStudio.context_window_tokens 'LM Studio context load control was not recorded.'
     Assert-Equal 'max' $lmStudio.gpu_offload 'LM Studio GPU load control was not recorded.'
@@ -68,6 +77,120 @@ try {
     Assert-True (@($lmStudio.arguments) -contains '--context-length') 'LM Studio context was not included in the exact load arguments.'
     Assert-True (@($lmStudio.arguments) -contains '--gpu') 'LM Studio GPU control was not included in the exact load arguments.'
     Assert-True (@($lmStudio.arguments) -contains '--parallel') 'LM Studio concurrency was not included in the exact load arguments.'
+
+    $inventory = @'
+{
+  "models": [
+    {
+      "key": "unrelated/model",
+      "loaded_instances": []
+    },
+    {
+      "key": "loaded/model",
+      "quantization": { "name": "Q4_K_M", "bits_per_weight": 4 },
+      "size_bytes": 123456,
+      "format": "gguf",
+      "loaded_instances": [
+        {
+          "id": "loaded/model",
+          "config": { "context_length": 16384, "parallel": 1 }
+        }
+      ]
+    }
+  ]
+}
+'@ | ConvertFrom-Json
+    $loadedInstances = @(& $adapterModule {
+        param($InputInventory)
+        ConvertTo-LmStudioLoadedInstances -Inventory $InputInventory
+    } $inventory)
+    Assert-Equal 1 $loadedInstances.Count 'Native inventory did not isolate actual loaded instances.'
+    Assert-Equal 'loaded/model' $loadedInstances[0].instance_id 'Native inventory lost the loaded instance identifier.'
+    Assert-Equal 16384 ([int]$loadedInstances[0].config.context_length) 'Native inventory lost effective context.'
+    Assert-Equal 1 ([int]$loadedInstances[0].config.parallel) 'Native inventory lost effective parallelism.'
+
+    $matchingObservation = [pscustomobject]@{
+        target_loaded_count = 1
+        target_instances = @($loadedInstances[0])
+    }
+    $validatedObservation = & $adapterModule {
+        param($Plan, $Observation)
+        Assert-LmStudioProviderObservation -ProviderPlan $Plan -Observation $Observation
+    } $lmStudio $matchingObservation
+    Assert-Equal 1 $validatedObservation.target_loaded_count 'Exact LM Studio load configuration was not accepted.'
+
+    $wrongContextInventory = $inventory | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+    $wrongContextInventory.models[1].loaded_instances[0].config.context_length = 8192
+    $wrongContextInstances = @(& $adapterModule {
+        param($InputInventory)
+        ConvertTo-LmStudioLoadedInstances -Inventory $InputInventory
+    } $wrongContextInventory)
+    Assert-Throws {
+        & $adapterModule {
+            param($Plan, $Observation)
+            Assert-LmStudioProviderObservation -ProviderPlan $Plan -Observation $Observation
+        } $lmStudio ([pscustomobject]@{ target_loaded_count = 1; target_instances = @($wrongContextInstances[0]) })
+    } 'LM Studio context mismatch was accepted.'
+
+    $validSentinelResponse = [pscustomobject]@{
+        model = 'loaded/model'
+        choices = @([pscustomobject]@{
+            finish_reason = 'stop'
+            message = [pscustomobject]@{ content = 'PROVIDER_SENTINEL_OK' }
+        })
+        usage = [pscustomobject]@{ prompt_tokens = 10; completion_tokens = 3; total_tokens = 13 }
+    }
+    $sentinelShape = & $adapterModule {
+        param($Body)
+        ConvertFrom-ProviderSentinelResponse -ResponseBody $Body
+    } $validSentinelResponse
+    Assert-Equal 20 $sentinelShape.content_chars 'Provider sentinel response content was not validated.'
+    Assert-Equal 13 $sentinelShape.total_tokens 'Provider sentinel usage was not preserved.'
+    Assert-Throws {
+        & $adapterModule {
+            ConvertFrom-ProviderSentinelResponse -ResponseBody ([pscustomobject]@{ choices = @() })
+        }
+    } 'An empty provider sentinel response was accepted.'
+
+    $validToolSentinelResponse = @'
+{
+  "model": "loaded/model",
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call-1",
+            "type": "function",
+            "function": {
+              "name": "report_provider_sentinel",
+              "arguments": "{\"value\":\"PROVIDER_SENTINEL_OK\"}"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+'@ | ConvertFrom-Json
+    $toolSentinelShape = & $adapterModule {
+        param($Body)
+        ConvertFrom-ProviderToolSentinelResponse -ResponseBody $Body
+    } $validToolSentinelResponse
+    Assert-Equal 1 $toolSentinelShape.tool_call_count 'Provider tool sentinel call count was not validated.'
+    Assert-Equal 'report_provider_sentinel' $toolSentinelShape.tool_name 'Provider tool sentinel name was not validated.'
+    Assert-True $toolSentinelShape.exact_value_verified 'Provider tool sentinel argument value was not validated.'
+    $wrongToolSentinelResponse = $validToolSentinelResponse | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+    $wrongToolSentinelResponse.choices[0].message.tool_calls[0].function.arguments = '{"value":"WRONG"}'
+    Assert-Throws {
+        & $adapterModule {
+            param($Body)
+            ConvertFrom-ProviderToolSentinelResponse -ResponseBody $Body
+        } $wrongToolSentinelResponse
+    } 'An incorrect provider tool sentinel argument was accepted.'
 
     $defaultLlama = New-ModelProviderPlan `
         -Backend llamacpp `
@@ -131,7 +254,6 @@ try {
     Assert-Throws { New-ModelProviderPlan -Backend external -BaseUrl 'http://localhost:1234/?secret=x' -ModelId model } 'Provider URL query was accepted.'
     Assert-Throws { New-ModelProviderPlan -Backend llamacpp -ModelId model -LlamaServerPath $fakeServer -ModelPath (Join-Path $tempRoot 'missing.gguf') } 'Missing GGUF was accepted.'
 
-    $adapterModule = Get-Module ModelProviderAdapter
     function global:lms {
         Write-Error 'No models are currently loaded.' -ErrorAction Continue
         $global:LASTEXITCODE = 1
@@ -145,12 +267,29 @@ try {
         Write-Error 'Model unloaded.' -ErrorAction Continue
         $global:LASTEXITCODE = 0
     }
-    Stop-ModelProvider -ProviderSession ([pscustomobject]@{
+    & $adapterModule {
+        Set-Item -Path Function:\Get-LmStudioProviderObservation -Value {
+            param($ProviderPlan)
+            return [pscustomobject]@{
+                endpoint = $ProviderPlan.native_models_endpoint
+                observed_utc = 'test'
+                response_sha256 = 'test'
+                total_loaded_count = 0
+                target_loaded_count = 0
+                target_instances = @()
+            }
+        }
+    }
+    $cleanupSession = [pscustomobject]@{
         process = $null
         loaded_model_id = 'owned/model'
-    })
+        provider_plan = $lmStudio
+        cleanup_verified = $false
+    }
+    Stop-ModelProvider -ProviderSession $cleanupSession
     Assert-Equal 'unload' $global:adapterLmsArguments[0] 'LM Studio cleanup did not use the exact unload command.'
     Assert-Equal 'owned/model' $global:adapterLmsArguments[1] 'LM Studio cleanup targeted the wrong model identifier.'
+    Assert-True $cleanupSession.cleanup_verified 'LM Studio cleanup was not marked verified.'
 
     Write-Host "PASS model provider adapter ($assertions assertions)" -ForegroundColor Green
 }
