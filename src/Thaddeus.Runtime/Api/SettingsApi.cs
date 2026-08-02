@@ -52,6 +52,13 @@ public static class SettingsApi
 
         // Reading status is cache-only. Retest is the sole endpoint allowed to
         // send the bounded synthetic capability prompts to the configured LLM.
+        app.MapGet("/api/settings/model-capabilities",
+            async (ModelCapabilityCertificationService certification, CancellationToken ct) =>
+            {
+                var statuses = await certification.GetStatusesAsync(ct).ConfigureAwait(false);
+                return Results.Json(statuses, SettingsJsonContext.Default.IReadOnlyListModelCapabilityStatus);
+            });
+
         app.MapGet("/api/settings/model-capabilities/wiki-write",
             async (ModelCapabilityCertificationService certification, CancellationToken ct) =>
             {
@@ -59,11 +66,39 @@ public static class SettingsApi
                 return Results.Json(status, SettingsJsonContext.Default.ModelCapabilityStatus);
             });
 
+        app.MapGet("/api/settings/model-capabilities/{capability}",
+            async (string capability, ModelCapabilityCertificationService certification, CancellationToken ct) =>
+            {
+                try
+                {
+                    var status = await certification.GetStatusAsync(capability, ct).ConfigureAwait(false);
+                    return Results.Json(status, SettingsJsonContext.Default.ModelCapabilityStatus);
+                }
+                catch (KeyNotFoundException)
+                {
+                    return Results.NotFound(new { error = "unknown_model_capability" });
+                }
+            });
+
         app.MapPost("/api/settings/model-capabilities/wiki-write/retest",
             async (ModelCapabilityCertificationService certification, CancellationToken ct) =>
             {
                 var status = await certification.RetestWikiWriteAsync(ct).ConfigureAwait(false);
                 return Results.Json(status, SettingsJsonContext.Default.ModelCapabilityStatus);
+            });
+
+        app.MapPost("/api/settings/model-capabilities/{capability}/retest",
+            async (string capability, ModelCapabilityCertificationService certification, CancellationToken ct) =>
+            {
+                try
+                {
+                    var status = await certification.RetestAsync(capability, ct).ConfigureAwait(false);
+                    return Results.Json(status, SettingsJsonContext.Default.ModelCapabilityStatus);
+                }
+                catch (KeyNotFoundException)
+                {
+                    return Results.NotFound(new { error = "unknown_model_capability" });
+                }
             });
 
         // POST /api/settings/test-llm — probes an OpenAI-compatible endpoint
@@ -399,6 +434,7 @@ public sealed record GatekeeperStatusResponse(
 [JsonSerializable(typeof(TestLlmResponse))]
 [JsonSerializable(typeof(GatekeeperStatusResponse))]
 [JsonSerializable(typeof(ModelCapabilityStatus))]
+[JsonSerializable(typeof(IReadOnlyList<ModelCapabilityStatus>))]
 [JsonSerializable(typeof(ModelCapabilityCertificate))]
 [JsonSerializable(typeof(ModelCapabilityProbeResult))]
 // Per-tool overrides map on PermissionsSettings — register the concrete

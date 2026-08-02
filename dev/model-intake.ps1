@@ -4,9 +4,10 @@
     Measures a local model on supported Sir Thaddeus harness suites.
 
 .DESCRIPTION
-    Runs the production baseline repeatedly with temperature 0 and writes an
-    auditable scorecard plus Markdown report. Rejected reasoning strategies do
-    not remain as configurable arms. Partial runs are surfaced explicitly.
+    Runs the production baseline repeatedly with a frozen configuration and
+    writes an auditable scorecard plus Markdown report. Without -ProfilePath,
+    temperature remains 0 for backward compatibility. A profile supplies
+    researched qualification settings before provider startup.
 
     Use -ReuseSummaryPath to regenerate a report from one completed
     harness-repeat summary without loading the model or rerunning inference.
@@ -23,8 +24,11 @@
     dev/model-intake.ps1 -Backend external -ProviderName ollama -BaseUrl http://127.0.0.1:11434 -ModelId gemma3:4b
 #>
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$ModelId,
+    [string]$ModelId = '',
+
+    [string]$ProfilePath = '',
+
+    [string]$ArtifactRoot = '',
 
     [string]$GatekeeperModelId = '',
 
@@ -70,10 +74,6 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-if ([string]::IsNullOrWhiteSpace($GatekeeperModelId)) {
-    $GatekeeperModelId = $ModelId
-}
 if (@($Suites).Count -eq 0 -or @($Suites | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
     throw 'At least one non-empty suite name is required.'
 }
@@ -83,18 +83,39 @@ if (-not [string]::IsNullOrWhiteSpace($ReuseSummaryPath) -and @($Suites).Count -
 if ($PlanOnly -and -not [string]::IsNullOrWhiteSpace($ReuseSummaryPath)) {
     throw '-PlanOnly cannot be combined with -ReuseSummaryPath.'
 }
-if ($Backend -eq 'llamacpp' -and
-    -not [string]::Equals($GatekeeperModelId, $ModelId, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'The managed llama.cpp backend launches one model. GatekeeperModelId must match ModelId; use an external backend for a separately managed gatekeeper.'
-}
-
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $RepeatScript = Join-Path $RepoRoot 'dev/harness-repeat.ps1'
 $ProviderAdapterModule = Join-Path $RepoRoot 'dev/ModelProviderAdapter.psm1'
+$QualificationProfileModule = Join-Path $RepoRoot 'dev/ModelQualificationProfile.psm1'
 $RepeatSummaryDir = Join-Path $RepoRoot 'artifacts/harness-repeat'
 $script:HarnessBuildPrepared = $false
 Set-Location $RepoRoot
 Import-Module $ProviderAdapterModule -Force
+Import-Module $QualificationProfileModule -Force
+
+$qualificationProfile = $null
+if (-not [string]::IsNullOrWhiteSpace($ProfilePath)) {
+    $qualificationProfile = Import-ModelQualificationProfile -Path $ProfilePath -Backend $Backend
+    if (-not [string]::IsNullOrWhiteSpace($ModelId) -and
+        -not [string]::Equals($ModelId, [string]$qualificationProfile.model_id, [StringComparison]::Ordinal)) {
+        throw "ModelId '$ModelId' does not match profile model '$($qualificationProfile.model_id)'."
+    }
+    $ModelId = [string]$qualificationProfile.model_id
+    if ($ContextWindowTokens -gt 0 -and $ContextWindowTokens -ne [int]$qualificationProfile.context_window_tokens) {
+        throw "ContextWindowTokens '$ContextWindowTokens' does not match profile qualification '$($qualificationProfile.context_window_tokens)'."
+    }
+    $ContextWindowTokens = [int]$qualificationProfile.context_window_tokens
+}
+if ([string]::IsNullOrWhiteSpace($ModelId)) {
+    throw 'Pass -ModelId or a -ProfilePath containing model.id.'
+}
+if ([string]::IsNullOrWhiteSpace($GatekeeperModelId)) {
+    $GatekeeperModelId = $ModelId
+}
+if ($Backend -eq 'llamacpp' -and
+    -not [string]::Equals($GatekeeperModelId, $ModelId, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'The managed llama.cpp backend launches one model. GatekeeperModelId must match ModelId; use an external backend for a separately managed gatekeeper.'
+}
 
 function Resolve-SettingsTemplate {
     param([string]$ExplicitPath)
@@ -210,7 +231,10 @@ $providerPlanPath = $null
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $safeModel = $ModelId -replace '[^A-Za-z0-9._-]', '_'
 $safeBackend = $Backend -replace '[^A-Za-z0-9._-]', '_'
-$outputDirectory = Join-Path $RepoRoot "artifacts/model-intake/$stamp-$safeModel-$safeBackend"
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) {
+    $ArtifactRoot = Join-Path $RepoRoot 'artifacts/model-intake'
+}
+$outputDirectory = Join-Path $ArtifactRoot "$stamp-$safeModel-$safeBackend"
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
@@ -250,6 +274,7 @@ try {
             -GpuOffload $GpuOffload `
             -Parallel $Parallel `
             -StartupTimeoutSeconds $StartupTimeoutSeconds `
+            -QualificationProfile $qualificationProfile `
             -HashModel:$shouldHashModel
         New-ModelIntakeSettings `
             -TemplatePath $template `
@@ -319,6 +344,10 @@ try {
         provider_name = if ($null -eq $providerPlan) { $null } else { $providerPlan.provider }
         provider_base_url = if ($null -eq $providerPlan) { $null } else { $providerPlan.base_url }
         provider_plan_path = $providerPlanPath
+        qualification_profile_id = if ($null -eq $qualificationProfile) { $null } else { $qualificationProfile.profile_id }
+        qualification_profile_sha256 = if ($null -eq $qualificationProfile) { $null } else { $qualificationProfile.profile_sha256 }
+        qualification_applied_settings = if ($null -eq $qualificationProfile) { @() } else { @($qualificationProfile.applied_settings) }
+        qualification_unsupported_settings = if ($null -eq $qualificationProfile) { @() } else { @($qualificationProfile.unsupported_settings) }
         repeats = $Repeats
         suites_requested = @($Suites)
         honesty_note = 'Baseline production behavior only. Partial runs are surfaced and no experimental reasoning arms are retained.'
@@ -337,6 +366,10 @@ try {
     if ($null -ne $providerPlan) {
         [void]$report.Add("- Provider: ``$($providerPlan.provider)`` at ``$($providerPlan.base_url)``")
         [void]$report.Add("- Provider plan: ``$providerPlanPath``")
+    }
+    if ($null -ne $qualificationProfile) {
+        [void]$report.Add("- Qualification profile: ``$($qualificationProfile.profile_id)`` (``$($qualificationProfile.profile_sha256)``)")
+        [void]$report.Add("- Unsupported researched controls: $(@($qualificationProfile.unsupported_settings).Count)")
     }
     [void]$report.Add("- Repeats: $Repeats")
     [void]$report.Add('- Mode: production baseline')

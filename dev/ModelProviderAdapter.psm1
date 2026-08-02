@@ -292,11 +292,21 @@ function New-ModelProviderPlan {
         [ValidateRange(1, 3600)]
         [int]$StartupTimeoutSeconds = 120,
 
+        $QualificationProfile,
+
         [switch]$HashModel
     )
 
     Assert-SafeNativeValue -Value $ModelId -Label 'ModelId'
     $normalizedBackend = $Backend.ToLowerInvariant()
+    if ($null -ne $QualificationProfile) {
+        if (-not [string]::Equals([string]$QualificationProfile.model_id, $ModelId, [StringComparison]::Ordinal)) {
+            throw "Qualification profile model '$($QualificationProfile.model_id)' does not match ModelId '$ModelId'."
+        }
+        if (-not [string]::Equals([string]$QualificationProfile.selected_backend, $normalizedBackend, [StringComparison]::Ordinal)) {
+            throw "Qualification profile backend '$($QualificationProfile.selected_backend)' does not match Backend '$normalizedBackend'."
+        }
+    }
     $effectiveProvider = if ([string]::IsNullOrWhiteSpace($ProviderName)) { $normalizedBackend } else { $ProviderName.Trim() }
     Assert-SafeNativeValue -Value $effectiveProvider -Label 'ProviderName'
 
@@ -386,6 +396,21 @@ function New-ModelProviderPlan {
         parallel = $Parallel
         requires_fresh_load = $requiresFreshLoad
         startup_timeout_seconds = $StartupTimeoutSeconds
+        qualification_profile = if ($null -eq $QualificationProfile) { $null } else { [pscustomobject]@{
+            profile_id = $QualificationProfile.profile_id
+            path = $QualificationProfile.profile_path
+            sha256 = $QualificationProfile.profile_sha256
+            sources = @($QualificationProfile.sources)
+            recommended_settings = $QualificationProfile.recommended_settings
+            applied_settings = @($QualificationProfile.applied_settings)
+            unsupported_settings = @($QualificationProfile.unsupported_settings)
+            overrides = @($QualificationProfile.overrides)
+            override_reason = $QualificationProfile.override_reason
+        } }
+        generation = [pscustomobject]@{
+            temperature = if ($null -eq $QualificationProfile) { 0.0 } else { [double]$QualificationProfile.temperature }
+            max_output_tokens = if ($null -eq $QualificationProfile) { $null } else { [int]$QualificationProfile.max_output_tokens }
+        }
         arguments = @($arguments)
     }
 }
@@ -419,7 +444,14 @@ function New-ModelIntakeSettings {
     Set-JsonProperty -Object $settings.llm -Name gatekeeperBaseUrl -Value $ProviderPlan.base_url
     Set-JsonProperty -Object $settings.llm -Name gatekeeperModelId -Value $GatekeeperModelId
     Set-JsonProperty -Object $settings.llm -Name reusePrimaryModelForGatekeeperOnSharedEndpoint -Value $true
-    Set-JsonProperty -Object $settings.llm -Name temperature -Value 0
+    $temperature = if (($ProviderPlan.PSObject.Properties.Name -contains 'generation') -and
+        $null -ne $ProviderPlan.generation) { [double]$ProviderPlan.generation.temperature } else { 0.0 }
+    Set-JsonProperty -Object $settings.llm -Name temperature -Value $temperature
+    if (($ProviderPlan.PSObject.Properties.Name -contains 'generation') -and
+        $null -ne $ProviderPlan.generation -and
+        $null -ne $ProviderPlan.generation.max_output_tokens) {
+        Set-JsonProperty -Object $settings.llm -Name maxTokens -Value ([int]$ProviderPlan.generation.max_output_tokens)
+    }
     if ([int]$ProviderPlan.context_window_tokens -gt 0) {
         Set-JsonProperty -Object $settings.llm -Name contextWindowTokens -Value ([int]$ProviderPlan.context_window_tokens)
     }

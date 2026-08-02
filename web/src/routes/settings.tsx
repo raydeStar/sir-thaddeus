@@ -912,7 +912,7 @@ function ModelsTab({
             onChange={(v) =>
               setDoc({ ...doc, llm: { ...doc.llm, gatekeeperModelId: v || null } })
             }
-            placeholder="liquid/lfm2.5-1.2b"
+            placeholder="Optional verification model ID"
             options={buildModelOptions(testResult?.models ?? [], doc.llm.gatekeeperModelId ?? '')}
           />
         </Field>

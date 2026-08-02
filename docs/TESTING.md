@@ -205,6 +205,25 @@ preserve OpenAI-compatible function calls. That mode requires exactly one call
 to its declared function with the exact requested argument; text that merely
 looks like a tool call fails.
 
+Before loading a new model/provider pair, compile a sourced qualification
+profile with `-PlanOnly`. This validates provenance, exact model identity,
+documented backend support, context, output budget, and generation settings;
+it also records researched controls that the runtime cannot apply:
+
+```powershell
+./dev/model-intake.ps1 `
+  -ProfilePath C:\research\profiles\candidate.json `
+  -Backend external `
+  -ProviderName compatible `
+  -BaseUrl http://127.0.0.1:9000 `
+  -SettingsTemplate ./SirThaddeus.Settings.template.json `
+  -PlanOnly
+```
+
+The schema and architecture are documented in
+[`MODEL_QUALIFICATION_PROFILES.md`](MODEL_QUALIFICATION_PROFILES.md). Profile
+compilation makes zero model calls and does not authorize a benchmark campaign.
+
 Validate a provider plan without starting a server or making a model call:
 
 ```powershell

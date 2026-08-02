@@ -196,31 +196,53 @@ public sealed record RuntimeMemorySettings(bool Enabled);
 /// <summary>User policy for model-dependent capabilities.</summary>
 public sealed record ModelCapabilitySettings(
     string WikiWriteMode = "on",
-    IReadOnlyList<ModelCapabilityCertificate>? WikiWriteCertificates = null)
+    IReadOnlyList<ModelCapabilityCertificate>? WikiWriteCertificates = null,
+    IReadOnlyList<ModelCapabilityPreference>? Preferences = null,
+    IReadOnlyList<ModelCapabilityCertificate>? Certificates = null)
 {
     public bool Equals(ModelCapabilitySettings? other)
     {
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
         return string.Equals(WikiWriteMode, other.WikiWriteMode, StringComparison.Ordinal)
-            && CertificatesEqual(WikiWriteCertificates, other.WikiWriteCertificates);
+            && CertificatesEqual(WikiWriteCertificates, other.WikiWriteCertificates)
+            && SequenceEqual(Preferences, other.Preferences)
+            && CertificatesEqual(Certificates, other.Certificates);
     }
 
     public override int GetHashCode()
     {
         var hash = new HashCode();
         hash.Add(WikiWriteMode, StringComparer.Ordinal);
-        if (WikiWriteCertificates is not null)
+        AddCertificates(ref hash, WikiWriteCertificates);
+        if (Preferences is not null)
         {
-            foreach (var certificate in WikiWriteCertificates)
+            foreach (var preference in Preferences)
             {
-                hash.Add(certificate.Capability, StringComparer.Ordinal);
-                hash.Add(certificate.Status, StringComparer.Ordinal);
-                hash.Add(certificate.ConfigurationFingerprint, StringComparer.Ordinal);
-                hash.Add(certificate.TestedAt);
+                hash.Add(preference.Capability, StringComparer.Ordinal);
+                hash.Add(preference.Mode, StringComparer.Ordinal);
             }
         }
+        AddCertificates(ref hash, Certificates);
         return hash.ToHashCode();
+    }
+
+    private static void AddCertificates(ref HashCode hash, IReadOnlyList<ModelCapabilityCertificate>? certificates)
+    {
+        if (certificates is null) return;
+        foreach (var certificate in certificates)
+        {
+            hash.Add(certificate.Capability, StringComparer.Ordinal);
+            hash.Add(certificate.Status, StringComparer.Ordinal);
+            hash.Add(certificate.ConfigurationFingerprint, StringComparer.Ordinal);
+            hash.Add(certificate.TestedAt);
+        }
+    }
+
+    private static bool SequenceEqual<T>(IReadOnlyList<T>? left, IReadOnlyList<T>? right)
+    {
+        if (left is null || left.Count == 0) return right is null || right.Count == 0;
+        return right is not null && left.SequenceEqual(right);
     }
 
     private static bool CertificatesEqual(
@@ -248,6 +270,9 @@ public sealed record ModelCapabilitySettings(
         return true;
     }
 }
+
+/// <summary>User policy for one registered model-dependent capability.</summary>
+public sealed record ModelCapabilityPreference(string Capability, string Mode);
 
 /// <summary>Cached result of an explicit synthetic capability retest.</summary>
 public sealed record ModelCapabilityCertificate(
@@ -292,7 +317,7 @@ public sealed record SettingsDocument(
             ContextWindowTokens: 16384,
             Temperature: 0.7,
             GatekeeperBaseUrl: null,
-            GatekeeperModelId: "liquid/lfm2.5-1.2b",
+            GatekeeperModelId: null,
             ReusePrimaryForGatekeeperOnSharedEndpoint: false,
             EnableStartupWarmup: true,
             EnableKeepWarm: true,

@@ -66,6 +66,62 @@ public sealed class ModelCapabilityCertificationServiceTests
     }
 
     [Fact]
+    public void Legacy_Wiki_mode_remains_authoritative_after_generic_migration()
+    {
+        var document = ConfiguredDocument();
+        var certificate = PassingCertificate(document.Llm, "test-model");
+        var runtime = new LlmRuntimeHealthSnapshot { ModelLoadedOrReported = "test-model" };
+        var migrated = document with
+        {
+            ModelCapabilities = new ModelCapabilitySettings(
+                WikiWriteMode: "off",
+                WikiWriteCertificates: [certificate],
+                Preferences: [new ModelCapabilityPreference(ModelCapabilityPolicy.WikiWriteCapability, "auto")],
+                Certificates: [certificate]),
+        };
+
+        Assert.False(ModelCapabilityPolicy.IsWikiWriteEnabled(migrated, runtime));
+        Assert.True(ModelCapabilityPolicy.IsWikiWriteEnabled(migrated with
+        {
+            ModelCapabilities = migrated.ModelCapabilities! with { WikiWriteMode = "on" },
+        }, runtime));
+    }
+
+    [Fact]
+    public void Generic_policy_uses_capability_key_without_model_family_branching()
+    {
+        const string capability = "structured_output";
+        const string probeVersion = "structured-output-v1";
+        const string contractVersion = "json-object-v1";
+        var document = ConfiguredDocument();
+        var fingerprint = ModelCapabilityPolicy.CreateConfigurationFingerprint(
+            document.Llm, "test-model", contractVersion, probeVersion);
+        var certificate = new ModelCapabilityCertificate(
+            capability, "certified", fingerprint, document.Llm.ModelId, "test-model",
+            probeVersion, 1, 5, DateTimeOffset.UtcNow,
+            [new ModelCapabilityProbeResult("json_object", true, "pass")]);
+        document = document with
+        {
+            ModelCapabilities = new ModelCapabilitySettings(
+                Preferences: [new ModelCapabilityPreference(capability, "auto")],
+                Certificates: [certificate]),
+        };
+
+        Assert.True(ModelCapabilityPolicy.IsEnabled(
+            document,
+            new LlmRuntimeHealthSnapshot { ModelLoadedOrReported = "test-model" },
+            capability,
+            probeVersion,
+            contractVersion));
+        Assert.False(ModelCapabilityPolicy.IsEnabled(
+            document with { Llm = document.Llm with { Temperature = 0.8 } },
+            new LlmRuntimeHealthSnapshot { ModelLoadedOrReported = "test-model" },
+            capability,
+            probeVersion,
+            contractVersion));
+    }
+
+    [Fact]
     public void Just_tested_certificate_is_stale_if_settings_changed_during_retest()
     {
         var before = ConfiguredDocument();
@@ -111,6 +167,30 @@ public sealed class ModelCapabilityCertificationServiceTests
     }
 
     [Fact]
+    public async Task Capability_matrix_is_cache_only_and_keyed_by_registered_capability()
+    {
+        var document = ConfiguredDocument();
+        var store = new InMemorySettings(document with
+        {
+            ModelCapabilities = new ModelCapabilitySettings("auto", [PassingCertificate(document.Llm, "test-model")]),
+        });
+        var factoryCalls = 0;
+        var runtime = new LlmRuntimeRegistry();
+        runtime.SetStartupSnapshot(new LlmRuntimeHealthSnapshot { ModelLoadedOrReported = "test-model" });
+        var service = new ModelCapabilityCertificationService(
+            store, new FakeMcp(), runtime,
+            NullLogger<ModelCapabilityCertificationService>.Instance,
+            _ => { factoryCalls++; return new ScriptedLlm([]); });
+
+        var statuses = await service.GetStatusesAsync(CancellationToken.None);
+
+        var status = Assert.Single(statuses);
+        Assert.Equal(ModelCapabilityPolicy.WikiWriteCapability, status.Capability);
+        Assert.True(status.Enabled);
+        Assert.Equal(0, factoryCalls);
+    }
+
+    [Fact]
     public async Task Retest_certifies_four_exact_safe_responses_and_caches_result()
     {
         var llm = new ScriptedLlm([
@@ -132,7 +212,11 @@ public sealed class ModelCapabilityCertificationServiceTests
         Assert.Equal(4, status.Certificate!.ModelCalls);
         Assert.Equal(4, llm.ChatCalls);
         Assert.All(status.Certificate.Probes, probe => Assert.True(probe.Passed));
-        Assert.Contains(status.Certificate, (await store.GetAsync(CancellationToken.None)).ModelCapabilities!.WikiWriteCertificates!);
+        var savedCapabilities = (await store.GetAsync(CancellationToken.None)).ModelCapabilities!;
+        Assert.Contains(status.Certificate, savedCapabilities.WikiWriteCertificates!);
+        Assert.Contains(status.Certificate, savedCapabilities.Certificates!);
+        Assert.Contains(savedCapabilities.Preferences!, preference =>
+            preference.Capability == ModelCapabilityPolicy.WikiWriteCapability && preference.Mode == "auto");
     }
 
     [Fact]
@@ -154,6 +238,18 @@ public sealed class ModelCapabilityCertificationServiceTests
         Assert.Equal("limited", status.Status);
         Assert.False(status.Enabled);
         Assert.False(status.Certificate!.Probes.Single(probe => probe.Id == "target_conflict_stop").Passed);
+    }
+
+    [Fact]
+    public async Task Capability_keyed_service_rejects_unknown_registration_without_model_call()
+    {
+        var llm = new ScriptedLlm([]);
+        var service = NewService(new InMemorySettings(ConfiguredDocument()), llm);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.RetestAsync("unknown-capability", CancellationToken.None));
+
+        Assert.Equal(0, llm.ChatCalls);
     }
 
     [SkippableFact]

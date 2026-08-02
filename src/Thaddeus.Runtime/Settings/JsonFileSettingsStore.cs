@@ -213,9 +213,48 @@ public sealed class JsonFileSettingsStore : ISettingsStore
                         .Take(20)
                         .ToArray()
                     : null,
+                Preferences = NormalizeCapabilityPreferences(modelCapabilities.Preferences),
+                Certificates = NormalizeCapabilityCertificates(modelCapabilities.Certificates),
             },
         };
     }
+
+    private static IReadOnlyList<ModelCapabilityPreference>? NormalizeCapabilityPreferences(
+        IReadOnlyList<ModelCapabilityPreference>? preferences)
+    {
+        if (preferences is not { Count: > 0 }) return null;
+        return preferences
+            .Where(preference => !string.IsNullOrWhiteSpace(preference.Capability))
+            .Select(preference => new ModelCapabilityPreference(
+                NormalizeCapabilityName(preference.Capability),
+                NormalizeCapabilityMode(preference.Mode)))
+            .GroupBy(preference => preference.Capability, StringComparer.Ordinal)
+            .Select(group => group.Last())
+            .OrderBy(preference => preference.Capability, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ModelCapabilityCertificate>? NormalizeCapabilityCertificates(
+        IReadOnlyList<ModelCapabilityCertificate>? certificates)
+    {
+        if (certificates is not { Count: > 0 }) return null;
+        return certificates
+            .Where(certificate => !string.IsNullOrWhiteSpace(certificate.Capability))
+            .Select(certificate => certificate with
+            {
+                Capability = NormalizeCapabilityName(certificate.Capability),
+            })
+            .GroupBy(certificate => certificate.Capability, StringComparer.Ordinal)
+            .SelectMany(group => group
+                .OrderByDescending(certificate => certificate.TestedAt)
+                .Take(20))
+            .OrderBy(certificate => certificate.Capability, StringComparer.Ordinal)
+            .ThenByDescending(certificate => certificate.TestedAt)
+            .ToArray();
+    }
+
+    private static string NormalizeCapabilityName(string capability) =>
+        capability.Trim().ToLowerInvariant().Replace('-', '_');
 
     private static string NormalizeCapabilityMode(string? mode) =>
         mode?.Trim().ToLowerInvariant() switch

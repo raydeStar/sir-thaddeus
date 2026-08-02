@@ -6,6 +6,13 @@ the user-controlled capability certificate policy. See
 `Auto / On / Off` contract, fingerprint limits, probe budget, and current Wiki
 write evidence. Certification never replaces permissions or target guards.
 
+New model/provider pairs are described by sourced, pre-load qualification
+profiles rather than production model-family branches. See
+[MODEL_QUALIFICATION_PROFILES.md](MODEL_QUALIFICATION_PROFILES.md). Profiles
+freeze researched configuration and provenance; capability-keyed certificates
+record what the exact observed configuration actually demonstrated. Neither
+profile presence nor ordinary chat success grants a capability.
+
 This document is the production contract for Sir Thaddeus chat orchestration.
 It describes behavior that is active on the default desktop and headless paths,
 the diagnostics that are intentionally supported, and the experiments that have
