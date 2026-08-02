@@ -216,13 +216,27 @@ for ($i = 1; $i -le $Repeats; $i++) {
     # Invoke the harness. Capture stdout for the fallback parser while echoing it.
     $stdoutLines = New-Object System.Collections.ArrayList
     $runStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    & dotnet exec $HarnessAssembly @baseArgs 2>&1 | ForEach-Object {
-        $text = $_
-        if ($_ -is [System.Management.Automation.ErrorRecord]) { $text = $_.ToString() }
-        Write-Host $text
-        [void]$stdoutLines.Add([string]$text)
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativePreference = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $previousNativePreference = if ($null -ne $nativePreference) { $nativePreference.Value } else { $null }
+    try {
+        # The harness writes phase markers to stderr for crash diagnosis. They
+        # are progress records, not PowerShell failures; the native exit code
+        # remains the authoritative completion signal.
+        $ErrorActionPreference = 'Continue'
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        & dotnet exec $HarnessAssembly @baseArgs 2>&1 | ForEach-Object {
+            $text = $_
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $text = $_.ToString() }
+            Write-Host $text
+            [void]$stdoutLines.Add([string]$text)
+        }
+        $harnessExitCode = $LASTEXITCODE
     }
-    $harnessExitCode = $LASTEXITCODE
+    finally {
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $previousNativePreference }
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     $runStopwatch.Stop()
     if ($harnessExitCode -ne 0) {
         Write-Host ("  harness exited with code {0}; collecting any completed results." -f $harnessExitCode) -ForegroundColor DarkYellow

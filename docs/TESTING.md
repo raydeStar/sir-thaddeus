@@ -187,6 +187,24 @@ remains the default. Native llama.cpp can own one exact `llama-server` process,
 while `external` connects to an already-running Ollama or other
 OpenAI-compatible endpoint without taking lifecycle ownership.
 
+Before spending benchmark cases on a provider comparison, run the ownership
+sentinel. It sends one neutral provider request and zero harness cases, records
+the request and response hashes, and proves adapter-owned cleanup:
+
+```powershell
+./dev/provider-sentinel.ps1 `
+  -Backend lmstudio `
+  -ModelId liquid/lfm2.5-1.2b `
+  -ContextWindowTokens 4096 `
+  -GpuOffload max `
+  -Parallel 1
+```
+
+Use `-SentinelMode tool` as a separate protocol gate when the comparison must
+preserve OpenAI-compatible function calls. That mode requires exactly one call
+to its declared function with the exact requested argument; text that merely
+looks like a tool call fails.
+
 Validate a provider plan without starting a server or making a model call:
 
 ```powershell
@@ -214,6 +232,12 @@ For a paired backend comparison, pass the same `-ContextWindowTokens`,
 controls require a fresh model load; intake fails rather than reusing a model
 whose loaded context cannot be attributed. A model loaded by intake is unloaded
 on cleanup, while a pre-existing model is left untouched.
+
+LM Studio's OpenAI `/v1/models` route may include downloaded but unloaded models
+when JIT loading is enabled. Exact-control intake therefore uses the native
+`/api/v1/models` loaded-instance inventory to verify effective context and
+parallelism before inference and to prove the owned instance is absent after
+cleanup. It also refuses an exact run while any unrelated instance is loaded.
 
 The managed llama.cpp default is `127.0.0.1:18080`, deliberately separate from
 Sir Thaddeus's default SearXNG endpoint on port `8080`. Plan generation fails

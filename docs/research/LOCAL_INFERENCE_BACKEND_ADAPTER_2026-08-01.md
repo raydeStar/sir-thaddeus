@@ -74,6 +74,9 @@ quantization, context, prompt, sampling configuration, and item set.
 `dev/ModelProviderAdapter.psm1` owns provider preparation:
 
 - `lmstudio` preserves `lms load` and probes the configured `/v1/models` route;
+- exact LM Studio runs additionally use `/api/v1/models` as the loaded-instance
+  authority, because JIT can make `/v1/models` advertise unloaded catalog
+  entries; effective context and parallelism must match the frozen plan;
 - `llamacpp` validates exact executable and GGUF paths, binds to
   `127.0.0.1`, supplies a stable model alias, aligns provider and runtime
   context, enables `--jinja` and `--metrics`, and probes `/v1/models`;
@@ -98,6 +101,12 @@ quantization, context, prompt, sampling configuration, and item set.
   SearXNG; settings generation also rejects an explicit authority collision;
 - cleanup targets only the captured process object. No name-based or broad
   process termination is used.
+
+`dev/provider-sentinel.ps1` exercises that contract before a benchmark. Its
+default mode makes one deterministic chat request and zero benchmark calls.
+The separate `-SentinelMode tool` gate requires one structurally valid function
+call with an exact argument, so provider-specific template or parser failures
+cannot hide behind ordinary text completion parity.
 
 The temporary runtime settings set provider identity, endpoint, model alias,
 shared gatekeeper endpoint, temperature zero, and the exact native context.
@@ -165,3 +174,33 @@ GGUF and product SHA fixed and compare LM Studio with native llama.cpp on:
 
 Only that campaign can establish whether the backend produces a tooling,
 orchestration, latency, or resource uplift.
+
+## First attributable comparison result
+
+The first complete paired comparison used `liquid/lfm2.5-1.2b` Q4_K_M, the
+same GGUF SHA-256, 4,096-token context, temperature zero, parallelism one, and
+official llama.cpp CUDA release `b10223`.
+
+- LM Studio and standalone llama.cpp both passed the chat ownership sentinel,
+  including exact model identity and cleanup.
+- The six-case solver development run and its reversed-order exact repeat
+  produced byte-identical provider pairs on all 12 comparisons. Both providers
+  scored `0/6` in each run and emitted no tool calls, so this is behavior parity
+  on a failed no-tool slice, not a benchmark uplift.
+- Native llama.cpp did not establish an efficiency win. On the exact repeat its
+  warm median was 435 ms versus 278 ms for LM Studio, while whole-campaign time
+  was 5.63 seconds versus 5.38 seconds. The six-item tail figures are
+  descriptive only.
+- The separate forced-tool sentinel passed on LM Studio and failed on official
+  llama.cpp with zero parsed tool calls. The native `/props` contract reported
+  tool-capable template metadata but a `Content-only` chat format. Upstream
+  llama.cpp documentation warns that function calling can require a model-
+  appropriate tool-use template override even with `--jinja`.
+
+**Verdict:** the managed native adapter and ownership sentinel are useful,
+reproducible research infrastructure. Do not make this standalone llama.cpp
+configuration the default for tool-capable LFM2.5 research, and do not claim a
+tooling, orchestration, or latency uplift. A future candidate requires a
+documented, independently justified LFM2 tool-use template or upstream parser
+support and a fresh protocol gate; do not tune templates against the consumed
+solver outputs.
