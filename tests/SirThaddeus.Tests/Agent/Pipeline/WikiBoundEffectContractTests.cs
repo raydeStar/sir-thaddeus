@@ -28,6 +28,7 @@ public sealed class WikiBoundEffectContractTests
         Assert.DoesNotContain("rootName", json, StringComparison.Ordinal);
         Assert.DoesNotContain("pageTitle", json, StringComparison.Ordinal);
         Assert.DoesNotContain("pageId", json, StringComparison.Ordinal);
+        Assert.Contains("must never be copied", tool.Function.Description, StringComparison.Ordinal);
     }
 
     [Fact]

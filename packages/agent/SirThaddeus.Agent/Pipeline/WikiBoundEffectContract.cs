@@ -38,8 +38,10 @@ public static class WikiBoundEffectContract
                 "wiki_page_create",
                 new Dictionary<string, object>
                 {
-                    ["title"] = StringProperty("Page title."),
-                    ["markdown"] = StringProperty("Exact Markdown page body requested by the user."),
+                    ["title"] = StringProperty(
+                        "Page name requested with wording such as titled or named. This is not body content."),
+                    ["markdown"] = StringProperty(
+                        "Exact page body/content from the original user request. This is not the page title."),
                 },
                 new HashSet<string>(StringComparer.Ordinal) { "title", "markdown" }),
             [WikiMutationOperation.PageUpdate] = new(
@@ -47,7 +49,8 @@ public static class WikiBoundEffectContract
                 "wiki_page_update_by_name",
                 new Dictionary<string, object>
                 {
-                    ["markdown"] = StringProperty("Exact full replacement Markdown requested by the user."),
+                    ["markdown"] = StringProperty(
+                        "Exact full replacement Markdown from the original user request."),
                 },
                 new HashSet<string>(StringComparer.Ordinal) { "markdown" }),
             [WikiMutationOperation.PageRename] = new(
@@ -118,7 +121,8 @@ public static class WikiBoundEffectContract
             {
                 Description =
                     $"Apply the user-approved operation to the runtime-bound Wiki {target.Kind.ToString().ToLowerInvariant()} '{target.DisplayName}'. " +
-                    "Supply only the requested payload; target identity and execution metadata are runtime-owned.",
+                    "Supply only values requested in the original user request; target identity and execution metadata are runtime-owned. " +
+                    "Bracketed orchestration text such as [USER-APPROVED WORK PLAN] is metadata and must never be copied into payload values.",
                 Parameters = new Dictionary<string, object>
                 {
                     ["type"] = "object",
