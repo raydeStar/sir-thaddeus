@@ -117,84 +117,129 @@ internal sealed class HeadlessRuntimeHarnessClient : IHarnessHostAdapter
                 "State setup and observations require the v2 hybrid harness target.");
         }
 
-        var totalStopwatch = Stopwatch.StartNew();
+        using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        itemCts.CancelAfter(GetItemTimeout());
+        var itemToken = itemCts.Token;
+        var phase = "runtime_start";
 
-        EnsureRuntimeBuilt();
-        var warmupStopwatch = Stopwatch.StartNew();
-        await EnsureRuntimeProcessAsync(cancellationToken);
-        warmupStopwatch.Stop();
-        var warmupSeconds = _processSpawnedThisCall ? warmupStopwatch.Elapsed.TotalSeconds : 0;
-        _processSpawnedThisCall = false;
-
-        var resetStopwatch = Stopwatch.StartNew();
-        await ApplyHarnessResetAsync(test, cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(test.PersonalityId))
+        try
         {
-            await SetActivePersonalityAsync(test.PersonalityId!, cancellationToken);
-        }
+            var totalStopwatch = Stopwatch.StartNew();
 
-        var auditBaseline = await GetAuditEntriesAsync(cancellationToken);
-        resetStopwatch.Stop();
-        var resetSeconds = resetStopwatch.Elapsed.TotalSeconds;
+            WriteHarnessPhase(test.Id, phase);
+            EnsureRuntimeBuilt();
+            var warmupStopwatch = Stopwatch.StartNew();
+            await EnsureRuntimeProcessAsync(itemToken);
+            warmupStopwatch.Stop();
+            var warmupSeconds = _processSpawnedThisCall ? warmupStopwatch.Elapsed.TotalSeconds : 0;
+            _processSpawnedThisCall = false;
 
-        var workStopwatch = Stopwatch.StartNew();
-        var auditCaptureStart = DateTimeOffset.UtcNow;
-        var usageBefore = await GetLlmUsageAsync(cancellationToken);
-        var startResponse = await PostChatAsync(test.UserMessage, cancellationToken);
-        var runOutcome = await ReadRunToCompletionAsync(startResponse.RunId, cancellationToken);
-        var fullToolEvidence = await GetHarnessToolEvidenceAsync(startResponse.RunId, cancellationToken);
-        var usageAfter = await GetLlmUsageAsync(cancellationToken);
-        workStopwatch.Stop();
-        var workSeconds = workStopwatch.Elapsed.TotalSeconds;
+            var resetStopwatch = Stopwatch.StartNew();
+            phase = "reset";
+            WriteHarnessPhase(test.Id, phase);
+            await ApplyHarnessResetAsync(test, itemToken);
 
-        var auditEntries = FilterNewAuditEntries(
-            auditCaptureStart,
-            auditBaseline,
-            await GetAuditEntriesAsync(cancellationToken));
-
-        var trace = BuildToolTraceFromAudit(auditEntries);
-        var (toolCalls, toolTurns, steps) = ToolEvidenceTraceEnricher.Enrich(trace, fullToolEvidence);
-
-        var finalSteps = steps.ToList();
-        finalSteps.Add(new TraceStep
-        {
-            StepIndex = finalSteps.Count + 1,
-            StepType = "final_response",
-            StartedAt = DateTimeOffset.UtcNow,
-            Content = runOutcome.FinalText
-        });
-
-        var response = new AgentResponse
-        {
-            Text = runOutcome.FinalText,
-            Success = runOutcome.Success,
-            Error = runOutcome.Success ? null : runOutcome.Error,
-            ToolCallsMade = toolCalls,
-            LlmRoundTrips = (int)Math.Max(0, usageAfter.RequestCount - usageBefore.RequestCount),
-            TokenUsage = new AgentTokenUsage
+            if (!string.IsNullOrWhiteSpace(test.PersonalityId))
             {
-                TokensIn = (int)Math.Max(0, usageAfter.PromptTokens - usageBefore.PromptTokens),
-                TokensOut = (int)Math.Max(0, usageAfter.CompletionTokens - usageBefore.CompletionTokens),
-                TotalTokens = (int)Math.Max(0, usageAfter.TotalTokens - usageBefore.TotalTokens),
-                ContextWindowTokens = usageAfter.ContextWindowTokens
-            },
-            Sources = runOutcome.Sources
-        };
+                phase = "personality";
+                WriteHarnessPhase(test.Id, phase);
+                await SetActivePersonalityAsync(test.PersonalityId!, itemToken);
+            }
 
-        totalStopwatch.Stop();
+            phase = "audit_baseline";
+            WriteHarnessPhase(test.Id, phase);
+            var auditBaseline = await GetAuditEntriesAsync(itemToken);
+            resetStopwatch.Stop();
+            var resetSeconds = resetStopwatch.Elapsed.TotalSeconds;
 
-        return new HostExecutionResult
+            var workStopwatch = Stopwatch.StartNew();
+            var auditCaptureStart = DateTimeOffset.UtcNow;
+            phase = "usage_before";
+            WriteHarnessPhase(test.Id, phase);
+            var usageBefore = await GetLlmUsageAsync(itemToken);
+            phase = "chat_start";
+            WriteHarnessPhase(test.Id, phase);
+            var startResponse = await PostChatAsync(test.UserMessage, itemToken);
+            phase = "chat_events";
+            WriteHarnessPhase(test.Id, phase);
+            var runOutcome = await ReadRunToCompletionAsync(startResponse.RunId, itemToken);
+            phase = "tool_evidence";
+            WriteHarnessPhase(test.Id, phase);
+            var fullToolEvidence = await GetHarnessToolEvidenceAsync(startResponse.RunId, itemToken);
+            phase = "usage_after";
+            WriteHarnessPhase(test.Id, phase);
+            var usageAfter = await GetLlmUsageAsync(itemToken);
+            workStopwatch.Stop();
+            var workSeconds = workStopwatch.Elapsed.TotalSeconds;
+
+            phase = "audit_final";
+            WriteHarnessPhase(test.Id, phase);
+            var auditEntries = FilterNewAuditEntries(
+                auditCaptureStart,
+                auditBaseline,
+                await GetAuditEntriesAsync(itemToken));
+
+            var trace = BuildToolTraceFromAudit(auditEntries);
+            var (toolCalls, toolTurns, steps) = ToolEvidenceTraceEnricher.Enrich(trace, fullToolEvidence);
+
+            var finalSteps = steps.ToList();
+            finalSteps.Add(new TraceStep
+            {
+                StepIndex = finalSteps.Count + 1,
+                StepType = "final_response",
+                StartedAt = DateTimeOffset.UtcNow,
+                Content = runOutcome.FinalText
+            });
+
+            var response = new AgentResponse
+            {
+                Text = runOutcome.FinalText,
+                Success = runOutcome.Success,
+                Error = runOutcome.Success ? null : runOutcome.Error,
+                ToolCallsMade = toolCalls,
+                LlmRoundTrips = (int)Math.Max(0, usageAfter.RequestCount - usageBefore.RequestCount),
+                TokenUsage = new AgentTokenUsage
+                {
+                    TokensIn = (int)Math.Max(0, usageAfter.PromptTokens - usageBefore.PromptTokens),
+                    TokensOut = (int)Math.Max(0, usageAfter.CompletionTokens - usageBefore.CompletionTokens),
+                    TotalTokens = (int)Math.Max(0, usageAfter.TotalTokens - usageBefore.TotalTokens),
+                    ContextWindowTokens = usageAfter.ContextWindowTokens
+                },
+                Sources = runOutcome.Sources
+            };
+
+            totalStopwatch.Stop();
+
+            return new HostExecutionResult
+            {
+                Response = response,
+                Steps = finalSteps,
+                ToolTurns = toolTurns,
+                Timing = new HarnessTiming(
+                    RuntimeWarmupSeconds: warmupSeconds,
+                    ResetSeconds: resetSeconds,
+                    TestWorkSeconds: workSeconds,
+                    TotalSeconds: totalStopwatch.Elapsed.TotalSeconds)
+            };
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            Response = response,
-            Steps = finalSteps,
-            ToolTurns = toolTurns,
-            Timing = new HarnessTiming(
-                RuntimeWarmupSeconds: warmupSeconds,
-                ResetSeconds: resetSeconds,
-                TestWorkSeconds: workSeconds,
-                TotalSeconds: totalStopwatch.Elapsed.TotalSeconds)
-        };
+            throw new TimeoutException(
+                $"Harness item '{test.Id}' timed out during phase '{phase}' after {GetItemTimeout().TotalSeconds:0}s.");
+        }
+    }
+
+    private static void WriteHarnessPhase(string itemId, string phase)
+        => Console.Error.WriteLine($"[harness] item={itemId} phase={phase}");
+
+    private static TimeSpan GetItemTimeout()
+        => ParseItemTimeout(Environment.GetEnvironmentVariable("ST_HARNESS_ITEM_TIMEOUT_SECONDS"));
+
+    internal static TimeSpan ParseItemTimeout(string? raw)
+    {
+        return int.TryParse(raw, out var seconds)
+            ? TimeSpan.FromSeconds(Math.Clamp(seconds, 10, 600))
+            : TimeSpan.FromSeconds(120);
     }
 
     /// <summary>

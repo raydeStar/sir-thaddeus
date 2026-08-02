@@ -257,8 +257,29 @@ function New-ModelIntakeSettings {
 
 function Test-LmStudioModelLoaded {
     param([Parameter(Mandatory = $true)][string]$ModelId)
-    $lines = & lms ps 2>&1 | ForEach-Object { [string]$_ }
-    return (($lines -join "`n").Contains($ModelId))
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativePreference = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $previousNativePreference = if ($null -ne $nativePreference) { $nativePreference.Value } else { $null }
+    try {
+        # `lms ps` reports the ordinary empty state on stderr with a non-zero
+        # exit code. Capture it explicitly so strict PowerShell error handling
+        # does not turn "nothing loaded" into a lifecycle failure.
+        $ErrorActionPreference = 'Continue'
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        $lines = @(& lms ps 2>&1 | ForEach-Object { [string]$_ })
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $previousNativePreference }
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    $output = $lines -join "`n"
+    if ($exitCode -ne 0 -and -not $output.Contains('No models are currently loaded.')) {
+        throw "LM Studio failed to list loaded models (exit $exitCode): $output"
+    }
+    return $output.Contains($ModelId)
 }
 
 function Initialize-LmStudioModel {
@@ -299,9 +320,23 @@ function Initialize-LmStudioModel {
 function Remove-LmStudioModel {
     param([Parameter(Mandatory = $true)][string]$ModelId)
 
-    & lms unload $ModelId 2>&1 | ForEach-Object { Write-Host $_.ToString() }
-    if ($LASTEXITCODE -ne 0) {
-        throw "LM Studio failed to unload adapter-owned model '$ModelId' (exit $LASTEXITCODE)."
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativePreference = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $previousNativePreference = if ($null -ne $nativePreference) { $nativePreference.Value } else { $null }
+    try {
+        # The CLI can print a successful unload on stderr. The native exit code,
+        # not the PowerShell stream chosen by the CLI, is authoritative.
+        $ErrorActionPreference = 'Continue'
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        & lms unload $ModelId 2>&1 | ForEach-Object { Write-Host $_.ToString() }
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $previousNativePreference }
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) {
+        throw "LM Studio failed to unload adapter-owned model '$ModelId' (exit $exitCode)."
     }
 }
 
