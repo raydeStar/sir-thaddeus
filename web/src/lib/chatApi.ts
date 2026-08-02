@@ -14,9 +14,16 @@ export type WikiChatContextInput =
   | { mode: 'folder'; rootId: string; folderId: string }
   | { mode: 'page'; pageId: string };
 
+export type WikiMutationOperationInput =
+  | 'page_create'
+  | 'page_update'
+  | 'page_rename'
+  | 'page_delete'
+  | 'root_rename';
+
 export type WikiMutationTargetInput =
-  | { mode: 'root'; rootId: string }
-  | { mode: 'page'; pageId: string };
+  | { mode: 'root'; rootId: string; operation?: WikiMutationOperationInput }
+  | { mode: 'page'; pageId: string; operation?: WikiMutationOperationInput };
 
 function token(): string {
   return readRuntimeMetadata().token;

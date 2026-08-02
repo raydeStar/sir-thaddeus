@@ -120,6 +120,7 @@ public sealed class ToolLoopStep : ITurnStep
         // exactly one reconciliation round before adopting a draft.
         var reconciliationNudges = 0;
         var useDefaultWikiRootLocationContract = false;
+        var boundEffectAttempted = false;
 
         if (ShouldAddCalculatorSetupHint(context))
         {
@@ -129,7 +130,8 @@ public sealed class ToolLoopStep : ITurnStep
                 "label the previous terms first, then call calculator for each derived term."));
         }
 
-        if (string.IsNullOrWhiteSpace(context.ForcedTool))
+        if (context.WikiMutationTarget?.Operation is null &&
+            string.IsNullOrWhiteSpace(context.ForcedTool))
         {
             forcedToolForNextRound = WikiRootCreateSelectionPolicy.TrySelect(
                 context.UserText,
@@ -173,6 +175,31 @@ public sealed class ToolLoopStep : ITurnStep
             IReadOnlyList<ToolDefinition>? tools = context.ToolDefs.Count > 0
                 ? context.ToolDefs
                 : null;
+            if (round == 0)
+            {
+                var boundEffect = string.IsNullOrWhiteSpace(forcedTool)
+                    ? WikiBoundEffectContract.Project(context.WikiMutationTarget, tools ?? [])
+                    : new WikiBoundEffectProjection(
+                        Active: false,
+                        ToolAvailable: false,
+                        ToolName: null,
+                        Tools: tools ?? [],
+                        Reason: "upstream-forced-tool");
+                LogWikiBoundEffectActivation(context, boundEffect);
+                if (boundEffect.Active)
+                {
+                    tools = boundEffect.ToolAvailable ? boundEffect.Tools : null;
+                    forcedTool = boundEffect.ToolAvailable ? boundEffect.ToolName : null;
+                }
+            }
+            else if (boundEffectAttempted)
+            {
+                // The approved effect is a one-shot contract. After its single
+                // attempt, let the model summarize the observed result without
+                // advertising another mutation opportunity.
+                tools = null;
+                forcedTool = null;
+            }
             if (tools is not null)
             {
                 var temporalProjectedTools = WikiRootTemporalDeferralToolPolicy.Project(
@@ -351,6 +378,15 @@ public sealed class ToolLoopStep : ITurnStep
                 var toolName = call.Function.Name;
                 var rawArgs = call.Function.Arguments ?? "{}";
                 var args = ApplyArgsRewriters(context, toolName, rawArgs);
+                var boundEffectBinding = WikiBoundEffectContract.Bind(
+                    context.WikiMutationTarget,
+                    toolName,
+                    args);
+                if (boundEffectBinding.Active)
+                {
+                    boundEffectAttempted = true;
+                    args = boundEffectBinding.Arguments;
+                }
                 if (!redirectedBatch)
                 {
                     var toolSteering = await _executionControl.ReachCheckpointAsync(
@@ -393,9 +429,16 @@ public sealed class ToolLoopStep : ITurnStep
                     .ConfigureAwait(false);
 
                 var sw = Stopwatch.StartNew();
-                var outcome = await ExecuteSingleCallAsync(
-                        context, toolName, args, activityId, pureComputeResults, cancellationToken)
-                    .ConfigureAwait(false);
+                var outcome = boundEffectBinding.Active && !boundEffectBinding.Allowed
+                    ? new ToolCallOutcome(
+                        WikiBoundEffectContract.BuildBlockedResult(
+                            context.WikiMutationTarget!,
+                            boundEffectBinding.Reason),
+                        Ok: false,
+                        Error: "wiki_bound_effect_mismatch")
+                    : await ExecuteSingleCallAsync(
+                            context, toolName, args, activityId, pureComputeResults, cancellationToken)
+                        .ConfigureAwait(false);
                 sw.Stop();
 
                 await _sink.ToolCompletedAsync(
@@ -617,6 +660,21 @@ public sealed class ToolLoopStep : ITurnStep
             $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
             "event=wiki_root_non_action_pruning " +
             $"decision={(activated ? "activated" : "inactive")}");
+    }
+
+    private void LogWikiBoundEffectActivation(
+        TurnContext context,
+        WikiBoundEffectProjection projection)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_bound_effect " +
+            $"decision={(projection.Active && projection.ToolAvailable ? "activated" : "inactive")} " +
+            $"reason={projection.Reason}");
     }
 
     private void LogWikiRootDefaultLocationActivation(TurnContext context, bool activated)

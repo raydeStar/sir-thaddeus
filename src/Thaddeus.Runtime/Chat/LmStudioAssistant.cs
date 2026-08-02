@@ -287,7 +287,16 @@ public sealed partial class LmStudioAssistant : IAssistant
                 preferredUnits: PreferredUnits,
                 offlineMode: OfflineMode)),
         };
-        if (options.WikiMutationTarget is { } mutationTarget)
+        if (options.WikiMutationTarget is { Operation: { } operation } boundTarget)
+        {
+            llmMessages.Add(LlmChatMessage.System(
+                "[USER-APPROVED WIKI EFFECT]\n" +
+                $"The user explicitly chose to {WikiBoundEffectContract.DisplayName(operation)} on the " +
+                $"Wiki {boundTarget.Kind.ToString().ToLowerInvariant()} '{boundTarget.DisplayName}' for this submission. " +
+                "The runtime owns target identity, placement, concurrency, permission, and verification. " +
+                "Call the single supplied function once and provide only its payload fields. Do not invent target fields."));
+        }
+        else if (options.WikiMutationTarget is { } mutationTarget)
         {
             llmMessages.Add(LlmChatMessage.System(
                 "[USER-SELECTED WIKI WRITE TARGET]\n" +

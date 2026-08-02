@@ -175,6 +175,26 @@ public sealed class WikiChatContextServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ResolveMutationTargetAsync_carries_only_compatible_approved_operation()
+    {
+        var pageId = await CreatePageAsync("Bound Page", "Keep");
+
+        var pageTarget = await _service.ResolveMutationTargetAsync(
+            new WikiMutationTargetRequest("page", PageId: pageId, Operation: "page_rename"),
+            CancellationToken.None);
+        Assert.Equal(SirThaddeus.Agent.Pipeline.WikiMutationOperation.PageRename, pageTarget!.Operation);
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.ResolveMutationTargetAsync(
+                new WikiMutationTargetRequest("page", PageId: pageId, Operation: "root_rename"),
+                CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.ResolveMutationTargetAsync(
+                new WikiMutationTargetRequest("page", PageId: pageId, Operation: "unknown"),
+                CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ResolveMutationTargetAsync_resolves_existing_root_and_rejects_unsupported_scope()
     {
         var root = await _wiki.CreateRootAsync("Operations", null, CancellationToken.None);

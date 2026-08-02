@@ -173,6 +173,64 @@ public class ToolLoopStepTests
     }
 
     [Fact]
+    public async Task Approved_wiki_effect_forces_payload_only_tool_and_binds_runtime_target_once()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("wiki_page_update_by_name", "{\"markdown\":\"Approved replacement\"}"),
+            LlmReply.Final("Updated."));
+        var mcpCalls = new List<(string Tool, string Arguments)>();
+        var mcp = new StubMcp((tool, arguments) =>
+        {
+            mcpCalls.Add((tool, arguments));
+            return "{\"ok\":true,\"version\":2}";
+        });
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, mcp: mcp, log: (eventName, message) => logs.Add((eventName, message)));
+        var context = NewContext() with
+        {
+            ToolDefs =
+            [
+                ToolDefinitionFor("wiki_page_update_by_name"),
+                ToolDefinitionFor("wiki_page_read"),
+            ],
+            WikiMutationTarget = new WikiMutationTarget(
+                WikiMutationTargetKind.Page,
+                "root-1",
+                "Project",
+                "page-1",
+                "Plan",
+                WikiMutationOperation.PageUpdate),
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Equal("Updated.", next.AssistantDraft);
+        Assert.Equal(["wiki_page_update_by_name", null], llm.ForcedToolNames);
+
+        var projected = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<ToolDefinition>>(llm.ReceivedTools[0]));
+        Assert.Equal("wiki_page_update_by_name", projected.Function.Name);
+        var projectedSchema = JsonSerializer.Serialize(projected.Function.Parameters);
+        Assert.Contains("markdown", projectedSchema, StringComparison.Ordinal);
+        Assert.DoesNotContain("rootName", projectedSchema, StringComparison.Ordinal);
+        Assert.DoesNotContain("pageTitle", projectedSchema, StringComparison.Ordinal);
+        Assert.Null(llm.ReceivedTools[1]);
+
+        var execution = Assert.Single(mcpCalls);
+        Assert.Equal("wiki_page_update_by_name", execution.Tool);
+        using var arguments = JsonDocument.Parse(execution.Arguments);
+        Assert.Equal("Project", arguments.RootElement.GetProperty("rootName").GetString());
+        Assert.Equal("Plan", arguments.RootElement.GetProperty("pageTitle").GetString());
+        Assert.Equal("Approved replacement", arguments.RootElement.GetProperty("markdown").GetString());
+        Assert.Single(next.ToolCallsMade);
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_bound_effect", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Interceptor_claims_call_and_MCP_is_not_invoked()
     {
         // An interceptor that owns the tool name short-circuits MCP —
