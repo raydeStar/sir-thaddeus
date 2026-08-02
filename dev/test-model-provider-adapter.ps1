@@ -131,6 +131,14 @@ try {
     Assert-Throws { New-ModelProviderPlan -Backend external -BaseUrl 'http://localhost:1234/?secret=x' -ModelId model } 'Provider URL query was accepted.'
     Assert-Throws { New-ModelProviderPlan -Backend llamacpp -ModelId model -LlamaServerPath $fakeServer -ModelPath (Join-Path $tempRoot 'missing.gguf') } 'Missing GGUF was accepted.'
 
+    $adapterModule = Get-Module ModelProviderAdapter
+    function global:lms {
+        Write-Error 'No models are currently loaded.' -ErrorAction Continue
+        $global:LASTEXITCODE = 1
+    }
+    $emptyStateLoaded = & $adapterModule { Test-LmStudioModelLoaded -ModelId 'absent/model' }
+    Assert-True (-not $emptyStateLoaded) 'The ordinary LM Studio empty state was treated as a lifecycle failure.'
+
     $global:adapterLmsArguments = @()
     function global:lms {
         $global:adapterLmsArguments = @($args)
