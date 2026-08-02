@@ -14,7 +14,7 @@ namespace SirThaddeus.LlmClient;
 /// Sends chat completion requests with optional tool definitions and
 /// parses tool_calls from the response.
 /// </summary>
-public sealed class LmStudioClient : ILlmClient, ILlmUsageTelemetry, ILlmRuntimeDiagnostics, ILlmWarmupClient, IDisposable
+public sealed class LmStudioClient : IConfigurableLlmClient
 {
     private static readonly TimeSpan ModelDiscoveryTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan ModelLoadTimeout = TimeSpan.FromSeconds(10);

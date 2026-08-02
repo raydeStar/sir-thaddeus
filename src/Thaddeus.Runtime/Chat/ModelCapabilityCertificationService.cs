@@ -109,7 +109,7 @@ public sealed class ModelCapabilityCertificationService
         LlmRuntimeRegistry runtime,
         ILogger<ModelCapabilityCertificationService> logger)
         : this(settings, mcp, runtime, logger, llm =>
-            new LmStudioClient(AssistantRouter.ToClientOptions(llm)))
+            LlmClientFactory.Create(AssistantRouter.ToClientOptions(llm)))
     {
     }
 

@@ -91,7 +91,7 @@ public sealed class LocalModelJudgeClient
         };
 
         using var httpClient = new HttpClient();
-        var llm = new LmStudioClient(options, httpClient);
+        using var llm = LlmClientFactory.Create(options, httpClient);
 
         var messages = new List<ChatMessage>
         {

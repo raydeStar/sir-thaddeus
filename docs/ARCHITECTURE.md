@@ -127,7 +127,7 @@ The original repo documentation described a five-layer split. That model still a
 | Runtime host | [src/Thaddeus.Runtime/](../src/Thaddeus.Runtime/) | Loopback API, static asset hosting, WebSocket broadcasting, local stores, sidecar composition |
 | Workspace UI | [web/](../web/) | Chat, wiki, memory, routines, settings, diagnostics, onboarding, activity, compact experience |
 | Assistant and orchestration | [src/Thaddeus.Runtime/Chat/](../src/Thaddeus.Runtime/Chat/), [packages/agent/](../packages/agent/) | Routing, history shaping, memory/personality injection, tool loop, validation and repair |
-| Model integration | [packages/llm-client/](../packages/llm-client/) | OpenAI-compatible chat client, token budgets, endpoint abstraction |
+| Model integration | [packages/llm-client/](../packages/llm-client/) | Provider-neutral client factory, OpenAI-compatible and CLI transports, token budgets, endpoint abstraction |
 | Tools and knowledge | [apps/mcp-server/](../apps/mcp-server/), [packages/mcp-tools-core/](../packages/mcp-tools-core/), [packages/mcp-tools-windows/](../packages/mcp-tools-windows/), [packages/wiki/](../packages/wiki/) | Web, file, system, screen, semantic memory, and wiki capabilities |
 | Voice | [apps/voice-host/](../apps/voice-host/), [apps/voice-backend/](../apps/voice-backend/), [src/Thaddeus.Tts.Abstractions/](../src/Thaddeus.Tts.Abstractions/), [src/Thaddeus.Tts.Kokoro/](../src/Thaddeus.Tts.Kokoro/), [src/Thaddeus.Tts.Piper.Legacy/](../src/Thaddeus.Tts.Piper.Legacy/) | Speech-to-text, text-to-speech, voice sidecar startup, local model assets |
 
@@ -142,6 +142,11 @@ The original repo documentation described a five-layer split. That model still a
 | Knowledge and memory | [packages/memory/](../packages/memory/), [packages/memory-sqlite/](../packages/memory-sqlite/), [packages/wiki/](../packages/wiki/) | Retrieved semantic memory, SQLite storage, core pinned memory, and the local wiki canvas |
 | Platform and infrastructure | [packages/config/](../packages/config/), [packages/core/](../packages/core/), [packages/runtime-host/](../packages/runtime-host/), [packages/logging/](../packages/logging/), [packages/startup-diagnostics/](../packages/startup-diagnostics/), [packages/voice/](../packages/voice/) | Configuration, logging, runtime helpers, diagnostics, shared voice contracts |
 | Legacy and harness | [apps/headless-runtime/](../apps/headless-runtime/), [tools/](../tools/) | Older runtime surface, harnesses, migration and transition support |
+
+Product and research hosts construct model clients through
+`LlmClientFactory` and retain only the `IConfigurableLlmClient` contract.
+Concrete transports remain private implementation choices at that boundary;
+adding or replacing a backend must not require a second orchestration path.
 
 ## User-Facing Feature Inventory
 

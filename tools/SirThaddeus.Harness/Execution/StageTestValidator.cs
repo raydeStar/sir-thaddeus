@@ -44,14 +44,15 @@ internal sealed class StageTestValidator
         var preprocessor = new RequestPreprocessor();
         IRequestClassifier? classifier = null;
         PipelineQueryBuilder? queryBuilder = null;
+        IConfigurableLlmClient? classifierLlm = null;
 
         if (classifyEnabled)
         {
             try
             {
                 var settings = SirThaddeus.Config.SettingsManager.Load();
-                var llm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildPrimary(settings));
-                var router = new DefaultRouter(llm, new DeterministicUtilityEngineAdapter());
+                classifierLlm = LlmClientFactory.Create(RuntimeLlmOptionsFactory.BuildPrimary(settings));
+                var router = new DefaultRouter(classifierLlm, new DeterministicUtilityEngineAdapter());
                 classifier = new RequestClassifier(router);
                 queryBuilder = new PipelineQueryBuilder();
             }
@@ -62,11 +63,18 @@ internal sealed class StageTestValidator
             }
         }
 
-        foreach (var test in tests)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var result = await ValidateSingleAsync(test, target, defaultUserCity, preprocessor, classifier, queryBuilder, cancellationToken);
-            results.Add(result);
+            foreach (var test in tests)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var result = await ValidateSingleAsync(test, target, defaultUserCity, preprocessor, classifier, queryBuilder, cancellationToken);
+                results.Add(result);
+            }
+        }
+        finally
+        {
+            classifierLlm?.Dispose();
         }
 
         return results;

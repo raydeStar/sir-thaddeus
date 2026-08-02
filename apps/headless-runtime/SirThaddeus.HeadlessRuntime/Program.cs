@@ -131,8 +131,8 @@ else
     await EnsureManagedSearxngSerializedAsync(settings, CancellationToken.None);
 }
 
-using var llm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildPrimary(settings));
-using var gatekeeperLlm = new LmStudioClient(RuntimeLlmOptionsFactory.BuildGatekeeper(settings));
+using var llm = LlmClientFactory.Create(RuntimeLlmOptionsFactory.BuildPrimary(settings));
+using var gatekeeperLlm = LlmClientFactory.Create(RuntimeLlmOptionsFactory.BuildGatekeeper(settings));
 
 var mcp = await RuntimeMcpClientFactory.CreateAsync(
     enableTools: options.EnableTools,
