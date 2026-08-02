@@ -99,6 +99,10 @@ Write-Section "Policy Guard (No Device Geolocation)"
 & "$PSScriptRoot\check-no-device-geolocation.ps1" -RepoRoot $RepoRoot
 if ($LASTEXITCODE -ne 0) { Fail "Device geolocation policy guard failed (exit code $LASTEXITCODE)." $LASTEXITCODE }
 
+Write-Section "Model Provider Adapter Contract"
+& "$PSScriptRoot\test-model-provider-adapter.ps1"
+if ($LASTEXITCODE -ne 0) { Fail "Model provider adapter contract failed (exit code $LASTEXITCODE)." $LASTEXITCODE }
+
 # ── Optional restore ──────────────────────────────────────────
 if ($effectiveRestore) {
     Write-Section "Restore"
