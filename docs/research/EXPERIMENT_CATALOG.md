@@ -1,6 +1,6 @@
 # Experiment Catalog
 
-This is a compact index of material Sir Thaddeus experiments through July 30,
+This is a compact index of material Sir Thaddeus experiments through August 2,
 2026. It records reusable conclusions, not hidden benchmark content. Exact
 manifests, commands, artifact hashes, and verdicts live in the sibling private
 `local-benchmark-runner` repository under `experiments/`.
@@ -127,6 +127,8 @@ manifests, commands, artifact hashes, and verdicts live in the sibling private
 | Rename tool pruning v4 | **Rejected on resources** | Classification worked, but pruning caused a hard p95 regression. |
 | Pre-MCP rename execution guard v5 | **Inconclusive, then retired** | The guard blocked attempted writes but showed no final-state uplift while the exact-only tool already failed closed. It was retained only to test guarded label tolerance. |
 | Guarded decorated root-label resolver v6 | **Rejected; mechanism family closed** | Authorized state improved `1/8` to `6/8` with five wins and zero losses, but two of eight non-actions became unauthorized writes, safety scored `5/6`, and no-action p95 was `1.586x` v5. All temporary Wiki rename branches were removed. |
+| Typed unresolved Wiki-target termination v1-v3 | **Rejected after disjoint safety validation** | Neutral typed stops repeatedly added four or five unresolved-target wins and cut calls/tokens, but v2 intercepted two non-action controls and intent-gated v3 intercepted a valid rename after semantic page-title misbinding. V3 validation improved `4/18 -> 8/18` with zero paired losses and calls `61 -> 43`, yet missed the five-win floor and failed the zero-valid-target-activation gate. Typed failures prove only that attempted arguments did not resolve, not that the user's target is absent. Do not add another lexical rename repair. |
+| Folder-qualified page-create schema v1-v2 | **Rejected; schema-only containment closed** | After an evaluator-contract correction on a fresh slice, requiring `folderName` improved verified containment `6/10 -> 8/10` with two wins, zero losses, `6/6` intended and `0/4` control activations. It missed the four-win floor, left two tool omissions unchanged, and increased calls `33 -> 36` plus tokens `36,063 -> 37,560`. Schema requirements can constrain an attempted call but cannot create tool commitment. |
 
 ## Product latency and reliability campaign
 
