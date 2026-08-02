@@ -69,6 +69,13 @@ try {
     Assert-True (@($lmStudio.arguments) -contains '--gpu') 'LM Studio GPU control was not included in the exact load arguments.'
     Assert-True (@($lmStudio.arguments) -contains '--parallel') 'LM Studio concurrency was not included in the exact load arguments.'
 
+    $defaultLlama = New-ModelProviderPlan `
+        -Backend llamacpp `
+        -ModelId 'research/model' `
+        -LlamaServerPath $fakeServer `
+        -ModelPath $fakeModel
+    Assert-Equal 'http://127.0.0.1:18080' $defaultLlama.base_url 'Default llama.cpp endpoint must avoid the SearXNG default port.'
+
     $llama = New-ModelProviderPlan `
         -Backend llamacpp `
         -ModelId 'research/model' `
@@ -105,6 +112,20 @@ try {
     Assert-Equal 0 ([double]$settings.llm.temperature) 'Model intake must retain deterministic temperature zero.'
     Assert-Equal 8192 ([int]$settings.llm.contextWindowTokens) 'Runtime and provider contexts must match.'
     Assert-True ([bool]$settings.llm.reusePrimaryModelForGatekeeperOnSharedEndpoint) 'A shared intake endpoint must reuse its loaded model.'
+
+    $collidingLlama = New-ModelProviderPlan `
+        -Backend llamacpp `
+        -ModelId 'research/model' `
+        -LlamaServerPath $fakeServer `
+        -ModelPath $fakeModel `
+        -Port 8080
+    Assert-Throws {
+        New-ModelIntakeSettings `
+            -TemplatePath (Join-Path $repoRoot 'SirThaddeus.Settings.template.json') `
+            -ProviderPlan $collidingLlama `
+            -GatekeeperModelId 'research/model' `
+            -DestinationPath (Join-Path $tempRoot 'colliding-settings.json')
+    } 'A llama.cpp endpoint collision with SearXNG was accepted.'
 
     Assert-Throws { New-ModelProviderPlan -Backend external -BaseUrl 'file:///tmp/model' -ModelId model } 'Non-HTTP provider URL was accepted.'
     Assert-Throws { New-ModelProviderPlan -Backend external -BaseUrl 'http://localhost:1234/?secret=x' -ModelId model } 'Provider URL query was accepted.'
