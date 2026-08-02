@@ -83,6 +83,12 @@ function New-ModelProviderPlan {
         [ValidateRange(0, 1048576)]
         [int]$ContextWindowTokens = 0,
 
+        [ValidateSet('', 'auto', 'max', 'off')]
+        [string]$GpuOffload = '',
+
+        [ValidateRange(0, 64)]
+        [int]$Parallel = 0,
+
         [ValidateRange(1, 3600)]
         [int]$StartupTimeoutSeconds = 120,
 
@@ -100,10 +106,29 @@ function New-ModelProviderPlan {
     $resolvedModelPath = $null
     $modelSha256 = $null
     $arguments = @()
+    $requiresFreshLoad = $false
 
     switch ($normalizedBackend) {
         'lmstudio' {
             if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $BaseUrl = 'http://127.0.0.1:1234' }
+            $arguments = @('load', (Quote-NativeValue -Value $ModelId), '-y', '--identifier', (Quote-NativeValue -Value $ModelId))
+            if ($ContextWindowTokens -gt 0) {
+                $arguments += @('--context-length', [string]$ContextWindowTokens)
+                $requiresFreshLoad = $true
+            }
+            if (-not [string]::IsNullOrWhiteSpace($GpuOffload) -and $GpuOffload -ne 'auto') {
+                $arguments += @('--gpu', $GpuOffload)
+                $requiresFreshLoad = $true
+            }
+            if ($Parallel -gt 0) {
+                $arguments += @('--parallel', [string]$Parallel)
+                $requiresFreshLoad = $true
+            }
+            $lmsCommand = Get-Command lms -ErrorAction SilentlyContinue
+            if ($null -ne $lmsCommand -and (Test-Path -LiteralPath $lmsCommand.Source -PathType Leaf)) {
+                $executablePath = $lmsCommand.Source
+                $executableSha256 = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
         }
         'external' {
             if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
@@ -117,6 +142,7 @@ function New-ModelProviderPlan {
             $resolvedModelPath = Resolve-RequiredFile -Path $ModelPath -Label 'ModelPath'
             if ($Port -eq 0) { $Port = 8080 }
             if ($ContextWindowTokens -eq 0) { $ContextWindowTokens = 16384 }
+            if ($Parallel -eq 0) { $Parallel = 1 }
             $BaseUrl = "http://127.0.0.1:$Port"
             if ($HashModel) {
                 $modelSha256 = (Get-FileHash -LiteralPath $resolvedModelPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -127,6 +153,13 @@ function New-ModelProviderPlan {
                 '--host', '127.0.0.1',
                 '--port', [string]$Port,
                 '-c', [string]$ContextWindowTokens,
+                '--gpu-layers', $(
+                    if ($GpuOffload -eq 'off') { '0' }
+                    elseif ($GpuOffload -eq 'max') { 'all' }
+                    else { 'auto' }
+                ),
+                '--parallel', [string]$Parallel,
+                '--flash-attn', 'auto',
                 '--jinja',
                 '--metrics'
             )
@@ -148,6 +181,9 @@ function New-ModelProviderPlan {
         model_path = $resolvedModelPath
         model_sha256 = $modelSha256
         context_window_tokens = $ContextWindowTokens
+        gpu_offload = if ([string]::IsNullOrWhiteSpace($GpuOffload)) { 'auto' } else { $GpuOffload }
+        parallel = $Parallel
+        requires_fresh_load = $requiresFreshLoad
         startup_timeout_seconds = $StartupTimeoutSeconds
         arguments = @($arguments)
     }
@@ -194,24 +230,27 @@ function Test-LmStudioModelLoaded {
 }
 
 function Initialize-LmStudioModel {
-    param([Parameter(Mandatory = $true)][string]$ModelId)
+    param([Parameter(Mandatory = $true)]$ProviderPlan)
 
     if ($null -eq (Get-Command lms -ErrorAction SilentlyContinue)) {
         throw "LM Studio CLI 'lms' was not found on PATH. Start LM Studio and enable its CLI."
     }
-    if (Test-LmStudioModelLoaded -ModelId $ModelId) {
-        Write-Host "Model '$ModelId' is already loaded." -ForegroundColor Green
-        return
+    if (Test-LmStudioModelLoaded -ModelId $ProviderPlan.model_id) {
+        if ($ProviderPlan.requires_fresh_load) {
+            throw "Model '$($ProviderPlan.model_id)' is already loaded, so its context/GPU/parallel settings cannot be attributed. Unload it before an exact-control run."
+        }
+        Write-Host "Model '$($ProviderPlan.model_id)' is already loaded." -ForegroundColor Green
+        return $false
     }
 
-    Write-Host "Loading '$ModelId' through LM Studio..." -ForegroundColor Yellow
+    Write-Host "Loading '$($ProviderPlan.model_id)' through LM Studio with the recorded provider plan..." -ForegroundColor Yellow
     $previousErrorActionPreference = $ErrorActionPreference
     $nativePreference = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
     $previousNativePreference = if ($null -ne $nativePreference) { $nativePreference.Value } else { $null }
     try {
         $ErrorActionPreference = 'Continue'
         if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $false }
-        & lms load $ModelId -y 2>&1 | ForEach-Object { Write-Host $_.ToString() }
+        & lms @($ProviderPlan.arguments) 2>&1 | ForEach-Object { Write-Host $_.ToString() }
         $exitCode = $LASTEXITCODE
     }
     finally {
@@ -219,8 +258,18 @@ function Initialize-LmStudioModel {
         $ErrorActionPreference = $previousErrorActionPreference
     }
 
-    if ($exitCode -ne 0 -or -not (Test-LmStudioModelLoaded -ModelId $ModelId)) {
-        throw "LM Studio failed to load '$ModelId' reliably (exit $exitCode)."
+    if ($exitCode -ne 0 -or -not (Test-LmStudioModelLoaded -ModelId $ProviderPlan.model_id)) {
+        throw "LM Studio failed to load '$($ProviderPlan.model_id)' reliably (exit $exitCode)."
+    }
+    return $true
+}
+
+function Remove-LmStudioModel {
+    param([Parameter(Mandatory = $true)][string]$ModelId)
+
+    & lms unload $ModelId 2>&1 | ForEach-Object { Write-Host $_.ToString() }
+    if ($LASTEXITCODE -ne 0) {
+        throw "LM Studio failed to unload adapter-owned model '$ModelId' (exit $LASTEXITCODE)."
     }
 }
 
@@ -273,13 +322,24 @@ function Start-ModelProvider {
 
     New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null
     if ($ProviderPlan.backend -eq 'lmstudio') {
-        Initialize-LmStudioModel -ModelId $ProviderPlan.model_id
-        Wait-ModelProviderEndpoint -ProviderPlan $ProviderPlan
-        return [pscustomobject]@{ process = $null; stdout_path = $null; stderr_path = $null }
+        $loadedByAdapter = Initialize-LmStudioModel -ProviderPlan $ProviderPlan
+        try {
+            Wait-ModelProviderEndpoint -ProviderPlan $ProviderPlan
+            return [pscustomobject]@{
+                process = $null
+                stdout_path = $null
+                stderr_path = $null
+                loaded_model_id = if ($loadedByAdapter) { $ProviderPlan.model_id } else { $null }
+            }
+        }
+        catch {
+            if ($loadedByAdapter) { Remove-LmStudioModel -ModelId $ProviderPlan.model_id }
+            throw
+        }
     }
     if ($ProviderPlan.backend -eq 'external') {
         Wait-ModelProviderEndpoint -ProviderPlan $ProviderPlan
-        return [pscustomobject]@{ process = $null; stdout_path = $null; stderr_path = $null }
+        return [pscustomobject]@{ process = $null; stdout_path = $null; stderr_path = $null; loaded_model_id = $null }
     }
 
     if (Test-ModelProviderEndpoint -ProviderPlan $ProviderPlan) {
@@ -298,7 +358,7 @@ function Start-ModelProvider {
         -PassThru
     try {
         Wait-ModelProviderEndpoint -ProviderPlan $ProviderPlan -Process $process
-        return [pscustomobject]@{ process = $process; stdout_path = $stdoutPath; stderr_path = $stderrPath }
+        return [pscustomobject]@{ process = $process; stdout_path = $stdoutPath; stderr_path = $stderrPath; loaded_model_id = $null }
     }
     catch {
         if (-not $process.HasExited) {
@@ -313,7 +373,11 @@ function Stop-ModelProvider {
     [CmdletBinding()]
     param($ProviderSession)
 
-    if ($null -eq $ProviderSession -or $null -eq $ProviderSession.process) { return }
+    if ($null -eq $ProviderSession) { return }
+    if (-not [string]::IsNullOrWhiteSpace([string]$ProviderSession.loaded_model_id)) {
+        Remove-LmStudioModel -ModelId $ProviderSession.loaded_model_id
+    }
+    if ($null -eq $ProviderSession.process) { return }
     $process = $ProviderSession.process
     if (-not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue

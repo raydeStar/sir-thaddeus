@@ -83,9 +83,16 @@ quantization, context, prompt, sampling configuration, and item set.
 - `external` requires an explicit HTTP(S) base URL, probes it, and never starts
   or stops a process;
 - every live native llama.cpp run hashes both `llama-server` and the GGUF;
+- context, GPU offload, and parallel-slot controls are recorded and applied to
+  both managed backends; an explicitly controlled LM Studio arm requires a
+  fresh load instead of trusting unknown resident settings;
+- LM Studio models loaded by intake are unloaded during cleanup, while
+  pre-existing loaded models are never unloaded by the adapter;
 - native stdout/stderr, the exact argument vector, endpoint, readiness time,
   PID, settings hash, and artifact hashes are retained in
   `provider-plan.json`;
+- artifact directories include both model and backend identity so paired arms
+  cannot overwrite one another even when they start in the same second;
 - cleanup targets only the captured process object. No name-based or broad
   process termination is used.
 
@@ -105,6 +112,8 @@ Validate a native plan without launching anything or calling a model:
   -LlamaServerPath C:\tools\llama.cpp\llama-server.exe `
   -ModelPath D:\models\gemma-4-12b-it-q4_k_xl.gguf `
   -ContextWindowTokens 16384 `
+  -GpuOffload max `
+  -Parallel 1 `
   -PlanOnly
 ```
 
@@ -117,6 +126,8 @@ Run the existing intake battery with a managed native server:
   -LlamaServerPath C:\tools\llama.cpp\llama-server.exe `
   -ModelPath D:\models\gemma-4-12b-it-q4_k_xl.gguf `
   -ContextWindowTokens 16384 `
+  -GpuOffload max `
+  -Parallel 1 `
   -Suites python-probe,solver-probe `
   -Repeats 3
 ```
