@@ -9,6 +9,8 @@ namespace SirThaddeus.Harness.Scoring;
 
 public sealed class ScoringEngine
 {
+    private const string EmptyResponseFallback = "(The model returned an empty response.)";
+
     private static readonly Regex MultipleChoiceLetterOnlyPromptPattern = new(
         @"\breply\s+with\s+only\s+A,\s+B,\s+C,\s+or\s+D\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -378,7 +380,16 @@ public sealed class ScoringEngine
         var final = response.Text ?? string.Empty;
         var checks = new List<RubricCheckResult>();
 
-        Add(checks, "final_response_present", !string.IsNullOrWhiteSpace(final), "hard", "Final response text must be present.");
+        var hasRealFinalResponse = !string.IsNullOrWhiteSpace(final) &&
+            !final.Trim().Equals(EmptyResponseFallback, StringComparison.OrdinalIgnoreCase);
+        Add(
+            checks,
+            "final_response_present",
+            hasRealFinalResponse,
+            "hard",
+            hasRealFinalResponse
+                ? "Final response text is present."
+                : "Final response text must contain a real model outcome, not an empty-response fallback.");
 
         if (test.Expectations.RequireJson)
         {
