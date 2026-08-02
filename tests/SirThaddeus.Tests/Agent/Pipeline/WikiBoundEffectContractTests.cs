@@ -85,6 +85,33 @@ public sealed class WikiBoundEffectContractTests
     }
 
     [Fact]
+    public void Binding_removes_runtime_owned_work_plan_suffix_from_payload()
+    {
+        var binding = WikiBoundEffectContract.Bind(
+            PageTarget(WikiMutationOperation.PageUpdate),
+            "wiki_page_update_by_name",
+            "{\"markdown\":\"# Shift Brief\\n- All checks passed\\n[USER-APPROVED WORK PLAN]\\n1. Internal step\"}");
+
+        Assert.True(binding.Allowed);
+        using var document = JsonDocument.Parse(binding.Arguments);
+        Assert.Equal(
+            "# Shift Brief\n- All checks passed",
+            document.RootElement.GetProperty("markdown").GetString());
+    }
+
+    [Fact]
+    public void Binding_rejects_required_payload_that_contains_only_runtime_metadata()
+    {
+        var binding = WikiBoundEffectContract.Bind(
+            PageTarget(WikiMutationOperation.PageUpdate),
+            "wiki_page_update_by_name",
+            "{\"markdown\":\"[USER-APPROVED WORK PLAN]\\n1. Internal step\"}");
+
+        Assert.False(binding.Allowed);
+        Assert.Equal("invalid-payload", binding.Reason);
+    }
+
+    [Fact]
     public void Contract_is_inactive_without_approved_operation_and_fails_closed_when_tool_is_missing()
     {
         var inactive = WikiBoundEffectContract.Project(PageTarget(null), [Tool("wiki_page_read")]);

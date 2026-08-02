@@ -24,6 +24,8 @@ public sealed record WikiBoundEffectBinding(
 /// </summary>
 public static class WikiBoundEffectContract
 {
+    public const string ApprovedWorkPlanMarker = "[USER-APPROVED WORK PLAN]";
+
     private sealed record OperationContract(
         WikiMutationTargetKind TargetKind,
         string ToolName,
@@ -210,7 +212,7 @@ public static class WikiBoundEffectContract
                 if (!contract.Properties.ContainsKey(property.Name) ||
                     property.Value.ValueKind != JsonValueKind.String)
                     return false;
-                payload[property.Name] = property.Value.GetString();
+                payload[property.Name] = StripRuntimeOwnedSuffix(property.Value.GetString());
             }
 
             foreach (var name in contract.Required)
@@ -226,5 +228,17 @@ public static class WikiBoundEffectContract
         {
             return false;
         }
+    }
+
+    private static string? StripRuntimeOwnedSuffix(string? value)
+    {
+        if (value is null)
+            return null;
+
+        var markerIndex = value.IndexOf(ApprovedWorkPlanMarker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+            return value;
+
+        return value[..markerIndex].TrimEnd('\r', '\n');
     }
 }
