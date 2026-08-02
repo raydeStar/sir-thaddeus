@@ -182,6 +182,31 @@ assemblies for each isolated repeat. `-SkipBuild` is available when a parent
 campaign such as `model-intake.ps1` has already prepared both Debug assemblies.
 Do not use it after source changes unless you have rebuilt first.
 
+For model intake across local providers, use `dev/model-intake.ps1`. LM Studio
+remains the default. Native llama.cpp can own one exact `llama-server` process,
+while `external` connects to an already-running Ollama or other
+OpenAI-compatible endpoint without taking lifecycle ownership.
+
+Validate a provider plan without starting a server or making a model call:
+
+```powershell
+./dev/model-intake.ps1 `
+  -Backend llamacpp `
+  -ModelId <stable-model-alias> `
+  -LlamaServerPath <path-to-llama-server.exe> `
+  -ModelPath <path-to-model.gguf> `
+  -ContextWindowTokens 16384 `
+  -PlanOnly
+```
+
+Live native runs automatically hash the server executable and GGUF, retain the
+exact provider plan and logs under `artifacts/model-intake/`, wait for
+`/v1/models`, and stop only the process they started. `-HashModel` adds the GGUF
+hash to a plan-only artifact as well. See
+[the backend adapter decision](research/LOCAL_INFERENCE_BACKEND_ADAPTER_2026-08-01.md)
+for commands, evidence, and the boundary between infrastructure promotion and
+backend benchmark claims.
+
 The v2 hybrid adapter builds both `Thaddeus.Runtime` and the separately launched
 `SirThaddeus.McpServer` before its first case. This is required for experiments
 that change MCP tool implementations; rebuilding only the runtime can otherwise

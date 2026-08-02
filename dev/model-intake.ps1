@@ -17,6 +17,10 @@
     dev/model-intake.ps1 -ModelId my/new-model -Suites python-probe,solver-probe -Repeats 5
 .EXAMPLE
     dev/model-intake.ps1 -ModelId lfm2.5-8b-a1b -Suites python-probe -Repeats 1 -ReuseSummaryPath artifacts/harness-repeat/20260709_215509-python-probe.json
+.EXAMPLE
+    dev/model-intake.ps1 -Backend llamacpp -ModelId gemma-4-12b-it -LlamaServerPath C:\llama.cpp\llama-server.exe -ModelPath D:\models\gemma-4-12b-it.gguf -PlanOnly
+.EXAMPLE
+    dev/model-intake.ps1 -Backend external -ProviderName ollama -BaseUrl http://127.0.0.1:11434 -ModelId gemma3:4b
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -31,7 +35,31 @@ param(
 
     [string]$SettingsTemplate = '',
 
-    [string]$ReuseSummaryPath = ''
+    [string]$ReuseSummaryPath = '',
+
+    [ValidateSet('lmstudio', 'llamacpp', 'external')]
+    [string]$Backend = 'lmstudio',
+
+    [string]$ProviderName = '',
+
+    [string]$BaseUrl = '',
+
+    [string]$LlamaServerPath = '',
+
+    [string]$ModelPath = '',
+
+    [ValidateRange(0, 65535)]
+    [int]$Port = 0,
+
+    [ValidateRange(0, 1048576)]
+    [int]$ContextWindowTokens = 0,
+
+    [ValidateRange(1, 3600)]
+    [int]$StartupTimeoutSeconds = 120,
+
+    [switch]$HashModel,
+
+    [switch]$PlanOnly
 )
 
 Set-StrictMode -Version Latest
@@ -46,26 +74,21 @@ if (@($Suites).Count -eq 0 -or @($Suites | Where-Object { [string]::IsNullOrWhit
 if (-not [string]::IsNullOrWhiteSpace($ReuseSummaryPath) -and @($Suites).Count -ne 1) {
     throw '-ReuseSummaryPath requires exactly one suite.'
 }
+if ($PlanOnly -and -not [string]::IsNullOrWhiteSpace($ReuseSummaryPath)) {
+    throw '-PlanOnly cannot be combined with -ReuseSummaryPath.'
+}
+if ($Backend -eq 'llamacpp' -and
+    -not [string]::Equals($GatekeeperModelId, $ModelId, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'The managed llama.cpp backend launches one model. GatekeeperModelId must match ModelId; use an external backend for a separately managed gatekeeper.'
+}
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $RepeatScript = Join-Path $RepoRoot 'dev/harness-repeat.ps1'
+$ProviderAdapterModule = Join-Path $RepoRoot 'dev/ModelProviderAdapter.psm1'
 $RepeatSummaryDir = Join-Path $RepoRoot 'artifacts/harness-repeat'
 $script:HarnessBuildPrepared = $false
 Set-Location $RepoRoot
-
-function Set-JsonProperty {
-    param(
-        [Parameter(Mandatory = $true)]$Object,
-        [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)]$Value
-    )
-    if ($Object.PSObject.Properties.Name -contains $Name) {
-        $Object.$Name = $Value
-    }
-    else {
-        $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
-    }
-}
+Import-Module $ProviderAdapterModule -Force
 
 function Resolve-SettingsTemplate {
     param([string]$ExplicitPath)
@@ -82,70 +105,6 @@ function Resolve-SettingsTemplate {
         throw "Could not discover settings at '$candidate'. Pass -SettingsTemplate to override."
     }
     return (Resolve-Path -LiteralPath $candidate).Path
-}
-
-function New-PatchedSettings {
-    param(
-        [string]$TemplatePath,
-        [string]$PrimaryModelId,
-        [string]$RouterModelId,
-        [string]$DestinationPath
-    )
-
-    $settings = Get-Content -LiteralPath $TemplatePath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not ($settings.PSObject.Properties.Name -contains 'llm') -or $null -eq $settings.llm) {
-        $settings | Add-Member -NotePropertyName llm -NotePropertyValue ([pscustomobject]@{}) -Force
-    }
-    Set-JsonProperty -Object $settings.llm -Name model -Value $PrimaryModelId
-    Set-JsonProperty -Object $settings.llm -Name gatekeeperModelId -Value $RouterModelId
-    Set-JsonProperty -Object $settings.llm -Name temperature -Value 0
-
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [IO.File]::WriteAllText(
-        $DestinationPath,
-        ($settings | ConvertTo-Json -Depth 32),
-        $utf8NoBom)
-}
-
-function Assert-LmStudioCli {
-    if ($null -eq (Get-Command lms -ErrorAction SilentlyContinue)) {
-        throw "LM Studio CLI 'lms' was not found on PATH. Start LM Studio and enable its CLI."
-    }
-}
-
-function Test-ModelLoaded {
-    param([string]$RequestedModelId)
-    $lines = & lms ps 2>&1 | ForEach-Object { [string]$_ }
-    return (($lines -join "`n").Contains($RequestedModelId))
-}
-
-function Ensure-ModelLoaded {
-    param([string]$RequestedModelId)
-    if (Test-ModelLoaded -RequestedModelId $RequestedModelId) {
-        Write-Host "Model '$RequestedModelId' is already loaded." -ForegroundColor Green
-        return
-    }
-
-    Write-Host "Loading '$RequestedModelId' through LM Studio..." -ForegroundColor Yellow
-    $previousErrorActionPreference = $ErrorActionPreference
-    $nativePreference = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
-    $previousNativePreference = if ($null -ne $nativePreference) { $nativePreference.Value } else { $null }
-    try {
-        $ErrorActionPreference = 'Continue'
-        if ($null -ne $nativePreference) { $PSNativeCommandUseErrorActionPreference = $false }
-        & lms load $RequestedModelId -y 2>&1 | ForEach-Object { Write-Host $_.ToString() }
-        $exitCode = $LASTEXITCODE
-    }
-    finally {
-        if ($null -ne $nativePreference) {
-            $PSNativeCommandUseErrorActionPreference = $previousNativePreference
-        }
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
-
-    if ($exitCode -ne 0 -or -not (Test-ModelLoaded -RequestedModelId $RequestedModelId)) {
-        throw "LM Studio failed to load '$RequestedModelId' reliably (exit $exitCode)."
-    }
 }
 
 function Get-SuiteItemCount {
@@ -205,12 +164,16 @@ function Format-Percent {
 if (-not (Test-Path -LiteralPath $RepeatScript)) {
     throw "harness-repeat script not found at '$RepeatScript'."
 }
+if (-not (Test-Path -LiteralPath $ProviderAdapterModule)) {
+    throw "provider adapter module not found at '$ProviderAdapterModule'."
+}
 
 Write-Host ""
 Write-Host '========================================================================' -ForegroundColor Cyan
 Write-Host 'MODEL INTAKE - PRODUCTION BASELINE' -ForegroundColor Cyan
 Write-Host "model:      $ModelId" -ForegroundColor Cyan
 Write-Host "gatekeeper: $GatekeeperModelId" -ForegroundColor Cyan
+Write-Host "backend:    $Backend" -ForegroundColor Cyan
 Write-Host "suites:     $($Suites -join ', ')" -ForegroundColor Cyan
 Write-Host "repeats:    $Repeats" -ForegroundColor Cyan
 Write-Host '========================================================================' -ForegroundColor Cyan
@@ -219,6 +182,14 @@ $previousSettingsPath = $env:ST_SETTINGS_PATH
 $previousSkipPrewarm = $env:ST_HARNESS_SKIP_PREWARM
 $previousDisableFastPath = $env:ST_HARNESS_DISABLE_FASTPATH
 $tempRoot = $null
+$providerSession = $null
+$providerPlan = $null
+$providerPlanPath = $null
+$stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$safeModel = $ModelId -replace '[^A-Za-z0-9._-]', '_'
+$outputDirectory = Join-Path $RepoRoot "artifacts/model-intake/$stamp-$safeModel"
+New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 try {
     $measurements = @()
@@ -243,13 +214,49 @@ try {
         $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('st-model-intake-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
         $patchedSettings = Join-Path $tempRoot 'settings.json'
-        New-PatchedSettings -TemplatePath $template -PrimaryModelId $ModelId -RouterModelId $GatekeeperModelId -DestinationPath $patchedSettings
+        $shouldHashModel = $HashModel -or ($Backend -eq 'llamacpp' -and -not $PlanOnly)
+        $providerPlan = New-ModelProviderPlan `
+            -Backend $Backend `
+            -ModelId $ModelId `
+            -ProviderName $ProviderName `
+            -BaseUrl $BaseUrl `
+            -LlamaServerPath $LlamaServerPath `
+            -ModelPath $ModelPath `
+            -Port $Port `
+            -ContextWindowTokens $ContextWindowTokens `
+            -StartupTimeoutSeconds $StartupTimeoutSeconds `
+            -HashModel:$shouldHashModel
+        New-ModelIntakeSettings `
+            -TemplatePath $template `
+            -ProviderPlan $providerPlan `
+            -GatekeeperModelId $GatekeeperModelId `
+            -DestinationPath $patchedSettings
+        $providerPlan | Add-Member -NotePropertyName settings_sha256 -NotePropertyValue ((Get-FileHash -LiteralPath $patchedSettings -Algorithm SHA256).Hash.ToLowerInvariant()) -Force
+        $providerPlan | Add-Member -NotePropertyName process_id -NotePropertyValue $null -Force
+        $providerPlan | Add-Member -NotePropertyName ready_utc -NotePropertyValue $null -Force
+        $providerPlan | Add-Member -NotePropertyName stdout_path -NotePropertyValue $null -Force
+        $providerPlan | Add-Member -NotePropertyName stderr_path -NotePropertyValue $null -Force
+        $providerPlanPath = Join-Path $outputDirectory 'provider-plan.json'
+        [IO.File]::WriteAllText($providerPlanPath, ($providerPlan | ConvertTo-Json -Depth 10), $utf8NoBom)
+
+        if ($PlanOnly) {
+            Write-Host "Provider plan: $providerPlanPath" -ForegroundColor Green
+            Write-Host 'Plan-only validation complete; no provider was started and no model call was made.' -ForegroundColor Green
+            return
+        }
+
         $env:ST_SETTINGS_PATH = $patchedSettings
         $env:ST_HARNESS_SKIP_PREWARM = '1'
         $env:ST_HARNESS_DISABLE_FASTPATH = '1'
 
-        Assert-LmStudioCli
-        Ensure-ModelLoaded -RequestedModelId $ModelId
+        $providerSession = Start-ModelProvider -ProviderPlan $providerPlan -LogDirectory $outputDirectory
+        $providerPlan.ready_utc = (Get-Date).ToUniversalTime().ToString('O')
+        if ($null -ne $providerSession.process) {
+            $providerPlan.process_id = $providerSession.process.Id
+            $providerPlan.stdout_path = $providerSession.stdout_path
+            $providerPlan.stderr_path = $providerSession.stderr_path
+        }
+        [IO.File]::WriteAllText($providerPlanPath, ($providerPlan | ConvertTo-Json -Depth 10), $utf8NoBom)
         foreach ($suite in $Suites) {
             $measurements += Invoke-SuiteMeasurement -Suite $suite -RepeatCount $Repeats
         }
@@ -271,24 +278,22 @@ try {
         }
     }
 
-    $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $safeModel = $ModelId -replace '[^A-Za-z0-9._-]', '_'
-    $outputDirectory = Join-Path $RepoRoot "artifacts/model-intake/$stamp-$safeModel"
-    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-
     $scorecard = [pscustomobject]@{
-        schema_version = 2
+        schema_version = 3
         generated_utc = (Get-Date).ToUniversalTime().ToString('O')
         mode = 'production-baseline'
         model_id = $ModelId
         gatekeeper_id = $GatekeeperModelId
+        provider_backend = if ($null -eq $providerPlan) { 'reused-artifact' } else { $providerPlan.backend }
+        provider_name = if ($null -eq $providerPlan) { $null } else { $providerPlan.provider }
+        provider_base_url = if ($null -eq $providerPlan) { $null } else { $providerPlan.base_url }
+        provider_plan_path = $providerPlanPath
         repeats = $Repeats
         suites_requested = @($Suites)
         honesty_note = 'Baseline production behavior only. Partial runs are surfaced and no experimental reasoning arms are retained.'
         suites = @($suiteCards)
     }
 
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $scorecardPath = Join-Path $outputDirectory 'scorecard.json'
     [IO.File]::WriteAllText($scorecardPath, ($scorecard | ConvertTo-Json -Depth 10), $utf8NoBom)
 
@@ -297,6 +302,11 @@ try {
     [void]$report.Add('')
     [void]$report.Add("- Model: ``$ModelId``")
     [void]$report.Add("- Gatekeeper: ``$GatekeeperModelId``")
+    [void]$report.Add("- Provider backend: ``$($scorecard.provider_backend)``")
+    if ($null -ne $providerPlan) {
+        [void]$report.Add("- Provider: ``$($providerPlan.provider)`` at ``$($providerPlan.base_url)``")
+        [void]$report.Add("- Provider plan: ``$providerPlanPath``")
+    }
     [void]$report.Add("- Repeats: $Repeats")
     [void]$report.Add('- Mode: production baseline')
     [void]$report.Add('')
@@ -321,6 +331,7 @@ try {
     Write-Host "Report:    $reportPath" -ForegroundColor Green
 }
 finally {
+    Stop-ModelProvider -ProviderSession $providerSession
     $env:ST_SETTINGS_PATH = $previousSettingsPath
     $env:ST_HARNESS_SKIP_PREWARM = $previousSkipPrewarm
     $env:ST_HARNESS_DISABLE_FASTPATH = $previousDisableFastPath
