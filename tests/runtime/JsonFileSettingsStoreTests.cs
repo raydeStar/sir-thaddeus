@@ -29,6 +29,7 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
 
         var defaults = SettingsDocument.Defaults();
         Assert.Equal(defaults, doc);
+        Assert.Null(doc.Llm.GatekeeperModelId);
     }
 
     [Fact]
@@ -91,6 +92,42 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
         var roundTripped = await NewStore().GetAsync(CancellationToken.None);
 
         Assert.Equal(updated, roundTripped);
+    }
+
+    [Fact]
+    public async Task ReplaceAsync_normalizes_generic_capability_preferences_and_certificates()
+    {
+        var defaults = SettingsDocument.Defaults();
+        var certificate = new ModelCapabilityCertificate(
+            "Structured-Output",
+            "certified",
+            "fingerprint",
+            defaults.Llm.ModelId,
+            defaults.Llm.ModelId,
+            "structured-v1",
+            1,
+            10,
+            DateTimeOffset.UtcNow,
+            [new ModelCapabilityProbeResult("json", true, "pass")]);
+        var updated = defaults with
+        {
+            ModelCapabilities = new ModelCapabilitySettings(
+                Preferences:
+                [
+                    new ModelCapabilityPreference("structured-output", "off"),
+                    new ModelCapabilityPreference("Structured-Output", "AUTO"),
+                ],
+                Certificates: [certificate]),
+        };
+
+        await NewStore().ReplaceAsync(updated, CancellationToken.None);
+        var roundTripped = await NewStore().GetAsync(CancellationToken.None);
+
+        var capabilities = roundTripped.ModelCapabilities!;
+        var preference = Assert.Single(capabilities.Preferences!);
+        Assert.Equal("structured_output", preference.Capability);
+        Assert.Equal("auto", preference.Mode);
+        Assert.Equal("structured_output", Assert.Single(capabilities.Certificates!).Capability);
     }
 
     [Fact]

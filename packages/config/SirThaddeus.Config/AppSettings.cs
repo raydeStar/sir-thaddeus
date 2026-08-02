@@ -247,7 +247,7 @@ public sealed record LlmSettings
     /// is linguistically necessary for the current query.
     /// </summary>
     [JsonPropertyName("gatekeeperModelId")]
-    public string GatekeeperModelId { get; init; } = "liquid/lfm2.5-1.2b";
+    public string GatekeeperModelId { get; init; } = "";
 
     /// <summary>
     /// When true, and the gatekeeper shares the same endpoint as the primary

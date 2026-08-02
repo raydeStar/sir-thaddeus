@@ -131,6 +131,13 @@ export interface ModelCapabilityCertificate {
 export interface ModelCapabilitySettings {
   wikiWriteMode: ModelCapabilityMode;
   wikiWriteCertificates?: ModelCapabilityCertificate[] | null;
+  preferences?: ModelCapabilityPreference[] | null;
+  certificates?: ModelCapabilityCertificate[] | null;
+}
+
+export interface ModelCapabilityPreference {
+  capability: string;
+  mode: ModelCapabilityMode;
 }
 
 export interface SettingsDocument {

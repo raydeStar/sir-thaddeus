@@ -7,7 +7,7 @@
     "codexCliPath": "",
     "codexReasoningEffort": "high",
     "gatekeeperBaseUrl": "",
-    "gatekeeperModelId": "liquid/lfm2.5-1.2b",
+    "gatekeeperModelId": "",
     "reusePrimaryModelForGatekeeperOnSharedEndpoint": false,
     "maxTokens": 4096,
     "contextWindowTokens": 16384,

@@ -61,6 +61,39 @@ try {
     Assert-Equal 'http://127.0.0.1:11434/v1/models' $external.models_endpoint 'Models probe URL is incorrect.'
     Assert-True (-not $external.managed_process) 'External endpoints must never be process-managed.'
 
+    $qualificationProfile = [pscustomobject]@{
+        profile_id = 'synthetic-profile'
+        profile_path = 'C:\profiles\synthetic.json'
+        profile_sha256 = 'profile-sha'
+        model_id = 'vendor/profile-model'
+        selected_backend = 'external'
+        context_window_tokens = 12288
+        max_output_tokens = 640
+        temperature = 0.25
+        sources = @([pscustomobject]@{ id = 'official'; uri = 'https://example.invalid/card'; revision = 'r1' })
+        recommended_settings = [pscustomobject]@{ context_window_tokens = 12288; generation = [pscustomobject]@{ temperature = 0.25 } }
+        applied_settings = @([pscustomobject]@{ name = 'temperature'; value = 0.25 })
+        unsupported_settings = @([pscustomobject]@{ name = 'top_k'; value = 40; reason = 'unsupported' })
+        overrides = @()
+        override_reason = $null
+    }
+    $profilePlan = New-ModelProviderPlan `
+        -Backend external `
+        -ProviderName compatible `
+        -BaseUrl 'http://127.0.0.1:9000' `
+        -ModelId 'vendor/profile-model' `
+        -ContextWindowTokens 12288 `
+        -QualificationProfile $qualificationProfile
+    Assert-Equal 'synthetic-profile' $profilePlan.qualification_profile.profile_id 'Provider plan lost profile identity.'
+    Assert-Equal 'profile-sha' $profilePlan.qualification_profile.sha256 'Provider plan lost profile hash.'
+    Assert-Equal 0.25 ([double]$profilePlan.generation.temperature) 'Provider plan lost researched temperature.'
+    Assert-Equal 640 ([int]$profilePlan.generation.max_output_tokens) 'Provider plan lost qualification output limit.'
+    Assert-Equal 1 @($profilePlan.qualification_profile.unsupported_settings).Count 'Provider plan hid unsupported settings.'
+    Assert-Throws {
+        New-ModelProviderPlan -Backend external -BaseUrl 'http://127.0.0.1:9000' `
+            -ModelId 'different/model' -QualificationProfile $qualificationProfile
+    } 'Provider plan accepted a mismatched profile identity.'
+
     $lmStudio = New-ModelProviderPlan `
         -Backend lmstudio `
         -ModelId 'loaded/model' `
@@ -235,6 +268,17 @@ try {
     Assert-Equal 0 ([double]$settings.llm.temperature) 'Model intake must retain deterministic temperature zero.'
     Assert-Equal 8192 ([int]$settings.llm.contextWindowTokens) 'Runtime and provider contexts must match.'
     Assert-True ([bool]$settings.llm.reusePrimaryModelForGatekeeperOnSharedEndpoint) 'A shared intake endpoint must reuse its loaded model.'
+
+    $profileSettingsPath = Join-Path $tempRoot 'profile-settings.json'
+    New-ModelIntakeSettings `
+        -TemplatePath (Join-Path $repoRoot 'SirThaddeus.Settings.template.json') `
+        -ProviderPlan $profilePlan `
+        -GatekeeperModelId 'vendor/profile-model' `
+        -DestinationPath $profileSettingsPath
+    $profileSettings = Get-Content -LiteralPath $profileSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-Equal 0.25 ([double]$profileSettings.llm.temperature) 'Profile temperature was not applied to intake settings.'
+    Assert-Equal 640 ([int]$profileSettings.llm.maxTokens) 'Profile output limit was not applied to intake settings.'
+    Assert-Equal 12288 ([int]$profileSettings.llm.contextWindowTokens) 'Profile context was not applied to intake settings.'
 
     $collidingLlama = New-ModelProviderPlan `
         -Backend llamacpp `

@@ -17,25 +17,103 @@ public static class ModelCapabilityPolicy
     public const string WikiWriteCapability = "wiki_write";
     public const string ProbeVersion = "wiki-write-v2";
     public const string ToolContractVersion = "wiki-tools-2026-07-30";
+    private static readonly IReadOnlyList<string> CapabilityNames =
+        Array.AsReadOnly([WikiWriteCapability]);
+    public static IReadOnlyList<string> RegisteredCapabilities => CapabilityNames;
+
+    public static bool IsRegistered(string capability) =>
+        RegisteredCapabilities.Contains(NormalizeCapabilityName(capability), StringComparer.Ordinal);
 
     public static bool IsWikiWriteEnabled(SettingsDocument document, LlmRuntimeHealthSnapshot runtime)
+        => IsEnabled(
+            document,
+            runtime,
+            WikiWriteCapability,
+            ProbeVersion,
+            ToolContractVersion,
+            legacyMode: document.ModelCapabilities?.WikiWriteMode,
+            legacyCertificates: document.ModelCapabilities?.WikiWriteCertificates);
+
+    public static bool IsEnabled(
+        SettingsDocument document,
+        LlmRuntimeHealthSnapshot runtime,
+        string capability,
+        string probeVersion,
+        string toolContractVersion,
+        string? legacyMode = null,
+        IReadOnlyList<ModelCapabilityCertificate>? legacyCertificates = null)
     {
         var settings = document.ModelCapabilities ?? SettingsDocument.Defaults().ModelCapabilities!;
-        return NormalizeMode(settings.WikiWriteMode) switch
+        var normalizedCapability = NormalizeCapabilityName(capability);
+        var mode = GetMode(settings, normalizedCapability, legacyMode);
+        var certificates = GetCertificates(settings, normalizedCapability, legacyCertificates);
+        return mode switch
         {
             "on" => true,
             "off" => false,
             _ => string.Equals(
-                FindCurrentCertificate(document.Llm, settings.WikiWriteCertificates, runtime)?.Status,
+                FindCurrentCertificate(
+                    document.Llm,
+                    certificates,
+                    runtime,
+                    normalizedCapability,
+                    probeVersion,
+                    toolContractVersion)?.Status,
                 "certified",
                 StringComparison.OrdinalIgnoreCase),
         };
+    }
+
+    public static string GetMode(
+        ModelCapabilitySettings settings,
+        string capability,
+        string? legacyMode = null)
+    {
+        var normalizedCapability = NormalizeCapabilityName(capability);
+        var preference = settings.Preferences?.LastOrDefault(candidate => string.Equals(
+            NormalizeCapabilityName(candidate.Capability), normalizedCapability, StringComparison.Ordinal));
+        return NormalizeMode(legacyMode ?? preference?.Mode ?? "on");
+    }
+
+    public static IReadOnlyList<ModelCapabilityCertificate> GetCertificates(
+        ModelCapabilitySettings settings,
+        string capability,
+        IReadOnlyList<ModelCapabilityCertificate>? legacyCertificates = null)
+    {
+        var normalizedCapability = NormalizeCapabilityName(capability);
+        return (settings.Certificates ?? [])
+            .Concat(legacyCertificates ?? [])
+            .Where(certificate => string.Equals(
+                NormalizeCapabilityName(certificate.Capability), normalizedCapability, StringComparison.Ordinal))
+            .GroupBy(certificate => new
+            {
+                certificate.ConfigurationFingerprint,
+                certificate.ProbeVersion,
+            })
+            .Select(group => group.OrderByDescending(certificate => certificate.TestedAt).First())
+            .OrderByDescending(certificate => certificate.TestedAt)
+            .ToArray();
     }
 
     public static ModelCapabilityCertificate? FindCurrentCertificate(
         LlmSettings llm,
         IReadOnlyList<ModelCapabilityCertificate>? certificates,
         LlmRuntimeHealthSnapshot runtime)
+        => FindCurrentCertificate(
+            llm,
+            certificates,
+            runtime,
+            WikiWriteCapability,
+            ProbeVersion,
+            ToolContractVersion);
+
+    public static ModelCapabilityCertificate? FindCurrentCertificate(
+        LlmSettings llm,
+        IReadOnlyList<ModelCapabilityCertificate>? certificates,
+        LlmRuntimeHealthSnapshot runtime,
+        string capability,
+        string probeVersion,
+        string toolContractVersion)
     {
         var reportedModel = runtime.ModelLoadedOrReported;
         if (string.IsNullOrWhiteSpace(reportedModel))
@@ -45,14 +123,22 @@ public static class ModelCapabilityPolicy
             reportedModel = llm.ModelId;
         }
 
-        var fingerprint = CreateConfigurationFingerprint(llm, reportedModel);
+        var fingerprint = CreateConfigurationFingerprint(llm, reportedModel, toolContractVersion, probeVersion);
         return certificates?
-            .Where(certificate => string.Equals(certificate.ProbeVersion, ProbeVersion, StringComparison.Ordinal))
+            .Where(certificate => string.Equals(
+                NormalizeCapabilityName(certificate.Capability),
+                NormalizeCapabilityName(capability),
+                StringComparison.Ordinal))
+            .Where(certificate => string.Equals(certificate.ProbeVersion, probeVersion, StringComparison.Ordinal))
             .FirstOrDefault(certificate => string.Equals(
                 certificate.ConfigurationFingerprint, fingerprint, StringComparison.Ordinal));
     }
 
-    public static string CreateConfigurationFingerprint(LlmSettings llm, string? reportedModelId)
+    public static string CreateConfigurationFingerprint(
+        LlmSettings llm,
+        string? reportedModelId,
+        string toolContractVersion = ToolContractVersion,
+        string probeVersion = ProbeVersion)
     {
         var canonical = string.Join('\n',
             $"provider={Normalize(llm.Provider)}",
@@ -65,8 +151,8 @@ public static class ModelCapabilityPolicy
             $"temperature={llm.Temperature:R}",
             $"chat_path={Normalize(llm.ChatCompletionPath)}",
             $"codex_reasoning={Normalize(llm.CodexReasoningEffort)}",
-            $"tool_contract={ToolContractVersion}",
-            $"probe={ProbeVersion}");
+            $"tool_contract={Normalize(toolContractVersion)}",
+            $"probe={Normalize(probeVersion)}");
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
@@ -76,6 +162,9 @@ public static class ModelCapabilityPolicy
         "off" => "off",
         _ => "on",
     };
+
+    public static string NormalizeCapabilityName(string capability) =>
+        (capability ?? string.Empty).Trim().ToLowerInvariant().Replace('-', '_');
 
     private static string Normalize(string? value) => (value ?? string.Empty).Trim().ToLowerInvariant();
 }
@@ -131,6 +220,24 @@ public sealed class ModelCapabilityCertificationService
     {
         var document = await _settings.GetAsync(cancellationToken).ConfigureAwait(false);
         return BuildStatus(document, _runtime.GetSnapshot());
+    }
+
+    public Task<ModelCapabilityStatus> GetStatusAsync(string capability, CancellationToken cancellationToken)
+    {
+        var normalized = ModelCapabilityPolicy.NormalizeCapabilityName(capability);
+        if (!ModelCapabilityPolicy.IsRegistered(normalized))
+            throw new KeyNotFoundException($"Unknown model capability '{capability}'.");
+        return GetWikiWriteStatusAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ModelCapabilityStatus>> GetStatusesAsync(CancellationToken cancellationToken)
+    {
+        var statuses = new List<ModelCapabilityStatus>(ModelCapabilityPolicy.RegisteredCapabilities.Count);
+        foreach (var capability in ModelCapabilityPolicy.RegisteredCapabilities)
+        {
+            statuses.Add(await GetStatusAsync(capability, cancellationToken).ConfigureAwait(false));
+        }
+        return statuses;
     }
 
     public async Task<ModelCapabilityStatus> RetestWikiWriteAsync(CancellationToken cancellationToken)
@@ -222,7 +329,10 @@ public sealed class ModelCapabilityCertificationService
             results);
         var current = await _settings.GetAsync(cancellationToken).ConfigureAwait(false);
         var capabilitySettings = current.ModelCapabilities ?? new ModelCapabilitySettings();
-        var certificates = (capabilitySettings.WikiWriteCertificates ?? [])
+        var certificates = ModelCapabilityPolicy.GetCertificates(
+                capabilitySettings,
+                ModelCapabilityPolicy.WikiWriteCapability,
+                capabilitySettings.WikiWriteCertificates)
             .Where(existing => !string.Equals(
                 existing.ConfigurationFingerprint,
                 certificate.ConfigurationFingerprint,
@@ -231,11 +341,40 @@ public sealed class ModelCapabilityCertificationService
             .OrderByDescending(existing => existing.TestedAt)
             .Take(20)
             .ToArray();
+        var preferences = (capabilitySettings.Preferences ?? [])
+            .Where(preference => !string.Equals(
+                ModelCapabilityPolicy.NormalizeCapabilityName(preference.Capability),
+                ModelCapabilityPolicy.WikiWriteCapability,
+                StringComparison.Ordinal))
+            .Append(new ModelCapabilityPreference(
+                ModelCapabilityPolicy.WikiWriteCapability,
+                ModelCapabilityPolicy.NormalizeMode(capabilitySettings.WikiWriteMode)))
+            .ToArray();
+        var allCertificates = (capabilitySettings.Certificates ?? [])
+            .Where(existing => !string.Equals(
+                ModelCapabilityPolicy.NormalizeCapabilityName(existing.Capability),
+                ModelCapabilityPolicy.WikiWriteCapability,
+                StringComparison.Ordinal))
+            .Concat(certificates)
+            .ToArray();
         var saved = await _settings.ReplaceAsync(current with
         {
-            ModelCapabilities = capabilitySettings with { WikiWriteCertificates = certificates },
+            ModelCapabilities = capabilitySettings with
+            {
+                WikiWriteCertificates = certificates,
+                Preferences = preferences,
+                Certificates = allCertificates,
+            },
         }, cancellationToken).ConfigureAwait(false);
         return BuildStatus(saved, _runtime.GetSnapshot(), certificate);
+    }
+
+    public Task<ModelCapabilityStatus> RetestAsync(string capability, CancellationToken cancellationToken)
+    {
+        var normalized = ModelCapabilityPolicy.NormalizeCapabilityName(capability);
+        if (!ModelCapabilityPolicy.IsRegistered(normalized))
+            throw new KeyNotFoundException($"Unknown model capability '{capability}'.");
+        return RetestWikiWriteAsync(cancellationToken);
     }
 
     internal static ModelCapabilityStatus BuildStatus(
@@ -244,18 +383,29 @@ public sealed class ModelCapabilityCertificationService
         ModelCapabilityCertificate? justTested = null)
     {
         var settings = document.ModelCapabilities ?? new ModelCapabilitySettings();
-        var mode = ModelCapabilityPolicy.NormalizeMode(settings.WikiWriteMode);
+        var mode = ModelCapabilityPolicy.GetMode(
+            settings,
+            ModelCapabilityPolicy.WikiWriteCapability,
+            settings.WikiWriteMode);
         var reported = justTested?.ReportedModelId ?? runtime.ModelLoadedOrReported;
         if (string.IsNullOrWhiteSpace(reported) && !string.Equals(document.Llm.ModelId, "auto", StringComparison.OrdinalIgnoreCase))
             reported = document.Llm.ModelId;
-        var fingerprint = ModelCapabilityPolicy.CreateConfigurationFingerprint(document.Llm, reported);
+        var fingerprint = ModelCapabilityPolicy.CreateConfigurationFingerprint(
+            document.Llm,
+            reported,
+            ModelCapabilityPolicy.ToolContractVersion,
+            ModelCapabilityPolicy.ProbeVersion);
         var justTestedCurrent = justTested is not null &&
             string.Equals(justTested.ConfigurationFingerprint, fingerprint, StringComparison.Ordinal) &&
             string.Equals(justTested.ProbeVersion, ModelCapabilityPolicy.ProbeVersion, StringComparison.Ordinal);
-        var currentCertificate = justTestedCurrent ? justTested : settings.WikiWriteCertificates?.FirstOrDefault(certificate =>
+        var certificates = ModelCapabilityPolicy.GetCertificates(
+            settings,
+            ModelCapabilityPolicy.WikiWriteCapability,
+            settings.WikiWriteCertificates);
+        var currentCertificate = justTestedCurrent ? justTested : certificates.FirstOrDefault(certificate =>
             string.Equals(certificate.ConfigurationFingerprint, fingerprint, StringComparison.Ordinal) &&
             string.Equals(certificate.ProbeVersion, ModelCapabilityPolicy.ProbeVersion, StringComparison.Ordinal));
-        var latestCertificate = settings.WikiWriteCertificates?.OrderByDescending(certificate => certificate.TestedAt).FirstOrDefault();
+        var latestCertificate = certificates.OrderByDescending(certificate => certificate.TestedAt).FirstOrDefault();
         var certificate = currentCertificate ?? latestCertificate;
         var current = currentCertificate is not null;
         var enabled = mode == "on" || (mode == "auto" && current &&

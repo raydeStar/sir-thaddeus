@@ -6,6 +6,12 @@ namespace SirThaddeus.Tests;
 public sealed class RuntimeLlmOptionsFactoryTests
 {
     [Fact]
+    public void DefaultSettings_do_not_select_a_model_specific_gatekeeper()
+    {
+        Assert.Equal(string.Empty, new LlmSettings().GatekeeperModelId);
+    }
+
+    [Fact]
     public void BuildPrimary_PreservesCodexCliConfiguration()
     {
         var settings = new AppSettings

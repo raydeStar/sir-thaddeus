@@ -4,6 +4,11 @@ Sir Thaddeus can keep model-dependent features installed while deciding which
 ones an exact model configuration should see. The first certified capability is
 targeted Wiki writes.
 
+The storage and API contract is capability-keyed. Targeted Wiki writes remain
+the first registered probe and keep their original settings fields and routes
+as compatibility aliases. Adding a model reuses the same profile, fingerprint,
+certificate, and matrix flow; production code must not branch on model family.
+
 This is a product-quality scorecard, not a model-capacity benchmark. It does not
 claim that the model knows more or scores better on MMLU. It asks a narrower
 question: can this configured model use this production tool contract without
