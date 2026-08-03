@@ -122,14 +122,21 @@ selected Wiki scope, and stays inactive when no Wiki context is attached. It is
 a prompt-load and evidence-selection seam, not implicit retrieval or a general
 conversation router.
 
-## Explicit Wiki mutation targets
+## Explicit typed Wiki targets and operations
 
-Wiki reference context and Wiki write authorization are separate user-visible
-controls. For a turn that may change Wiki state, the user can select one
-existing root or page as the write target without attaching it as evidence.
-The runtime resolves that selection to typed root/page identity before model
-execution; display names are supplied to the model, while opaque identifiers
-remain runtime-owned.
+Wiki reference context and Wiki operation scope are separate user-visible
+controls. The composer can bind a turn to one selected root or page and an
+explicit operation: `PageRead`, `PageCreate`, `PageUpdate`, `PageRename`,
+`PageDelete`, or `RootRename`. The runtime resolves the selection to typed
+root/page identity before model execution; display names are supplied to the
+model, while opaque identifiers remain runtime-owned. With no explicit
+operation, selection remains context only and does not authorize a write.
+
+An explicit operation projects only its compatible tool and payload fields.
+The model still supplies semantic content such as a new title or Markdown, but
+the runtime restores the trusted selected identity before the audited call.
+This reduces tool-selection and opaque-ID work without embedding model-,
+prompt-, fixture-, or benchmark-specific rules.
 
 Immediately before the audited MCP boundary, every proposed Wiki mutation is
 checked against that typed identity. An exact target match proceeds through the
@@ -139,10 +146,16 @@ creation, or mutation whose containment cannot be proven returns the structured
 Wiki tools and non-Wiki capabilities are unaffected. With no selected target,
 the guard is inactive and existing behavior is unchanged.
 
-This contract does not infer authorization from prose, repair tool arguments,
+For `PageRead`, one successful `wiki_page_read` result must match the bound page
+identity. The runtime then renders a deterministic verified receipt from that
+result and records whether the receipt path activated. It does not invent or
+summarize missing evidence, add a model call, or activate for context-only,
+failed, mismatched, or write operations.
+
+This contract does not infer authorization from prose, repair semantic content,
 choose a substitute resource, bypass permission prompts, or turn attached Wiki
 context into write scope. Desktop and headless paths carry the same typed turn
-field, and activation is observable through content-free experiment diagnostics.
+fields, and activation is observable through content-free experiment diagnostics.
 
 ## Evidence-backed answer-only projection
 

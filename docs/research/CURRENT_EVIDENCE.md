@@ -1,14 +1,12 @@
 # Current Evidence
 
-**Evidence cutoff:** July 22, 2026
+**Evidence cutoff:** August 2, 2026
 
-**Production baseline before the current promotion:** `a1eaab94`; empty-state Wiki observation coverage was
-repaired through product PR `#256`, AngleSharp was pinned to `1.5.2` through
-security PR `#259`, the July outcome evidence was reconciled in PR `#260`, and
-the Wiki default-location projection was promoted through PR `#261`; native
-document evaluation support landed through PR `#263` and its evidence through
-PR `#264`, structured file-creation findings through PR `#265`, and the date
-specialization family was closed through PRs `#268`-`#270`
+**Production baseline before the current promotion:** `69caf87`; the retained
+typed selected-target Wiki operation candidate is `8478531` and has cleared
+development, exact repeat, disjoint validation, focused tests, full local tests,
+browser E2E, and a real headless conversation smoke. Protected delivery remains
+the final promotion gate.
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -23,6 +21,25 @@ The evidence does not support a broad claim that prompt scaffolds, extra
 reasoning calls, routing, or a larger comparison model reliably improve the
 closed-book capacity of a fixed small model. Those mechanisms have often added
 calls and latency while tying or losing to unchanged Thaddeus.
+
+### Typed selected-target Wiki operations
+
+- This is harness capability, not model-capacity uplift. Raw LFM 1.2B and
+  unchanged Thaddeus each scored `4/18` on the frozen disjoint bank; the retained
+  candidate scored `17/18`, with all `8/8` reads, `5/6` writes across every typed
+  operation family, all `4/4` non-action controls, thirteen paired wins, zero
+  losses, and `18/18` activation matches.
+- Calls fell `56 -> 44`, tokens `72,222 -> 35,209`, p50 latency
+  `6,206 -> 5,365 ms`, p95 `13,262 -> 12,654 ms`, and peak VRAM
+  `2,898 -> 2,891 MiB`. Development and exact repeat independently passed
+  `12/12` with identical calls and tokens.
+- The one validation miss was bounded semantic composition: the correct rename
+  tool targeted the correct page and preserved its body, but LFM included the
+  root label in the requested new title. No false write, target escape, invalid
+  output, stronger-model call, or hidden benchmark rule was observed.
+- The product mechanism is user-visible typed intent plus runtime-owned target
+  identity and verified outcome rendering. It is model agnostic and optional;
+  context-only turns and ordinary untyped behavior remain available.
 
 ## What is working
 
