@@ -1,6 +1,6 @@
 # Current Evidence
 
-**Evidence cutoff:** August 2, 2026
+**Evidence cutoff:** August 3, 2026
 
 **Production baseline before the current promotion:** `69caf87`; the retained
 typed selected-target Wiki operation candidate is `8478531` and has cleared
@@ -40,6 +40,38 @@ calls and latency while tying or losing to unchanged Thaddeus.
 - The product mechanism is user-visible typed intent plus runtime-owned target
   identity and verified outcome rendering. It is model agnostic and optional;
   context-only turns and ordinary untyped behavior remain available.
+
+### Reviewed scorecard and operation-safety closure
+
+- A fresh reviewed 64-case scorecard measured the current LFM 1.2B harness at
+  `23/64` strict and `9/32` strict families. LFM 8B-A1B reached `26/64` and
+  `12/32`, but verified Wiki mutations regressed `5/8 -> 2/8`. The comparison
+  supports exact model/configuration certification, not a blanket `8B+` rule.
+- On twelve new human-name Wiki tasks, unchanged 1.2B completed `5/6` positive
+  mutations twice. The opaque-ID pruning oracle was correctly stopped because
+  its required failure cluster was absent. The remaining positive miss chose
+  create-by-name for an update; all no-action final states remained unchanged,
+  although missing-target prompts still caused unsafe attempted selections.
+- A typed identity/operation diagnostic rejected automatic expansion. Identity
+  alone was correctly read-only (`0/8` positives); identity plus operation
+  reached `6/8`, only one above unchanged's `5/8`, and changed two no-action
+  states. This exposed a contradictory-operation safety seam rather than a
+  general routing opportunity.
+- The separate operation-aware no-action candidate passed development and exact
+  repeat at `12/12`. On disjoint validation it improved `5/12 -> 10/12`, with
+  five paired wins, zero losses, all `6/6` no-action states preserved, zero
+  forbidden writes, and exact activation. It remains unpromoted because the
+  frozen absolute validation gate was not met.
+- The two validation misses were identical in unchanged and candidate. Both
+  selected and successfully executed the correct page-update tool, but supplied
+  the whole instruction as Markdown rather than the requested replacement
+  scalar. This is semantic-content binding, not target identity, operation
+  selection, permission, or no-action classification.
+- The segment is closed without a product behavior change. A reusable evaluator
+  pass-through for typed Wiki mutation targets and operations remains as
+  measurement infrastructure. Any follow-up must use a new scorer-blind
+  gold-content or typed-content contract on fresh tasks; do not tune the
+  consumed validation language or weaken its gate.
 
 ## What is working
 

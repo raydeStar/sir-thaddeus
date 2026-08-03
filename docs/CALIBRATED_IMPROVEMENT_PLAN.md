@@ -3,9 +3,9 @@
 **Status:** maintenance-ready; harness-capability work may continue, while the
 MMLU capacity campaign is paused pending a materially different mechanism
 
-**Calibrated:** July 21, 2026
+**Calibrated:** July 21, 2026; segment closure updated August 3, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `23c5f632`
+**Current production baseline:** `a36937bf`
 
 ## Decision
 
@@ -23,6 +23,40 @@ materially different research mechanism supplies a falsifiable reason.
 The project will no longer treat a newer or larger comparison model as an
 improvement to the harness. Model comparisons remain useful as diagnostic
 ceilings, cross-model transfer checks, or explicit escalation studies.
+
+### August 3 scorecard and typed-operation safety segment closure
+
+The reviewed 64-case scorecard and its causal follow-ups are complete. On the
+fresh scorecard, frozen LFM 2.5 1.2B scored `23/64` strict and `9/32` strict
+families. LFM 2.5 8B-A1B scored `26/64` and `12/32`: a modest breadth gain, but
+verified Wiki mutations fell `5/8 -> 2/8`, so model size is not a capability
+certificate and the material-transfer hypothesis was rejected.
+
+A fresh human-name Wiki diagnostic showed unchanged 1.2B already completing
+`5/6` create/update mutations. Withholding opaque-ID mutation tools was stopped
+before its oracle because the frozen three-miss prerequisite did not exist.
+The subsequent typed identity/operation diagnostic localized the real contract:
+identity alone is intentionally read-only, while an explicit operation enables
+the selected write. Automatic operation inference and broad tool-surface
+pruning are closed on this evidence.
+
+That diagnostic also exposed a safety conflict when a previously selected
+operation met current prose such as "do not act" or "do nothing yet." A narrow
+operation-aware safety candidate improved development `6/12 -> 12/12`, repeated
+`12/12`, and improved disjoint validation `5/12 -> 10/12` with five paired wins,
+zero losses, all `6/6` no-action controls, and zero forbidden writes. It was not
+promoted because two authorized validation outcomes failed the frozen absolute
+gate in both unchanged and candidate. Their correct update calls copied the
+whole instruction into Markdown instead of the requested replacement value,
+localizing a separate semantic-content binding seam. The safety candidate is
+closed without a production change; do not relax its gate or tune against the
+consumed validation set.
+
+This segment is complete. Reopen Wiki mutation work only as a new, independently
+predeclared semantic-content experiment with scorer-blind typed inputs or a
+gold-content oracle. Do not add another prose router, infer user authorization,
+or use an `8B+` model-size rule as a substitute for exact-configuration
+capability certification.
 
 ### July 19 harness redirect result
 
