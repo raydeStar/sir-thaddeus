@@ -530,6 +530,35 @@ public sealed class ToolLoopStep : ITurnStep
                     Success = outcome.Ok,
                 });
 
+                if (explicitReadBinding.Active &&
+                    explicitReadBinding.Allowed &&
+                    WikiExplicitReadOperationContract.TryBuildVerifiedReceipt(
+                        context.WikiMutationTarget,
+                        toolName,
+                        outcome.Ok,
+                        outcome.ResultText,
+                        out var readReceipt))
+                {
+                    LogWikiExplicitReadReceiptActivation(
+                        context,
+                        activated: true,
+                        reason: "verified-page-read");
+                    var updated = context with
+                    {
+                        LlmMessages = messages,
+                        ToolCallsMade = toolCallsMade,
+                        AssistantDraft = readReceipt,
+                    };
+                    return new StepResult.Continue(updated);
+                }
+                if (explicitReadBinding.Active)
+                {
+                    LogWikiExplicitReadReceiptActivation(
+                        context,
+                        activated: false,
+                        reason: "unverified-read-result");
+                }
+
                 if (outcome.Ok && LooksLikePlacesDiscoverNeedsLocation(toolName, outcome.ResultText, context.UserText))
                 {
                     var updated = context with
@@ -771,6 +800,21 @@ public sealed class ToolLoopStep : ITurnStep
             "event=wiki_explicit_read_operation " +
             $"decision={(projection.Active && projection.ToolAvailable ? "activated" : "inactive")} " +
             $"reason={projection.Reason}");
+    }
+
+    private void LogWikiExplicitReadReceiptActivation(
+        TurnContext context,
+        bool activated,
+        string reason)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_explicit_read_receipt " +
+            $"decision={(activated ? "activated" : "inactive")} reason={reason}");
     }
 
     private void LogWikiRootDefaultLocationActivation(TurnContext context, bool activated)

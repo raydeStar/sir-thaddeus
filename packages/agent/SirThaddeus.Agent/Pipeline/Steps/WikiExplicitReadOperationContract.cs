@@ -99,6 +99,49 @@ internal static class WikiExplicitReadOperationContract
             },
         });
 
+    public static bool TryBuildVerifiedReceipt(
+        WikiMutationTarget? target,
+        string toolName,
+        bool toolSucceeded,
+        string result,
+        out string receipt)
+    {
+        receipt = string.Empty;
+        if (!toolSucceeded ||
+            !IsEligible(target) ||
+            !string.Equals(toolName, ReadToolName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(result);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("ok", out var ok) ||
+                ok.ValueKind != JsonValueKind.True ||
+                !root.TryGetProperty("document", out var readDocument) ||
+                !readDocument.TryGetProperty("page", out var page) ||
+                !page.TryGetProperty("id", out var pageId) ||
+                pageId.ValueKind != JsonValueKind.String ||
+                !string.Equals(pageId.GetString(), target!.PageId, StringComparison.Ordinal) ||
+                !readDocument.TryGetProperty("markdown", out var markdownElement) ||
+                markdownElement.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(markdownElement.GetString()))
+            {
+                return false;
+            }
+
+            var displayName = JsonSerializer.Serialize(target.DisplayName);
+            receipt = $"Selected Wiki page {displayName}:\n\n{markdownElement.GetString()!.Trim()}";
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private static bool IsEligible(WikiMutationTarget? target) =>
         target is
         {

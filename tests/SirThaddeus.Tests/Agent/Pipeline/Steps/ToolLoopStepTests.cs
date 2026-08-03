@@ -266,7 +266,7 @@ public class ToolLoopStepTests
     }
 
     [Fact]
-    public async Task Explicit_page_read_forces_one_payload_only_call_and_binds_runtime_page()
+    public async Task Explicit_page_read_returns_verified_receipt_without_model_summary_round()
     {
         var llm = new FakeLlm(
             LlmReply.Tool("wiki_page_read", "{\"pageId\":\"invented\",\"maxChars\":1200}"),
@@ -275,7 +275,7 @@ public class ToolLoopStepTests
         var mcp = new StubMcp((tool, arguments) =>
         {
             mcpCalls.Add((tool, arguments));
-            return "{\"markdown\":\"Launch code: CIRRUS\"}";
+            return "{\"ok\":true,\"document\":{\"page\":{\"id\":\"page-opaque-1\"},\"markdown\":\"Launch code: CIRRUS\"}}";
         });
         var logs = new List<(string Event, string Message)>();
         using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
@@ -300,14 +300,15 @@ public class ToolLoopStepTests
         var result = await step.ExecuteAsync(context, CancellationToken.None);
 
         var next = Assert.IsType<StepResult.Continue>(result).Next;
-        Assert.Equal("The launch code is CIRRUS.", next.AssistantDraft);
-        Assert.Equal(["wiki_page_read", null], llm.ForcedToolNames);
+        Assert.Contains("Project / Plan", next.AssistantDraft, StringComparison.Ordinal);
+        Assert.Contains("Launch code: CIRRUS", next.AssistantDraft, StringComparison.Ordinal);
+        Assert.Equal(["wiki_page_read"], llm.ForcedToolNames);
         var projected = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<ToolDefinition>>(llm.ReceivedTools[0]));
         Assert.Equal("wiki_page_read", projected.Function.Name);
         var schema = JsonSerializer.Serialize(projected.Function.Parameters);
         Assert.Contains("maxChars", schema, StringComparison.Ordinal);
         Assert.DoesNotContain("pageId", schema, StringComparison.Ordinal);
-        Assert.Null(llm.ReceivedTools[1]);
+        Assert.Single(llm.ReceivedTools);
 
         var execution = Assert.Single(mcpCalls);
         using var arguments = JsonDocument.Parse(execution.Arguments);
@@ -317,6 +318,10 @@ public class ToolLoopStepTests
         Assert.Contains(logs, entry =>
             entry.Event == "EXPERIMENT_ACTIVATION" &&
             entry.Message.Contains("event=wiki_explicit_read_operation", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_explicit_read_receipt", StringComparison.Ordinal) &&
             entry.Message.Contains("decision=activated", StringComparison.Ordinal));
     }
 

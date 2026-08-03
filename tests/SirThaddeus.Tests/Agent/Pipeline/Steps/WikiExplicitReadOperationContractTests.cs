@@ -59,6 +59,27 @@ public sealed class WikiExplicitReadOperationContractTests
         Assert.False(wrongTool.Allowed);
     }
 
+    [Fact]
+    public void Verified_receipt_requires_success_matching_page_and_nonblank_markdown()
+    {
+        const string success =
+            "{\"ok\":true,\"document\":{\"page\":{\"id\":\"page-opaque-1\"},\"markdown\":\"Launch code: CIRRUS\"}}";
+
+        Assert.True(WikiExplicitReadOperationContract.TryBuildVerifiedReceipt(
+            PageTarget(), "wiki_page_read", true, success, out var receipt));
+        Assert.Contains("Project / Plan", receipt, StringComparison.Ordinal);
+        Assert.Contains("Launch code: CIRRUS", receipt, StringComparison.Ordinal);
+
+        Assert.False(WikiExplicitReadOperationContract.TryBuildVerifiedReceipt(
+            PageTarget(), "wiki_page_read", true,
+            "{\"ok\":true,\"document\":{\"page\":{\"id\":\"other\"},\"markdown\":\"CIRRUS\"}}",
+            out _));
+        Assert.False(WikiExplicitReadOperationContract.TryBuildVerifiedReceipt(
+            PageTarget(), "wiki_page_read", false, success, out _));
+        Assert.False(WikiExplicitReadOperationContract.TryBuildVerifiedReceipt(
+            PageTarget(), "wiki_page_read", true, "not-json", out _));
+    }
+
     private static WikiMutationTarget PageTarget() => new(
         WikiMutationTargetKind.Page,
         "root-1",
