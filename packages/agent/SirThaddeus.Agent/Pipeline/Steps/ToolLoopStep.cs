@@ -121,6 +121,7 @@ public sealed class ToolLoopStep : ITurnStep
         var reconciliationNudges = 0;
         var useDefaultWikiRootLocationContract = false;
         var boundEffectAttempted = false;
+        var explicitReadAttempted = false;
 
         if (ShouldAddCalculatorSetupHint(context))
         {
@@ -215,6 +216,30 @@ public sealed class ToolLoopStep : ITurnStep
             if (round == 0)
             {
                 LogWikiExplicitOperationGateActivation(context, explicitOperationProjection);
+            }
+            var explicitReadProjection = round == 0
+                ? WikiExplicitReadOperationContract.Project(context.WikiMutationTarget, tools ?? [])
+                : new WikiExplicitReadProjection(
+                    Active: false,
+                    ToolAvailable: false,
+                    ToolName: null,
+                    Tools: tools ?? [],
+                    Reason: explicitReadAttempted ? "one-shot-complete" : "inactive");
+            if (explicitReadProjection.Active)
+            {
+                tools = explicitReadProjection.ToolAvailable ? explicitReadProjection.Tools : null;
+                forcedTool = explicitReadProjection.ToolAvailable ? explicitReadProjection.ToolName : null;
+            }
+            else if (round > 0 && explicitReadAttempted)
+            {
+                // An explicit read is also a one-shot contract. The second
+                // round receives only the observed result and must summarize.
+                tools = null;
+                forcedTool = null;
+            }
+            if (round == 0)
+            {
+                LogWikiExplicitReadOperationActivation(context, explicitReadProjection);
             }
             if (tools is not null)
             {
@@ -394,6 +419,15 @@ public sealed class ToolLoopStep : ITurnStep
                 var toolName = call.Function.Name;
                 var rawArgs = call.Function.Arguments ?? "{}";
                 var args = ApplyArgsRewriters(context, toolName, rawArgs);
+                var explicitReadBinding = WikiExplicitReadOperationContract.Bind(
+                    context.WikiMutationTarget,
+                    toolName,
+                    args);
+                if (explicitReadBinding.Active)
+                {
+                    explicitReadAttempted = true;
+                    args = explicitReadBinding.Arguments;
+                }
                 var explicitOperationDecision = WikiExplicitOperationToolPolicy.EvaluateCall(
                     context.WikiMutationTarget,
                     toolName);
@@ -454,6 +488,13 @@ public sealed class ToolLoopStep : ITurnStep
                             context.WikiMutationTarget!),
                         Ok: false,
                         Error: "wiki_explicit_operation_required")
+                    : explicitReadBinding.Active && !explicitReadBinding.Allowed
+                        ? new ToolCallOutcome(
+                            WikiExplicitReadOperationContract.BuildBlockedResult(
+                                context.WikiMutationTarget!,
+                                explicitReadBinding.Reason),
+                            Ok: false,
+                            Error: "wiki_explicit_read_mismatch")
                     : boundEffectBinding.Active && !boundEffectBinding.Allowed
                         ? new ToolCallOutcome(
                         WikiBoundEffectContract.BuildBlockedResult(
@@ -715,6 +756,21 @@ public sealed class ToolLoopStep : ITurnStep
             "event=wiki_explicit_operation_gate " +
             $"decision={(projection.Active ? "activated" : "inactive")} " +
             $"withheld_write_tools={projection.WithheldWriteCount}");
+    }
+
+    private void LogWikiExplicitReadOperationActivation(
+        TurnContext context,
+        WikiExplicitReadProjection projection)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_explicit_read_operation " +
+            $"decision={(projection.Active && projection.ToolAvailable ? "activated" : "inactive")} " +
+            $"reason={projection.Reason}");
     }
 
     private void LogWikiRootDefaultLocationActivation(TurnContext context, bool activated)

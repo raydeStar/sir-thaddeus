@@ -266,6 +266,61 @@ public class ToolLoopStepTests
     }
 
     [Fact]
+    public async Task Explicit_page_read_forces_one_payload_only_call_and_binds_runtime_page()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("wiki_page_read", "{\"pageId\":\"invented\",\"maxChars\":1200}"),
+            LlmReply.Final("The launch code is CIRRUS."));
+        var mcpCalls = new List<(string Tool, string Arguments)>();
+        var mcp = new StubMcp((tool, arguments) =>
+        {
+            mcpCalls.Add((tool, arguments));
+            return "{\"markdown\":\"Launch code: CIRRUS\"}";
+        });
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, mcp: mcp, log: (eventName, message) => logs.Add((eventName, message)));
+        var context = NewContext() with
+        {
+            ToolDefs =
+            [
+                ToolDefinitionFor("wiki_page_read"),
+                ToolDefinitionFor("wiki_page_update_by_name"),
+                ToolDefinitionFor("web_search"),
+            ],
+            WikiMutationTarget = new WikiMutationTarget(
+                WikiMutationTargetKind.Page,
+                "root-1",
+                "Project",
+                "page-opaque-1",
+                "Plan",
+                WikiMutationOperation.PageRead),
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Equal("The launch code is CIRRUS.", next.AssistantDraft);
+        Assert.Equal(["wiki_page_read", null], llm.ForcedToolNames);
+        var projected = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<ToolDefinition>>(llm.ReceivedTools[0]));
+        Assert.Equal("wiki_page_read", projected.Function.Name);
+        var schema = JsonSerializer.Serialize(projected.Function.Parameters);
+        Assert.Contains("maxChars", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("pageId", schema, StringComparison.Ordinal);
+        Assert.Null(llm.ReceivedTools[1]);
+
+        var execution = Assert.Single(mcpCalls);
+        using var arguments = JsonDocument.Parse(execution.Arguments);
+        Assert.Equal("page-opaque-1", arguments.RootElement.GetProperty("pageId").GetString());
+        Assert.Equal(1200, arguments.RootElement.GetProperty("maxChars").GetInt32());
+        Assert.Single(next.ToolCallsMade);
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_explicit_read_operation", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Interceptor_claims_call_and_MCP_is_not_invoked()
     {
         // An interceptor that owns the tool name short-circuits MCP —

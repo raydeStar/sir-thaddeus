@@ -10,6 +10,7 @@ public enum WikiMutationTargetKind
 
 public enum WikiMutationOperation
 {
+    PageRead,
     PageCreate,
     PageUpdate,
     PageRename,

@@ -126,6 +126,7 @@ public sealed class WikiBoundEffectContractTests
     }
 
     [Theory]
+    [InlineData("page_read", WikiMutationOperation.PageRead)]
     [InlineData("page_rename", WikiMutationOperation.PageRename)]
     [InlineData("page-rename", WikiMutationOperation.PageRename)]
     [InlineData("RootRename", WikiMutationOperation.RootRename)]
@@ -133,6 +134,28 @@ public sealed class WikiBoundEffectContractTests
     {
         Assert.True(WikiBoundEffectContract.TryParseOperation(value, out var actual));
         Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void Page_read_is_compatible_but_owned_by_the_read_contract()
+    {
+        Assert.True(WikiBoundEffectContract.IsCompatible(
+            WikiMutationTargetKind.Page,
+            WikiMutationOperation.PageRead));
+        Assert.False(WikiBoundEffectContract.IsCompatible(
+            WikiMutationTargetKind.Root,
+            WikiMutationOperation.PageRead));
+
+        var projection = WikiBoundEffectContract.Project(
+            PageTarget(WikiMutationOperation.PageRead),
+            [Tool("wiki_page_read")]);
+        var binding = WikiBoundEffectContract.Bind(
+            PageTarget(WikiMutationOperation.PageRead),
+            "wiki_page_read",
+            "{}");
+
+        Assert.False(projection.Active);
+        Assert.False(binding.Active);
     }
 
     private static WikiMutationTarget PageTarget(WikiMutationOperation? operation) => new(

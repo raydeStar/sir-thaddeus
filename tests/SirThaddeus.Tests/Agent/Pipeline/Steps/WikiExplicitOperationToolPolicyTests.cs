@@ -41,6 +41,23 @@ public sealed class WikiExplicitOperationToolPolicyTests
     }
 
     [Fact]
+    public void Explicit_read_remains_write_guarded()
+    {
+        var target = PageTarget(WikiMutationOperation.PageRead);
+        var projection = WikiExplicitOperationToolPolicy.Project(
+            target,
+            [Tool("wiki_page_read"), Tool("wiki_page_update_by_name")]);
+        var write = WikiExplicitOperationToolPolicy.EvaluateCall(
+            target,
+            "wiki_page_update_by_name");
+
+        Assert.True(projection.Active);
+        Assert.Equal(["wiki_page_read"], projection.Tools.Select(tool => tool.Function.Name));
+        Assert.True(write.Active);
+        Assert.False(write.Allowed);
+    }
+
+    [Fact]
     public void Execution_gate_blocks_unadvertised_write_but_allows_read()
     {
         var target = PageTarget(operation: null);

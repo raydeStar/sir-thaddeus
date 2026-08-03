@@ -583,12 +583,13 @@ function mutationTargetFor(
 
 function operationOptionsFor(option: WikiContextOption | null): WikiMutationOperationInput[] {
   if (option?.mode === 'root') return ['page_create', 'root_rename'];
-  if (option?.mode === 'page') return ['page_update', 'page_rename', 'page_delete'];
+  if (option?.mode === 'page') return ['page_read', 'page_update', 'page_rename', 'page_delete'];
   return [];
 }
 
 function asMutationOperation(value: string): WikiMutationOperationInput | undefined {
   const known: WikiMutationOperationInput[] = [
+    'page_read',
     'page_create',
     'page_update',
     'page_rename',
@@ -600,6 +601,7 @@ function asMutationOperation(value: string): WikiMutationOperationInput | undefi
 
 function operationLabel(value: string): string {
   switch (value) {
+    case 'page_read': return 'Read selected page';
     case 'page_create': return 'Create page here';
     case 'page_update': return 'Replace selected page';
     case 'page_rename': return 'Rename selected page';

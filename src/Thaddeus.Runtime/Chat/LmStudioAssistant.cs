@@ -287,7 +287,19 @@ public sealed partial class LmStudioAssistant : IAssistant
                 preferredUnits: PreferredUnits,
                 offlineMode: OfflineMode)),
         };
-        if (options.WikiMutationTarget is { Operation: { } operation } boundTarget)
+        if (options.WikiMutationTarget is
+            {
+                Kind: WikiMutationTargetKind.Page,
+                Operation: WikiMutationOperation.PageRead,
+            } readTarget)
+        {
+            llmMessages.Add(LlmChatMessage.System(
+                "[USER-APPROVED WIKI READ]\n" +
+                $"The user explicitly chose to read the selected Wiki page '{readTarget.DisplayName}' for this submission. " +
+                "The runtime owns page identity, permission, and verification. " +
+                "Call the single supplied read function once with only its optional payload fields, then answer from the returned page content."));
+        }
+        else if (options.WikiMutationTarget is { Operation: { } operation } boundTarget)
         {
             llmMessages.Add(LlmChatMessage.System(
                 "[USER-APPROVED WIKI EFFECT]\n" +

@@ -15,6 +15,7 @@ export type WikiChatContextInput =
   | { mode: 'page'; pageId: string };
 
 export type WikiMutationOperationInput =
+  | 'page_read'
   | 'page_create'
   | 'page_update'
   | 'page_rename'

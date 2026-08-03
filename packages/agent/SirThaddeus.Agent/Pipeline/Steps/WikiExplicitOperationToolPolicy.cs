@@ -25,7 +25,7 @@ internal static class WikiExplicitOperationToolPolicy
         WikiMutationTarget? target,
         IReadOnlyList<ToolDefinition> advertisedTools)
     {
-        if (target is null || target.Operation is not null)
+        if (target is null || HasApprovedWrite(target))
             return new(false, advertisedTools, 0);
 
         var projected = advertisedTools
@@ -38,7 +38,7 @@ internal static class WikiExplicitOperationToolPolicy
         WikiMutationTarget? target,
         string toolName)
     {
-        if (target is null || target.Operation is not null)
+        if (target is null || HasApprovedWrite(target))
             return new(false, true, "inactive");
 
         return IsWikiWrite(toolName)
@@ -61,4 +61,7 @@ internal static class WikiExplicitOperationToolPolicy
     private static bool IsWikiWrite(string? toolName) =>
         !string.IsNullOrWhiteSpace(toolName) &&
         ToolCapabilityRegistry.ResolveCapability(toolName) == ToolCapability.WikiWrite;
+
+    private static bool HasApprovedWrite(WikiMutationTarget target) =>
+        target.Operation is not null and not WikiMutationOperation.PageRead;
 }

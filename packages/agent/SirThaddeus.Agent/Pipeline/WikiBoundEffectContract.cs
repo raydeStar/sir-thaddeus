@@ -86,14 +86,18 @@ public static class WikiBoundEffectContract
 
         var normalized = value.Trim().Replace("-", "", StringComparison.Ordinal)
             .Replace("_", "", StringComparison.Ordinal);
-        return Enum.TryParse(normalized, ignoreCase: true, out operation) && Contracts.ContainsKey(operation);
+        return Enum.TryParse(normalized, ignoreCase: true, out operation) &&
+               (operation == WikiMutationOperation.PageRead || Contracts.ContainsKey(operation));
     }
 
     public static bool IsCompatible(WikiMutationTargetKind targetKind, WikiMutationOperation operation) =>
-        Contracts.TryGetValue(operation, out var contract) && contract.TargetKind == targetKind;
+        operation == WikiMutationOperation.PageRead
+            ? targetKind == WikiMutationTargetKind.Page
+            : Contracts.TryGetValue(operation, out var contract) && contract.TargetKind == targetKind;
 
     public static string DisplayName(WikiMutationOperation operation) => operation switch
     {
+        WikiMutationOperation.PageRead => "read the page",
         WikiMutationOperation.PageCreate => "create a page",
         WikiMutationOperation.PageUpdate => "replace the page",
         WikiMutationOperation.PageRename => "rename the page",
@@ -108,6 +112,9 @@ public static class WikiBoundEffectContract
     {
         if (target?.Operation is not { } operation)
             return new(false, false, null, advertisedTools, "inactive");
+
+        if (operation == WikiMutationOperation.PageRead)
+            return new(false, false, null, advertisedTools, "read-operation");
 
         if (!Contracts.TryGetValue(operation, out var contract) || contract.TargetKind != target.Kind)
             return new(true, false, null, [], "operation-target-mismatch");
@@ -144,6 +151,9 @@ public static class WikiBoundEffectContract
     {
         if (target?.Operation is not { } operation)
             return new(false, true, arguments, "inactive");
+
+        if (operation == WikiMutationOperation.PageRead)
+            return new(false, true, arguments, "read-operation");
 
         if (!Contracts.TryGetValue(operation, out var contract) ||
             contract.TargetKind != target.Kind ||

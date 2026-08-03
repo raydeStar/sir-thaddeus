@@ -184,6 +184,11 @@ public sealed class WikiChatContextServiceTests : IDisposable
             CancellationToken.None);
         Assert.Equal(SirThaddeus.Agent.Pipeline.WikiMutationOperation.PageRename, pageTarget!.Operation);
 
+        var readTarget = await _service.ResolveMutationTargetAsync(
+            new WikiMutationTargetRequest("page", PageId: pageId, Operation: "page_read"),
+            CancellationToken.None);
+        Assert.Equal(SirThaddeus.Agent.Pipeline.WikiMutationOperation.PageRead, readTarget!.Operation);
+
         await Assert.ThrowsAsync<ArgumentException>(() =>
             _service.ResolveMutationTargetAsync(
                 new WikiMutationTargetRequest("page", PageId: pageId, Operation: "root_rename"),
