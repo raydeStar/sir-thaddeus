@@ -205,6 +205,10 @@ public class ToolLoopStepTests
             entry.Event == "EXPERIMENT_ACTIVATION" &&
             entry.Message.Contains("event=wiki_explicit_operation_gate", StringComparison.Ordinal) &&
             entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_explicit_read_receipt", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=inactive", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -240,6 +240,15 @@ public sealed class ToolLoopStep : ITurnStep
             if (round == 0)
             {
                 LogWikiExplicitReadOperationActivation(context, explicitReadProjection);
+                if (!explicitReadProjection.Active || !explicitReadProjection.ToolAvailable)
+                {
+                    LogWikiExplicitReadReceiptActivation(
+                        context,
+                        activated: false,
+                        reason: explicitReadProjection.Active
+                            ? explicitReadProjection.Reason
+                            : "ineligible-turn");
+                }
             }
             if (tools is not null)
             {
