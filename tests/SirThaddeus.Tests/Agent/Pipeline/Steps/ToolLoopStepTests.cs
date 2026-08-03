@@ -91,7 +91,7 @@ public class ToolLoopStepTests
     }
 
     [Fact]
-    public async Task Wiki_mutation_target_blocks_mismatched_write_before_mcp()
+    public async Task Wiki_mutation_target_without_operation_blocks_write_before_mcp()
     {
         var llm = new FakeLlm(
             LlmReply.Tool(
@@ -127,12 +127,11 @@ public class ToolLoopStepTests
             Assert.False(mcpCalled);
             var call = Assert.Single(next.ToolCallsMade);
             Assert.False(call.Success);
-            Assert.Contains("wiki_mutation_target_mismatch", call.Result, StringComparison.Ordinal);
+            Assert.Contains("wiki_explicit_operation_required", call.Result, StringComparison.Ordinal);
             Assert.Contains(logEntries, entry =>
                 entry.Event == "EXPERIMENT_ACTIVATION" &&
-                entry.Message.Contains("event=explicit_wiki_mutation_target", StringComparison.Ordinal) &&
-                entry.Message.Contains("decision=activated", StringComparison.Ordinal) &&
-                entry.Message.Contains("outcome=blocked", StringComparison.Ordinal));
+                entry.Message.Contains("event=wiki_explicit_operation_gate", StringComparison.Ordinal) &&
+                entry.Message.Contains("decision=activated", StringComparison.Ordinal));
         }
         finally
         {
@@ -141,12 +140,12 @@ public class ToolLoopStepTests
     }
 
     [Fact]
-    public async Task Wiki_mutation_target_allows_exact_write_to_reach_mcp()
+    public async Task Wiki_mutation_target_with_approved_operation_allows_bound_write_to_reach_mcp()
     {
         var llm = new FakeLlm(
             LlmReply.Tool(
                 "wiki_page_update_by_name",
-                "{\"rootName\":\"Project\",\"pageTitle\":\"Plan\",\"markdown\":\"right\"}"),
+                "{\"markdown\":\"right\"}"),
             LlmReply.Final("Updated."));
         var mcpCalled = false;
         var mcp = new StubMcp(_ =>
@@ -163,13 +162,171 @@ public class ToolLoopStepTests
                 "root-1",
                 "Project",
                 "page-1",
-                "Plan"),
+                "Plan",
+                WikiMutationOperation.PageUpdate),
         };
 
         var result = await step.ExecuteAsync(context, CancellationToken.None);
 
         Assert.IsType<StepResult.Continue>(result);
         Assert.True(mcpCalled);
+    }
+
+    [Fact]
+    public async Task Selected_target_without_operation_projects_reads_only_and_logs_activation()
+    {
+        var llm = new FakeLlm(LlmReply.Final("No write operation is approved."));
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, log: (eventName, message) => logs.Add((eventName, message)));
+        var context = NewContext() with
+        {
+            ToolDefs =
+            [
+                ToolDefinitionFor("wiki_page_read"),
+                ToolDefinitionFor("wiki_page_update_by_name"),
+                ToolDefinitionFor("web_search"),
+            ],
+            WikiMutationTarget = new WikiMutationTarget(
+                WikiMutationTargetKind.Page,
+                "root-1",
+                "Project",
+                "page-1",
+                "Plan"),
+        };
+
+        await step.ExecuteAsync(context, CancellationToken.None);
+
+        var advertised = Assert.Single(llm.ReceivedTools)!;
+        Assert.Equal(
+            ["wiki_page_read", "web_search"],
+            advertised.Select(tool => tool.Function.Name));
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_explicit_operation_gate", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_explicit_read_receipt", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=inactive", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Approved_wiki_effect_forces_payload_only_tool_and_binds_runtime_target_once()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("wiki_page_update_by_name", "{\"markdown\":\"Approved replacement\"}"),
+            LlmReply.Final("Updated."));
+        var mcpCalls = new List<(string Tool, string Arguments)>();
+        var mcp = new StubMcp((tool, arguments) =>
+        {
+            mcpCalls.Add((tool, arguments));
+            return "{\"ok\":true,\"version\":2}";
+        });
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, mcp: mcp, log: (eventName, message) => logs.Add((eventName, message)));
+        var context = NewContext() with
+        {
+            ToolDefs =
+            [
+                ToolDefinitionFor("wiki_page_update_by_name"),
+                ToolDefinitionFor("wiki_page_read"),
+            ],
+            WikiMutationTarget = new WikiMutationTarget(
+                WikiMutationTargetKind.Page,
+                "root-1",
+                "Project",
+                "page-1",
+                "Plan",
+                WikiMutationOperation.PageUpdate),
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Equal("Updated.", next.AssistantDraft);
+        Assert.Equal(["wiki_page_update_by_name", null], llm.ForcedToolNames);
+
+        var projected = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<ToolDefinition>>(llm.ReceivedTools[0]));
+        Assert.Equal("wiki_page_update_by_name", projected.Function.Name);
+        var projectedSchema = JsonSerializer.Serialize(projected.Function.Parameters);
+        Assert.Contains("markdown", projectedSchema, StringComparison.Ordinal);
+        Assert.DoesNotContain("rootName", projectedSchema, StringComparison.Ordinal);
+        Assert.DoesNotContain("pageTitle", projectedSchema, StringComparison.Ordinal);
+        Assert.Null(llm.ReceivedTools[1]);
+
+        var execution = Assert.Single(mcpCalls);
+        Assert.Equal("wiki_page_update_by_name", execution.Tool);
+        using var arguments = JsonDocument.Parse(execution.Arguments);
+        Assert.Equal("Project", arguments.RootElement.GetProperty("rootName").GetString());
+        Assert.Equal("Plan", arguments.RootElement.GetProperty("pageTitle").GetString());
+        Assert.Equal("Approved replacement", arguments.RootElement.GetProperty("markdown").GetString());
+        Assert.Single(next.ToolCallsMade);
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_bound_effect", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Explicit_page_read_returns_verified_receipt_without_model_summary_round()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("wiki_page_read", "{\"pageId\":\"invented\",\"maxChars\":1200}"),
+            LlmReply.Final("The launch code is CIRRUS."));
+        var mcpCalls = new List<(string Tool, string Arguments)>();
+        var mcp = new StubMcp((tool, arguments) =>
+        {
+            mcpCalls.Add((tool, arguments));
+            return "{\"ok\":true,\"document\":{\"page\":{\"id\":\"page-opaque-1\"},\"markdown\":\"Launch code: CIRRUS\"}}";
+        });
+        var logs = new List<(string Event, string Message)>();
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var step = BuildStep(llm, mcp: mcp, log: (eventName, message) => logs.Add((eventName, message)));
+        var context = NewContext() with
+        {
+            ToolDefs =
+            [
+                ToolDefinitionFor("wiki_page_read"),
+                ToolDefinitionFor("wiki_page_update_by_name"),
+                ToolDefinitionFor("web_search"),
+            ],
+            WikiMutationTarget = new WikiMutationTarget(
+                WikiMutationTargetKind.Page,
+                "root-1",
+                "Project",
+                "page-opaque-1",
+                "Plan",
+                WikiMutationOperation.PageRead),
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Contains("Project / Plan", next.AssistantDraft, StringComparison.Ordinal);
+        Assert.Contains("Launch code: CIRRUS", next.AssistantDraft, StringComparison.Ordinal);
+        Assert.Equal(["wiki_page_read"], llm.ForcedToolNames);
+        var projected = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<ToolDefinition>>(llm.ReceivedTools[0]));
+        Assert.Equal("wiki_page_read", projected.Function.Name);
+        var schema = JsonSerializer.Serialize(projected.Function.Parameters);
+        Assert.Contains("maxChars", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("pageId", schema, StringComparison.Ordinal);
+        Assert.Single(llm.ReceivedTools);
+
+        var execution = Assert.Single(mcpCalls);
+        using var arguments = JsonDocument.Parse(execution.Arguments);
+        Assert.Equal("page-opaque-1", arguments.RootElement.GetProperty("pageId").GetString());
+        Assert.Equal(1200, arguments.RootElement.GetProperty("maxChars").GetInt32());
+        Assert.Single(next.ToolCallsMade);
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_explicit_read_operation", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=wiki_explicit_read_receipt", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
     }
 
     [Fact]

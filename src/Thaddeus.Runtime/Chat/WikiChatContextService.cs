@@ -71,10 +71,11 @@ public sealed class WikiChatContextService
                 throw new ArgumentException("Wiki root mutation target requires a root id.", nameof(request));
             var tree = await _wiki.GetTreeAsync(request.RootId.Trim(), cancellationToken).ConfigureAwait(false)
                 ?? throw new KeyNotFoundException($"Wiki root '{request.RootId}' not found.");
-            return new WikiMutationTarget(
+            var target = new WikiMutationTarget(
                 WikiMutationTargetKind.Root,
                 tree.Root.Id,
                 tree.Root.Name);
+            return ApplyApprovedOperation(target, request.Operation);
         }
 
         if (!mode.Equals("page", StringComparison.OrdinalIgnoreCase))
@@ -86,12 +87,28 @@ public sealed class WikiChatContextService
             ?? throw new KeyNotFoundException($"Wiki page '{request.PageId}' not found.");
         var rootTree = await _wiki.GetTreeAsync(document.Page.RootId, cancellationToken).ConfigureAwait(false)
             ?? throw new KeyNotFoundException($"Wiki root '{document.Page.RootId}' not found.");
-        return new WikiMutationTarget(
+        var pageTarget = new WikiMutationTarget(
             WikiMutationTargetKind.Page,
             rootTree.Root.Id,
             rootTree.Root.Name,
             document.Page.Id,
             document.Page.Title);
+        return ApplyApprovedOperation(pageTarget, request.Operation);
+    }
+
+    private static WikiMutationTarget ApplyApprovedOperation(
+        WikiMutationTarget target,
+        string? operationValue)
+    {
+        if (string.IsNullOrWhiteSpace(operationValue))
+            return target;
+        if (!WikiBoundEffectContract.TryParseOperation(operationValue, out var operation))
+            throw new ArgumentException("Unsupported Wiki mutation operation.", nameof(operationValue));
+        if (!WikiBoundEffectContract.IsCompatible(target.Kind, operation))
+            throw new ArgumentException(
+                $"Wiki operation '{operationValue}' is not valid for a {target.Kind.ToString().ToLowerInvariant()} target.",
+                nameof(operationValue));
+        return target with { Operation = operation };
     }
 
     private async Task<WikiChatContextPrompt> BuildAllRootsContextAsync(
@@ -311,7 +328,8 @@ public sealed record WikiChatContextRequest(
 public sealed record WikiMutationTargetRequest(
     string? Mode,
     string? PageId = null,
-    string? RootId = null);
+    string? RootId = null,
+    string? Operation = null);
 
 public sealed record WikiChatContextPrompt(
     string Prompt,

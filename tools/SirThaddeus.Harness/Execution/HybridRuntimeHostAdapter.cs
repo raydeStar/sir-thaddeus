@@ -1125,7 +1125,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
         return new ResolvedWikiMutationTarget(
             resolved.Mode,
             resolved.PageId,
-            resolved.RootId);
+            resolved.RootId,
+            setup.Operation);
     }
 
     internal static string ResolveUniqueNamedId(
@@ -1157,7 +1158,8 @@ internal sealed class HybridRuntimeHostAdapter : IHarnessHostAdapter
     private sealed record ResolvedWikiMutationTarget(
         string Mode,
         string? PageId = null,
-        string? RootId = null);
+        string? RootId = null,
+        string? Operation = null);
 
     private string ResolveAuditFilePath()
     {

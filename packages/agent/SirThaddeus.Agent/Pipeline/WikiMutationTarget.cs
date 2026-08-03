@@ -8,6 +8,16 @@ public enum WikiMutationTargetKind
     Page,
 }
 
+public enum WikiMutationOperation
+{
+    PageRead,
+    PageCreate,
+    PageUpdate,
+    PageRename,
+    PageDelete,
+    RootRename,
+}
+
 /// <summary>
 /// Existing Wiki state explicitly selected by the user as the mutation scope
 /// for one turn. Opaque identifiers stay outside the model prompt; display
@@ -19,7 +29,8 @@ public sealed record WikiMutationTarget(
     string RootId,
     string RootName,
     string? PageId = null,
-    string? PageTitle = null)
+    string? PageTitle = null,
+    WikiMutationOperation? Operation = null)
 {
     public string DisplayName => Kind == WikiMutationTargetKind.Page
         ? $"{RootName} / {PageTitle}"

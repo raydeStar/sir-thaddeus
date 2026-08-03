@@ -17,7 +17,11 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { getWikiTree, listWikiRoots } from '../lib/wikiApi';
-import type { WikiChatContextInput, WikiMutationTargetInput } from '../lib/chatApi';
+import type {
+  WikiChatContextInput,
+  WikiMutationOperationInput,
+  WikiMutationTargetInput,
+} from '../lib/chatApi';
 import { useWikiContextStore } from '../stores/wikiContextStore';
 
 export type WikiContextSelection = WikiChatContextInput;
@@ -119,6 +123,8 @@ export function ChatComposer({
   const setWikiContextValue = useWikiContextStore((s) => s.setValue);
   const mutationTargetValue = useWikiContextStore((s) => s.mutationTargetValue);
   const setMutationTargetValue = useWikiContextStore((s) => s.setMutationTargetValue);
+  const mutationOperationValue = useWikiContextStore((s) => s.mutationOperationValue);
+  const setMutationOperationValue = useWikiContextStore((s) => s.setMutationOperationValue);
   const [wikiContextOptions, setWikiContextOptions] = useState<WikiContextOption[]>([]);
   const [wikiContextLoading, setWikiContextLoading] = useState(false);
   const [highlightedCommandIndex, setHighlightedCommandIndex] = useState(0);
@@ -135,6 +141,10 @@ export function ChatComposer({
   const selectedMutationTargetOption = useMemo(
     () => mutationTargetOptions.find((option) => option.value === mutationTargetValue) ?? null,
     [mutationTargetOptions, mutationTargetValue],
+  );
+  const mutationOperationOptions = useMemo(
+    () => operationOptionsFor(selectedMutationTargetOption),
+    [selectedMutationTargetOption],
   );
 
   const slashCommandState = useMemo(() => parseSlashCommand(value), [value]);
@@ -226,8 +236,9 @@ export function ChatComposer({
     await onSubmit(
       value.trim(),
       selectionFor(selectedWikiContextOption),
-      mutationTargetFor(selectedMutationTargetOption),
+      mutationTargetFor(selectedMutationTargetOption, mutationOperationValue),
     );
+    setMutationOperationValue('');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -426,7 +437,10 @@ export function ChatComposer({
             )}
             <select
               value={mutationTargetValue}
-              onChange={(event) => setMutationTargetValue(event.target.value)}
+              onChange={(event) => {
+                setMutationTargetValue(event.target.value);
+                setMutationOperationValue('');
+              }}
               disabled={sending || wikiContextLoading || mutationTargetOptions.length === 0}
               aria-label="Wiki write target"
               data-testid="chat-wiki-mutation-target"
@@ -446,6 +460,7 @@ export function ChatComposer({
                   event.preventDefault();
                   event.stopPropagation();
                   setMutationTargetValue('');
+                  setMutationOperationValue('');
                 }}
                 className="relative z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-subtle transition hover:bg-canvas-raised hover:text-ink"
                 aria-label="Clear Wiki write target"
@@ -455,6 +470,47 @@ export function ChatComposer({
                 <X className="h-3 w-3" strokeWidth={2} />
               </button>
             ) : null}
+          </div>
+        ) : null}
+
+        {showWikiContext && selectedMutationTargetOption ? (
+          <div
+            className={`relative flex min-w-0 max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors duration-150 ${
+              mutationOperationValue
+                ? 'border-emerald-400/60 bg-emerald-500/10 text-ink'
+                : 'border-line bg-canvas text-ink-muted hover:border-line-strong hover:text-ink'
+            } ${sending ? 'cursor-not-allowed opacity-60' : ''}`}
+            data-testid="chat-wiki-bound-effect-active"
+            title={
+              mutationOperationValue
+                ? `${operationLabel(mutationOperationValue)} on ${selectedMutationTargetOption.title} for this submission`
+                : 'Read-only until you explicitly choose one Wiki write operation'
+            }
+          >
+            <ShieldCheck
+              className={`h-3.5 w-3.5 shrink-0 ${mutationOperationValue ? 'text-emerald-600' : 'text-ink-subtle'}`}
+              strokeWidth={1.8}
+              aria-hidden
+            />
+            <span className="min-w-0 truncate font-medium">
+              {mutationOperationValue ? operationLabel(mutationOperationValue) : 'Read only'}
+            </span>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-subtle" strokeWidth={1.8} aria-hidden />
+            <select
+              value={mutationOperationValue}
+              onChange={(event) => setMutationOperationValue(event.target.value)}
+              disabled={sending}
+              aria-label="Wiki bound operation"
+              data-testid="chat-wiki-bound-operation"
+              className="absolute inset-0 cursor-pointer opacity-0 disabled:cursor-not-allowed"
+            >
+              <option value="">Read only</option>
+              {mutationOperationOptions.map((operation) => (
+                <option key={operation} value={operation}>
+                  {operationLabel(operation)}
+                </option>
+              ))}
+            </select>
           </div>
         ) : null}
 
@@ -513,10 +569,46 @@ function selectionFor(option: WikiContextOption | null): WikiContextSelection | 
 
 function mutationTargetFor(
   option: WikiContextOption | null,
+  operationValue: string,
 ): WikiMutationTargetSelection | undefined {
-  if (option?.mode === 'root' && option.rootId) return { mode: 'root', rootId: option.rootId };
-  if (option?.mode === 'page' && option.pageId) return { mode: 'page', pageId: option.pageId };
+  const operation = asMutationOperation(operationValue);
+  if (option?.mode === 'root' && option.rootId) {
+    return { mode: 'root', rootId: option.rootId, ...(operation ? { operation } : {}) };
+  }
+  if (option?.mode === 'page' && option.pageId) {
+    return { mode: 'page', pageId: option.pageId, ...(operation ? { operation } : {}) };
+  }
   return undefined;
+}
+
+function operationOptionsFor(option: WikiContextOption | null): WikiMutationOperationInput[] {
+  if (option?.mode === 'root') return ['page_create', 'root_rename'];
+  if (option?.mode === 'page') return ['page_read', 'page_update', 'page_rename', 'page_delete'];
+  return [];
+}
+
+function asMutationOperation(value: string): WikiMutationOperationInput | undefined {
+  const known: WikiMutationOperationInput[] = [
+    'page_read',
+    'page_create',
+    'page_update',
+    'page_rename',
+    'page_delete',
+    'root_rename',
+  ];
+  return known.find((operation) => operation === value);
+}
+
+function operationLabel(value: string): string {
+  switch (value) {
+    case 'page_read': return 'Read selected page';
+    case 'page_create': return 'Create page here';
+    case 'page_update': return 'Replace selected page';
+    case 'page_rename': return 'Rename selected page';
+    case 'page_delete': return 'Delete selected page';
+    case 'root_rename': return 'Rename selected root';
+    default: return 'Read only';
+  }
 }
 
 

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using SirThaddeus.Agent.Pipeline;
 using Thaddeus.SharedTypes;
 
 namespace Thaddeus.Runtime.Chat;
@@ -199,7 +200,7 @@ public static partial class WorkPlanBuilder
             plan.Steps.Select((step, index) =>
                 $"{index + 1}. {step.Label} [capability={step.Capability}]"));
         return $"{originalPrompt.TrimEnd()}\n\n" +
-               "[USER-APPROVED WORK PLAN]\n" +
+               $"{WikiBoundEffectContract.ApprovedWorkPlanMarker}\n" +
                $"{steps}\n" +
                "Follow the approved order for remaining work. Normal safety, tool policy, " +
                "permission checks, and verification still apply. If a step is impossible or " +

@@ -120,6 +120,8 @@ public sealed class ToolLoopStep : ITurnStep
         // exactly one reconciliation round before adopting a draft.
         var reconciliationNudges = 0;
         var useDefaultWikiRootLocationContract = false;
+        var boundEffectAttempted = false;
+        var explicitReadAttempted = false;
 
         if (ShouldAddCalculatorSetupHint(context))
         {
@@ -129,7 +131,8 @@ public sealed class ToolLoopStep : ITurnStep
                 "label the previous terms first, then call calculator for each derived term."));
         }
 
-        if (string.IsNullOrWhiteSpace(context.ForcedTool))
+        if (context.WikiMutationTarget is null &&
+            string.IsNullOrWhiteSpace(context.ForcedTool))
         {
             forcedToolForNextRound = WikiRootCreateSelectionPolicy.TrySelect(
                 context.UserText,
@@ -173,6 +176,80 @@ public sealed class ToolLoopStep : ITurnStep
             IReadOnlyList<ToolDefinition>? tools = context.ToolDefs.Count > 0
                 ? context.ToolDefs
                 : null;
+            if (round == 0)
+            {
+                var boundEffect = string.IsNullOrWhiteSpace(forcedTool)
+                    ? WikiBoundEffectContract.Project(context.WikiMutationTarget, tools ?? [])
+                    : new WikiBoundEffectProjection(
+                        Active: false,
+                        ToolAvailable: false,
+                        ToolName: null,
+                        Tools: tools ?? [],
+                        Reason: "upstream-forced-tool");
+                LogWikiBoundEffectActivation(context, boundEffect);
+                if (boundEffect.Active)
+                {
+                    tools = boundEffect.ToolAvailable ? boundEffect.Tools : null;
+                    forcedTool = boundEffect.ToolAvailable ? boundEffect.ToolName : null;
+                }
+            }
+            else if (boundEffectAttempted)
+            {
+                // The approved effect is a one-shot contract. After its single
+                // attempt, let the model summarize the observed result without
+                // advertising another mutation opportunity.
+                tools = null;
+                forcedTool = null;
+            }
+            var explicitOperationProjection = WikiExplicitOperationToolPolicy.Project(
+                context.WikiMutationTarget,
+                tools ?? []);
+            if (explicitOperationProjection.Active)
+            {
+                tools = explicitOperationProjection.Tools;
+                if (!string.IsNullOrWhiteSpace(forcedTool) &&
+                    ToolCapabilityRegistry.ResolveCapability(forcedTool) == ToolCapability.WikiWrite)
+                {
+                    forcedTool = null;
+                }
+            }
+            if (round == 0)
+            {
+                LogWikiExplicitOperationGateActivation(context, explicitOperationProjection);
+            }
+            var explicitReadProjection = round == 0
+                ? WikiExplicitReadOperationContract.Project(context.WikiMutationTarget, tools ?? [])
+                : new WikiExplicitReadProjection(
+                    Active: false,
+                    ToolAvailable: false,
+                    ToolName: null,
+                    Tools: tools ?? [],
+                    Reason: explicitReadAttempted ? "one-shot-complete" : "inactive");
+            if (explicitReadProjection.Active)
+            {
+                tools = explicitReadProjection.ToolAvailable ? explicitReadProjection.Tools : null;
+                forcedTool = explicitReadProjection.ToolAvailable ? explicitReadProjection.ToolName : null;
+            }
+            else if (round > 0 && explicitReadAttempted)
+            {
+                // An explicit read is also a one-shot contract. The second
+                // round receives only the observed result and must summarize.
+                tools = null;
+                forcedTool = null;
+            }
+            if (round == 0)
+            {
+                LogWikiExplicitReadOperationActivation(context, explicitReadProjection);
+                if (!explicitReadProjection.Active || !explicitReadProjection.ToolAvailable)
+                {
+                    LogWikiExplicitReadReceiptActivation(
+                        context,
+                        activated: false,
+                        reason: explicitReadProjection.Active
+                            ? explicitReadProjection.Reason
+                            : "ineligible-turn");
+                }
+            }
             if (tools is not null)
             {
                 var temporalProjectedTools = WikiRootTemporalDeferralToolPolicy.Project(
@@ -351,6 +428,27 @@ public sealed class ToolLoopStep : ITurnStep
                 var toolName = call.Function.Name;
                 var rawArgs = call.Function.Arguments ?? "{}";
                 var args = ApplyArgsRewriters(context, toolName, rawArgs);
+                var explicitReadBinding = WikiExplicitReadOperationContract.Bind(
+                    context.WikiMutationTarget,
+                    toolName,
+                    args);
+                if (explicitReadBinding.Active)
+                {
+                    explicitReadAttempted = true;
+                    args = explicitReadBinding.Arguments;
+                }
+                var explicitOperationDecision = WikiExplicitOperationToolPolicy.EvaluateCall(
+                    context.WikiMutationTarget,
+                    toolName);
+                var boundEffectBinding = WikiBoundEffectContract.Bind(
+                    context.WikiMutationTarget,
+                    toolName,
+                    args);
+                if (boundEffectBinding.Active)
+                {
+                    boundEffectAttempted = true;
+                    args = boundEffectBinding.Arguments;
+                }
                 if (!redirectedBatch)
                 {
                     var toolSteering = await _executionControl.ReachCheckpointAsync(
@@ -393,9 +491,29 @@ public sealed class ToolLoopStep : ITurnStep
                     .ConfigureAwait(false);
 
                 var sw = Stopwatch.StartNew();
-                var outcome = await ExecuteSingleCallAsync(
-                        context, toolName, args, activityId, pureComputeResults, cancellationToken)
-                    .ConfigureAwait(false);
+                var outcome = explicitOperationDecision.Active && !explicitOperationDecision.Allowed
+                    ? new ToolCallOutcome(
+                        WikiExplicitOperationToolPolicy.BuildBlockedResult(
+                            context.WikiMutationTarget!),
+                        Ok: false,
+                        Error: "wiki_explicit_operation_required")
+                    : explicitReadBinding.Active && !explicitReadBinding.Allowed
+                        ? new ToolCallOutcome(
+                            WikiExplicitReadOperationContract.BuildBlockedResult(
+                                context.WikiMutationTarget!,
+                                explicitReadBinding.Reason),
+                            Ok: false,
+                            Error: "wiki_explicit_read_mismatch")
+                    : boundEffectBinding.Active && !boundEffectBinding.Allowed
+                        ? new ToolCallOutcome(
+                        WikiBoundEffectContract.BuildBlockedResult(
+                            context.WikiMutationTarget!,
+                            boundEffectBinding.Reason),
+                        Ok: false,
+                        Error: "wiki_bound_effect_mismatch")
+                    : await ExecuteSingleCallAsync(
+                            context, toolName, args, activityId, pureComputeResults, cancellationToken)
+                        .ConfigureAwait(false);
                 sw.Stop();
 
                 await _sink.ToolCompletedAsync(
@@ -420,6 +538,35 @@ public sealed class ToolLoopStep : ITurnStep
                     Result = outcome.ResultText,
                     Success = outcome.Ok,
                 });
+
+                if (explicitReadBinding.Active &&
+                    explicitReadBinding.Allowed &&
+                    WikiExplicitReadOperationContract.TryBuildVerifiedReceipt(
+                        context.WikiMutationTarget,
+                        toolName,
+                        outcome.Ok,
+                        outcome.ResultText,
+                        out var readReceipt))
+                {
+                    LogWikiExplicitReadReceiptActivation(
+                        context,
+                        activated: true,
+                        reason: "verified-page-read");
+                    var updated = context with
+                    {
+                        LlmMessages = messages,
+                        ToolCallsMade = toolCallsMade,
+                        AssistantDraft = readReceipt,
+                    };
+                    return new StepResult.Continue(updated);
+                }
+                if (explicitReadBinding.Active)
+                {
+                    LogWikiExplicitReadReceiptActivation(
+                        context,
+                        activated: false,
+                        reason: "unverified-read-result");
+                }
 
                 if (outcome.Ok && LooksLikePlacesDiscoverNeedsLocation(toolName, outcome.ResultText, context.UserText))
                 {
@@ -617,6 +764,66 @@ public sealed class ToolLoopStep : ITurnStep
             $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
             "event=wiki_root_non_action_pruning " +
             $"decision={(activated ? "activated" : "inactive")}");
+    }
+
+    private void LogWikiBoundEffectActivation(
+        TurnContext context,
+        WikiBoundEffectProjection projection)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_bound_effect " +
+            $"decision={(projection.Active && projection.ToolAvailable ? "activated" : "inactive")} " +
+            $"reason={projection.Reason}");
+    }
+
+    private void LogWikiExplicitOperationGateActivation(
+        TurnContext context,
+        WikiExplicitOperationProjection projection)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_explicit_operation_gate " +
+            $"decision={(projection.Active ? "activated" : "inactive")} " +
+            $"withheld_write_tools={projection.WithheldWriteCount}");
+    }
+
+    private void LogWikiExplicitReadOperationActivation(
+        TurnContext context,
+        WikiExplicitReadProjection projection)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_explicit_read_operation " +
+            $"decision={(projection.Active && projection.ToolAvailable ? "activated" : "inactive")} " +
+            $"reason={projection.Reason}");
+    }
+
+    private void LogWikiExplicitReadReceiptActivation(
+        TurnContext context,
+        bool activated,
+        string reason)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "EXPERIMENT_ACTIVATION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "event=wiki_explicit_read_receipt " +
+            $"decision={(activated ? "activated" : "inactive")} reason={reason}");
     }
 
     private void LogWikiRootDefaultLocationActivation(TurnContext context, bool activated)

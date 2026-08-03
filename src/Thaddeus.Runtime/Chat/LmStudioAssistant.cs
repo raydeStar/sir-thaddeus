@@ -287,13 +287,34 @@ public sealed partial class LmStudioAssistant : IAssistant
                 preferredUnits: PreferredUnits,
                 offlineMode: OfflineMode)),
         };
-        if (options.WikiMutationTarget is { } mutationTarget)
+        if (options.WikiMutationTarget is
+            {
+                Kind: WikiMutationTargetKind.Page,
+                Operation: WikiMutationOperation.PageRead,
+            } readTarget)
         {
             llmMessages.Add(LlmChatMessage.System(
-                "[USER-SELECTED WIKI WRITE TARGET]\n" +
-                $"The user explicitly limited Wiki mutations for this turn to the {mutationTarget.Kind.ToString().ToLowerInvariant()} " +
-                $"'{mutationTarget.DisplayName}'. Use its exact displayed names for by-name tools. " +
-                "Do not mutate another Wiki resource, do not substitute a similar target, and stop if the requested work cannot be completed inside this scope."));
+                "[USER-APPROVED WIKI READ]\n" +
+                $"The user explicitly chose to read the selected Wiki page '{readTarget.DisplayName}' for this submission. " +
+                "The runtime owns page identity, permission, and verification. " +
+                "Call the single supplied read function once with only its optional payload fields, then answer from the returned page content."));
+        }
+        else if (options.WikiMutationTarget is { Operation: { } operation } boundTarget)
+        {
+            llmMessages.Add(LlmChatMessage.System(
+                "[USER-APPROVED WIKI EFFECT]\n" +
+                $"The user explicitly chose to {WikiBoundEffectContract.DisplayName(operation)} on the " +
+                $"Wiki {boundTarget.Kind.ToString().ToLowerInvariant()} '{boundTarget.DisplayName}' for this submission. " +
+                "The runtime owns target identity, placement, concurrency, permission, and verification. " +
+                "Call the single supplied function once and provide only its payload fields. Do not invent target fields."));
+        }
+        else if (options.WikiMutationTarget is { } mutationTarget)
+        {
+            llmMessages.Add(LlmChatMessage.System(
+                "[USER-SELECTED WIKI READ-ONLY TARGET]\n" +
+                $"The user selected the Wiki {mutationTarget.Kind.ToString().ToLowerInvariant()} " +
+                $"'{mutationTarget.DisplayName}', but did not approve a write operation for this submission. " +
+                "Wiki read tools remain available; no Wiki mutation is authorized."));
         }
         llmMessages.AddRange(BuildHistory(thread, userText));
 

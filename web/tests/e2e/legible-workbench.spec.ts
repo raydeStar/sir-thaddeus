@@ -222,7 +222,7 @@ test.describe('legible workbench UX', () => {
     const thread = await threadResponse.json() as { id: string };
     let submitted: {
       wikiContext?: unknown;
-      wikiMutationTarget?: { mode?: string; pageId?: string };
+      wikiMutationTarget?: { mode?: string; pageId?: string; operation?: string };
     } | null = null;
     await page.route(
       `${baseUrl}/api/threads/${encodeURIComponent(thread.id)}/messages`,
@@ -239,12 +239,18 @@ test.describe('legible workbench UX', () => {
     await expect(page.getByTestId('chat-wiki-mutation-target-active')).toContainText('Write target');
     await expect(page.getByTestId('chat-wiki-mutation-target-active')).toContainText('Approved page');
     await expect(page.getByTestId('chat-wiki-context')).toHaveValue('');
+    await expect(page.getByTestId('chat-wiki-bound-effect-active')).toContainText('Read only');
+    await page.getByTestId('chat-wiki-bound-operation').selectOption('page_read');
+    await expect(page.getByTestId('chat-wiki-bound-effect-active')).toContainText('Read selected page');
+    await page.getByTestId('chat-wiki-bound-operation').selectOption('page_update');
+    await expect(page.getByTestId('chat-wiki-bound-effect-active')).toContainText('Replace selected page');
 
     await page.getByTestId('chat-input').fill('Update the approved page.');
     await page.getByTestId('chat-send').click();
     await expect.poll(() => submitted?.wikiMutationTarget).toEqual({
       mode: 'page',
       pageId: created.page.id,
+      operation: 'page_update',
     });
     expect(submitted?.wikiContext).toBeUndefined();
   });

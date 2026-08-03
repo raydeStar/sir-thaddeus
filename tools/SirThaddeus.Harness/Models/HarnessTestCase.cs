@@ -169,6 +169,10 @@ public sealed record HarnessWikiMutationTargetSetup
     [JsonPropertyName("page_title")]
     [YamlMember(Alias = "page_title")]
     public string? PageTitle { get; init; }
+
+    [JsonPropertyName("operation")]
+    [YamlMember(Alias = "operation")]
+    public string? Operation { get; init; }
 }
 
 public sealed record HarnessStateSetup
