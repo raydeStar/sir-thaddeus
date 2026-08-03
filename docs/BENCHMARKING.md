@@ -5,6 +5,11 @@ separately. A tool, retrieval, or state-management gain may improve the user
 outcome without making the underlying model more knowledgeable. Reports must
 name the primary lane and its guardrails before showing a score.
 
+For stable metric definitions and the mechanical known-win ratchet, use
+[BENCHMARK_METRICS.md](BENCHMARK_METRICS.md). For additive test-bank work, use
+[BENCHMARK_REBUILD_PLAN.md](BENCHMARK_REBUILD_PLAN.md); that plan is not a
+release gate.
+
 ## Scorecards
 
 | Scorecard | Question | Typical controls | Primary evidence |

@@ -4,6 +4,42 @@
 
 _No entries yet._
 
+## 1.0.1 — 2026-08-03 — Broader benchmarks, clearer evidence
+
+This patch release makes Sir Thaddeus's benchmark program more complete,
+repeatable, and easier to review. It does not claim a new model-capacity or
+assistant-behavior uplift.
+
+### Measurement and research
+
+- Broadened the benchmark scorecard beyond answer accuracy to cover verified
+  tool and state outcomes, response validity, truthful no-action behavior,
+  latency, context use, resource cost, and regression-sensitive product
+  qualities.
+- Added explicit metric ownership, formulas, compatibility requirements,
+  small-sample rules, hard safety gates, and lifecycle states so a reported
+  improvement has a stable meaning across runs.
+- Defined a compact benchmark-bank rebuild plan, capped at 100 reviewed cases,
+  with paired controls, semantic mutations, exact repeats, disjoint validation,
+  and before/after reporting.
+- Added retention checks for previously measured wins so speed, safety, or
+  context improvements are less likely to disappear simply because the headline
+  task score stays flat.
+- Recorded fresh small- and larger-model diagnostics, including the rejected
+  Wiki operation-safety candidate, its useful directional gains, and the
+  remaining semantic content-binding limitation.
+
+### Release discipline
+
+- Extended the release checklist to require a compatible benchmark evidence
+  snapshot, separate model-capacity, harness-capability, and product-quality
+  reporting, and retained-win verification when applicable.
+- Consolidated current evidence and stop rules so unsuccessful experiments stay
+  visible without leaving dormant behavior in the production assistant.
+
+For the reader-friendly overview, see
+[`docs/releases/v1.0.1.md`](docs/releases/v1.0.1.md).
+
 ## 1.0.0 — 2026-07-30 — Hello, world!
 
 The first stable public GitHub release of Sir Thaddeus.

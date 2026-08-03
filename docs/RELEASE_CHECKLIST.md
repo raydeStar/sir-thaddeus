@@ -199,6 +199,23 @@ If any Beta item is broken in a way that would surprise a power user, either fix
 - [ ] [CHANGELOG.md](../CHANGELOG.md) has a v1.0 entry.
 - [ ] All relative markdown links resolve.
 
+## Benchmark Scorecard
+
+- [ ] Name the benchmark evidence status: attach a compatible versioned snapshot,
+      or state why no compatible snapshot exists for this release.
+- [ ] When a compatible snapshot exists, compare it with the previous compatible
+      release and report model capacity, harness capability, and product quality
+      separately.
+- [ ] Record missing observations and manual/platform-specific skips explicitly;
+      never render missing telemetry as zero or a pass.
+- [ ] If the retention registry has active entries for seams changed by this
+      release, attach the evaluator's passing `benchrun retention check` report.
+
+The multi-phase work in
+[BENCHMARK_REBUILD_PLAN.md](BENCHMARK_REBUILD_PLAN.md) is intentionally not a
+release prerequisite. Metric definitions and lifecycle rules are in
+[BENCHMARK_METRICS.md](BENCHMARK_METRICS.md).
+
 ---
 
 ## Sign-off
