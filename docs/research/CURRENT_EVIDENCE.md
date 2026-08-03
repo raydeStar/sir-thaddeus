@@ -5,8 +5,8 @@
 **Production baseline before the current promotion:** `69caf87`; the retained
 typed selected-target Wiki operation candidate is `8478531` and has cleared
 development, exact repeat, disjoint validation, focused tests, full local tests,
-browser E2E, and a real headless conversation smoke. Protected delivery remains
-the final promotion gate.
+browser E2E, and a real headless conversation smoke. Protected delivery is
+tracked in product PR `#307`.
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
