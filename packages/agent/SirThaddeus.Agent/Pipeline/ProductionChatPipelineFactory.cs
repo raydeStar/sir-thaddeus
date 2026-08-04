@@ -111,7 +111,7 @@ public static class ProductionChatPipelineFactory
             new AutoMemoryExtractStep(
                 options.AutoMemoryExtractor,
                 options.ActiveProfileIdGetter),
-            new ResponseComposerStep(),
+            new ResponseComposerStep(options.LogEvent),
         ]);
 
         return new ChatPipeline(steps, options.LogEvent, options.ExecutionControl);
