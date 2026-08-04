@@ -178,6 +178,14 @@ selected on only `4/6`, below its frozen binding-dominance gate. Gold and
 product code did not run. Do not bundle selection, parsing, rewriting, and
 response projection to optimize these authored fixtures.
 
+Grounded semantic-delta binding is also closed on current evidence. A fresh
+prerequisite reached exact verified final state on all `6/6` explicitly
+authorized typed Wiki updates under unchanged LFM 2.5 1.2B, so the proposed
+gold delta had no causal headroom and did not run. Only `2/4` controls preserved
+state, with three forbidden write selections on missing-value and ambiguous-
+target requests. Treat that as a distinct product-safety research seam; do not
+retrofit it into the rejected semantic-binding contract.
+
 Return to economical outcome accumulation at an under-sampled, independently
 verifiable product boundary. Keep broad routing, prompt, retrieval,
 response-contract, path-binding, schema-only file creation, generic

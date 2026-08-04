@@ -102,6 +102,19 @@ on fresh tasks. Product implementation is eligible only if the oracle produces
 a dominant causal improvement while preserving no-action, permission, validity,
 latency, token, and raw-language guardrails.
 
+### Prerequisite result
+
+The fresh prerequisite rejected this candidate before the gold arm. Unchanged
+LFM 2.5 1.2B completed all six explicitly authorized typed updates with exact
+verified final state and six successful Wiki writes, leaving zero positive
+headroom for a semantic-delta oracle. It preserved only two of four no-action or
+clarification controls and made three forbidden write selections across the
+missing-value and ambiguous-target cases. Those failures are a separate safety
+seam; they do not authorize adding clarification policy to the semantic-binding
+candidate. Raw, same-prompt direct, gold, repeat, validation, and product code
+did not run. Reopen semantic-delta binding only after ordinary fresh outcomes
+produce a new repeated cluster with measurable unchanged-harness headroom.
+
 ## Stop and reopen rules
 
 - **Reversible schema normalization:** reopen after at least three fresh
