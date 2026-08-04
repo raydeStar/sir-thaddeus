@@ -410,6 +410,113 @@ public class LmStudioClientSelfHealingTests : IDisposable
             advertised.GetProperty("function").GetProperty("name").GetString());
     }
 
+    [Fact]
+    public async Task DocumentedPythonicToolCall_IsStrictlyNormalized_WhenOpenAiCallsAreAbsent()
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            choices = new[]
+            {
+                new
+                {
+                    message = new
+                    {
+                        role = "assistant",
+                        content = (string?)null,
+                        reasoning_content = "thinking\n<|tool_call_start|>[wiki_update(page='Cedar', revision=3, flags=[True, None], metadata={'source':'local'})]<|tool_call_end|>"
+                    },
+                    finish_reason = "stop"
+                }
+            }
+        });
+        var handler = new SequenceHttpHandler([(HttpStatusCode.OK, body)]);
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        var response = await client.ChatAsync(SimpleMessages, [MakeToolDefinition("wiki_update")]);
+
+        Assert.False(response.IsComplete);
+        var call = Assert.Single(response.ToolCalls!);
+        Assert.Equal("wiki_update", call.Function.Name);
+        using var arguments = JsonDocument.Parse(call.Function.Arguments);
+        Assert.Equal("Cedar", arguments.RootElement.GetProperty("page").GetString());
+        Assert.Equal(3, arguments.RootElement.GetProperty("revision").GetInt64());
+        Assert.True(arguments.RootElement.GetProperty("flags")[0].GetBoolean());
+        Assert.Equal(JsonValueKind.Null, arguments.RootElement.GetProperty("flags")[1].ValueKind);
+        Assert.Equal("local", arguments.RootElement.GetProperty("metadata").GetProperty("source").GetString());
+    }
+
+    [Theory]
+    [InlineData("<|tool_call_start|>[unadvertised(value='x')]<|tool_call_end|>")]
+    [InlineData("<|tool_call_start|>[wiki_update(value=get_secret())]<|tool_call_end|>")]
+    [InlineData("<|tool_call_start|>[wiki_update(*args)]<|tool_call_end|>")]
+    [InlineData("<|tool_call_start|>[wiki_update(value='x')]<|tool_call_end|><|tool_call_start|>[wiki_update(value='y')]<|tool_call_end|>")]
+    public async Task DocumentedPythonicToolCall_FailsClosed_OnUntrustedSyntax(string reasoning)
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            choices = new[]
+            {
+                new
+                {
+                    message = new { role = "assistant", content = (string?)null, reasoning_content = reasoning },
+                    finish_reason = "stop"
+                }
+            }
+        });
+        var handler = new SequenceHttpHandler([(HttpStatusCode.OK, body)]);
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        var response = await client.ChatAsync(SimpleMessages, [MakeToolDefinition("wiki_update")]);
+
+        Assert.True(response.IsComplete);
+        Assert.Null(response.ToolCalls);
+    }
+
+    [Fact]
+    public async Task OpenAiToolCalls_RemainAuthoritative_OverFallbackText()
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            choices = new[]
+            {
+                new
+                {
+                    message = new
+                    {
+                        role = "assistant",
+                        content = (string?)null,
+                        reasoning_content = "<|tool_call_start|>[unadvertised(value='x')]<|tool_call_end|>",
+                        tool_calls = new[]
+                        {
+                            new
+                            {
+                                id = "native-1",
+                                type = "function",
+                                function = new { name = "wiki_update", arguments = "{\"page\":\"Cedar\"}" }
+                            }
+                        }
+                    },
+                    finish_reason = "tool_calls"
+                }
+            }
+        });
+        var handler = new SequenceHttpHandler([(HttpStatusCode.OK, body)]);
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        var response = await client.ChatAsync(SimpleMessages, [MakeToolDefinition("wiki_update")]);
+
+        Assert.Equal("native-1", Assert.Single(response.ToolCalls!).Id);
+    }
+
     // ── Response Builders ──────────────────────────────────────────────
 
     [Fact]

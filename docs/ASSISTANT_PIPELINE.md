@@ -13,6 +13,16 @@ freeze researched configuration and provenance; capability-keyed certificates
 record what the exact observed configuration actually demonstrated. Neither
 profile presence nor ordinary chat success grants a capability.
 
+At the OpenAI-compatible provider boundary, native `tool_calls` are
+authoritative. If they are absent, the client may normalize exactly one
+balanced Liquid-style `<|tool_call_start|>...<|tool_call_end|>` block from a
+reasoning or content field. The fallback is model-ID-blind, accepts only
+advertised function names, keyword arguments, and bounded JSON-compatible
+literals, and never evaluates code. Ambiguous delimiters, positional or spread
+arguments, expressions, unadvertised functions, and malformed input fail
+closed. This is transport compatibility, not tool authorization; normal
+selection, permission, target, execution, and verification boundaries remain.
+
 This document is the production contract for Sir Thaddeus chat orchestration.
 It describes behavior that is active on the default desktop and headless paths,
 the diagnostics that are intentionally supported, and the experiments that have

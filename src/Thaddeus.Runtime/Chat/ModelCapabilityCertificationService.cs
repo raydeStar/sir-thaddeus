@@ -15,7 +15,7 @@ namespace Thaddeus.Runtime.Chat;
 public static class ModelCapabilityPolicy
 {
     public const string WikiWriteCapability = "wiki_write";
-    public const string ProbeVersion = "wiki-write-v2";
+    public const string ProbeVersion = "wiki-write-v3";
     public const string ToolContractVersion = "wiki-tools-2026-07-30";
     private static readonly IReadOnlyList<string> CapabilityNames =
         Array.AsReadOnly([WikiWriteCapability]);
@@ -186,6 +186,7 @@ public sealed record ModelCapabilityStatus(
 public sealed class ModelCapabilityCertificationService
 {
     private static readonly TimeSpan RetestTimeout = TimeSpan.FromSeconds(60);
+    private const int RetestMaxOutputTokens = 512;
     private readonly ISettingsStore _settings;
     private readonly IMcpToolClient _mcp;
     private readonly LlmRuntimeRegistry _runtime;
@@ -445,7 +446,7 @@ public sealed class ModelCapabilityCertificationService
                 LlmChatMessage.User(user),
             ],
             [tool],
-            128,
+            RetestMaxOutputTokens,
             0.0,
             ct);
 

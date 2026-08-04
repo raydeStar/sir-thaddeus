@@ -211,6 +211,7 @@ public sealed class ModelCapabilityCertificationServiceTests
         Assert.True(status.Enabled);
         Assert.Equal(4, status.Certificate!.ModelCalls);
         Assert.Equal(4, llm.ChatCalls);
+        Assert.Equal([512, 512, 512, 512], llm.MaxTokenOverrides);
         Assert.All(status.Certificate.Probes, probe => Assert.True(probe.Passed));
         var savedCapabilities = (await store.GetAsync(CancellationToken.None)).ModelCapabilities!;
         Assert.Contains(status.Certificate, savedCapabilities.WikiWriteCertificates!);
@@ -333,6 +334,7 @@ public sealed class ModelCapabilityCertificationServiceTests
     {
         private readonly Queue<LlmResponse> _responses = new(responses);
         public int ChatCalls { get; private set; }
+        public List<int> MaxTokenOverrides { get; } = [];
 
         public Task<LlmResponse> ChatAsync(
             IReadOnlyList<LlmChatMessage> messages,
@@ -345,7 +347,10 @@ public sealed class ModelCapabilityCertificationServiceTests
             IReadOnlyList<ToolDefinition>? tools,
             int maxTokensOverride,
             CancellationToken cancellationToken = default)
-            => Next();
+        {
+            MaxTokenOverrides.Add(maxTokensOverride);
+            return Next();
+        }
 
         public Task<string?> GetModelNameAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<string?>("test-model");
