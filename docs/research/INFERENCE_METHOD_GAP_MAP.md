@@ -195,6 +195,7 @@ labels are not a materially different mechanism.
 
 ## Research basis
 
+- [AgentBeats winner transfer audit](AGENTBEATS_WINNER_TRANSFER_AUDIT_2026-08-03.md)
 - [LM Studio structured output](https://lmstudio.ai/docs/developer/openai-compat/structured-output)
 - [llama.cpp grammar and JSON-Schema support](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md)
 - [JSONSchemaBench](https://arxiv.org/abs/2501.10868)
