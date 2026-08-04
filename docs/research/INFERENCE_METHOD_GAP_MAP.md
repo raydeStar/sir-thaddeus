@@ -186,6 +186,17 @@ state, with three forbidden write selections on missing-value and ambiguous-
 target requests. Treat that as a distinct product-safety research seam; do not
 retrofit it into the rejected semantic-binding contract.
 
+The next active lane is external evaluation infrastructure, not another local
+Wiki mutation candidate. Build a thin evaluator-owned protocol adapter and
+start with the current pinned MCPMark filesystem easy tier, then advance to
+Verified standard tasks. Compare the same frozen model under the upstream
+scaffold and unchanged Sir before proposing any behavior change. ToolSandbox is
+the research-backed follow-up if official
+insufficient-information tasks reproduce the clarification safety cluster;
+tau-bench custom and AgentBeats A2A publication follow only after the adapter
+and fixed-model attribution gates pass. See the
+[standardized agent evaluation path](STANDARDIZED_AGENT_EVALUATION_PATH_2026-08-03.md).
+
 Return to economical outcome accumulation at an under-sampled, independently
 verifiable product boundary. Keep broad routing, prompt, retrieval,
 response-contract, path-binding, schema-only file creation, generic

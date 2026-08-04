@@ -95,6 +95,21 @@ Use a current LiveBench release, temporal questions, or another independently
 maintained holdout. Run difficult MATH, MuSR, and GPQA lanes only where the raw
 model is above the floor.
 
+For agentic harness confirmation, prefer externally maintained executable
+environments over making a passing local prompt artificially obscure. The
+recommended sequence is MCPMark Verified for fixed-model MCP/scaffold
+comparison, ToolSandbox for stateful insufficient-information diagnostics,
+tau-bench for a disclosed custom-orchestration submission, and AgentBeats for
+A2A/MCP interoperability. BFCL remains a model function-calling control; GAIA
+is a later general-assistant confirmation lane. The complete rationale and
+adapter gates are in the
+[standardized agent evaluation path](research/STANDARDIZED_AGENT_EVALUATION_PATH_2026-08-03.md).
+
+External task data, verifiers, containers, protocol dependencies, and
+credentials stay outside production assemblies. A competition adapter routes
+by protocol shape, never benchmark identity, and does not inherit promotion
+authority from a public leaderboard score.
+
 ### Reference conformance
 
 The generated-answer evaluator is the correct instrument for paired Thaddeus

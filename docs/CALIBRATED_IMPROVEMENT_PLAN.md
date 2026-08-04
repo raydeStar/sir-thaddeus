@@ -58,6 +58,24 @@ gold-content oracle. Do not add another prose router, infer user authorization,
 or use an `8B+` model-size rule as a substitute for exact-configuration
 capability certification.
 
+### Standardized external evaluation direction
+
+The semantic-delta prerequisite subsequently found unchanged LFM 2.5 1.2B at
+`6/6` exact authorized typed updates, so the gold arm had no positive headroom
+and did not run. Do not lower that baseline with contrived wording and call the
+result uplift. Preserve the reviewed 64-case bank; if local coverage expands,
+add no more than 32 fresh cases across ambiguity, stateful composition,
+capability interference, and failure/recovery.
+
+The next infrastructure seam is a thin evaluator-owned adapter for the current
+pinned MCPMark ten-task filesystem easy tier, followed by Verified standard
+tasks. It must compare the same frozen model under the upstream scaffold and
+unchanged Sir, keep benchmark tools and verifiers outside production, and route
+by protocol shape rather than task or benchmark identity. ToolSandbox is the
+targeted safety follow-up; tau-bench custom and AgentBeats are later public
+interoperability lanes. The complete contract is maintained in the
+[standardized agent evaluation path](research/STANDARDIZED_AGENT_EVALUATION_PATH_2026-08-03.md).
+
 ### July 19 harness redirect result
 
 The first verified-outcome redirect block is complete without a product

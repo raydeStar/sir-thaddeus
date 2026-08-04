@@ -25,9 +25,12 @@ folder is the deeper living record rather than the project pitch.
    is the single canonical report for the human-reviewed 100-case raw,
    same-prompt, direct-tools, and full-harness campaign across LFM 1.2B,
    LFM 8B-A1B, Gemma 26B-A4B, and Luna.
-6. [../CALIBRATED_IMPROVEMENT_PLAN.md](../CALIBRATED_IMPROVEMENT_PLAN.md)
+6. [STANDARDIZED_AGENT_EVALUATION_PATH_2026-08-03.md](STANDARDIZED_AGENT_EVALUATION_PATH_2026-08-03.md)
+   explains why harder wording is not uplift and selects MCPMark Verified,
+   ToolSandbox, tau-bench, and AgentBeats as the external evaluation sequence.
+7. [../CALIBRATED_IMPROVEMENT_PLAN.md](../CALIBRATED_IMPROVEMENT_PLAN.md)
    defines the current forward plan and stop rules.
-7. [../EXPERIMENTATION.md](../EXPERIMENTATION.md) defines the experiment
+8. [../EXPERIMENTATION.md](../EXPERIMENTATION.md) defines the experiment
    protocol; [../BENCHMARKING.md](../BENCHMARKING.md) defines the scorecards.
 
 ## Product-quality research
