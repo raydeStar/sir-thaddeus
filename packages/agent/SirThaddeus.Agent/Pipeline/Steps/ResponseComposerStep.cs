@@ -90,9 +90,6 @@ public sealed class ResponseComposerStep : ITurnStep
 
     private static string? TryBuildBlankWikiOutcomeReceipt(TurnContext context)
     {
-        if (!IsBlankWikiReceiptEnabled())
-            return null;
-
         var rootCalls = context.ToolCallsMade
             .Where(call => string.Equals(
                 call.ToolName,
@@ -100,8 +97,12 @@ public sealed class ResponseComposerStep : ITurnStep
                 StringComparison.OrdinalIgnoreCase))
             .ToArray();
         var successful = rootCalls.LastOrDefault(call => call.Success);
-        if (successful is not null && TryReadSuccessfulRootName(successful.Result, out var createdName))
-            return $"Created the Wiki root **{createdName}**.";
+        if (successful is not null)
+        {
+            return TryReadSuccessfulRootName(successful.Result, out var createdName)
+                ? $"Created the Wiki root **{createdName}**."
+                : null;
+        }
 
         if (rootCalls.Length > 0)
         {
@@ -164,15 +165,6 @@ public sealed class ResponseComposerStep : ITurnStep
         {
             return string.Empty;
         }
-    }
-
-    private static bool IsBlankWikiReceiptEnabled()
-    {
-        var raw = Environment.GetEnvironmentVariable("ST_EXPERIMENT_BLANK_WIKI_RECEIPT");
-        return string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     private void LogBlankWikiOutcomeReceiptActivation(TurnContext context, bool activated)

@@ -116,7 +116,6 @@ public class ResponseComposerStepTests
     [Fact]
     public async Task Candidate_builds_verified_receipt_for_blank_successful_root_creation()
     {
-        using var candidate = new EnvironmentScope("ST_EXPERIMENT_BLANK_WIKI_RECEIPT", "1");
         var step = new ResponseComposerStep();
         var ctx = new TurnContext
         {
@@ -145,7 +144,6 @@ public class ResponseComposerStepTests
     [Fact]
     public async Task Candidate_builds_truthful_receipt_for_blank_failed_root_creation()
     {
-        using var candidate = new EnvironmentScope("ST_EXPERIMENT_BLANK_WIKI_RECEIPT", "1");
         var step = new ResponseComposerStep();
         var ctx = new TurnContext
         {
@@ -174,7 +172,6 @@ public class ResponseComposerStepTests
     [Fact]
     public async Task Candidate_acknowledges_blank_explicit_no_action_without_claiming_success()
     {
-        using var candidate = new EnvironmentScope("ST_EXPERIMENT_BLANK_WIKI_RECEIPT", "1");
         var step = new ResponseComposerStep();
         var ctx = new TurnContext
         {
@@ -193,7 +190,6 @@ public class ResponseComposerStepTests
     [Fact]
     public async Task Candidate_does_not_replace_nonblank_conversational_response()
     {
-        using var candidate = new EnvironmentScope("ST_EXPERIMENT_BLANK_WIKI_RECEIPT", "1");
         var step = new ResponseComposerStep();
         var ctx = new TurnContext
         {
@@ -220,6 +216,34 @@ public class ResponseComposerStepTests
     }
 
     [Fact]
+    public async Task Successful_root_record_with_malformed_untrusted_result_fails_closed()
+    {
+        var step = new ResponseComposerStep();
+        var ctx = new TurnContext
+        {
+            ThreadId = "t1",
+            MessageId = "m1",
+            UserText = "Create a Wiki root named Cedar Notes.",
+            AssistantDraft = null,
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "wiki_root_create",
+                    Arguments = "{\"name\":\"Cedar Notes\"}",
+                    Result = "not valid verified JSON",
+                    Success = true,
+                }
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Equal("(The model returned an empty response.)", term.Response.Text);
+    }
+
+    [Fact]
     public async Task Honours_pre_cancelled_token()
     {
         var step = new ResponseComposerStep();
@@ -231,18 +255,4 @@ public class ResponseComposerStepTests
             step.ExecuteAsync(ctx, cts.Token));
     }
 
-    private sealed class EnvironmentScope : IDisposable
-    {
-        private readonly string _name;
-        private readonly string? _previous;
-
-        public EnvironmentScope(string name, string value)
-        {
-            _name = name;
-            _previous = Environment.GetEnvironmentVariable(name);
-            Environment.SetEnvironmentVariable(name, value);
-        }
-
-        public void Dispose() => Environment.SetEnvironmentVariable(_name, _previous);
-    }
 }
