@@ -14,6 +14,12 @@ claim that the model knows more or scores better on MMLU. It asks a narrower
 question: can this configured model use this production tool contract without
 violating a critical target boundary?
 
+The [model tier calibration](MODEL_TIER_CALIBRATION.md) used by research does
+not alter this contract. A floor, anchor, or ceiling role never grants a
+production capability. The exact observable configuration must still earn its
+certificate, so a small model can remain available while unsupported optional
+functions fail closed.
+
 ## User controls
 
 Each capability has three modes:

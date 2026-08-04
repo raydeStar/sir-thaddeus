@@ -1,6 +1,6 @@
 # Current Evidence
 
-**Evidence cutoff:** August 3, 2026
+**Evidence cutoff:** August 4, 2026
 
 **Production baseline before the current promotion:** `69caf87`; the retained
 typed selected-target Wiki operation candidate is `8478531` and has cleared
@@ -21,6 +21,19 @@ The evidence does not support a broad claim that prompt scaffolds, extra
 reasoning calls, routing, or a larger comparison model reliably improve the
 closed-book capacity of a fixed small model. Those mechanisms have often added
 calls and latency while tying or losing to unchanged Thaddeus.
+
+### Model-panel calibration
+
+- LFM 8B-A1B is now the primary discovery anchor because the sealed panel found
+  repeated strict-family harness uplift at a practical local resource point.
+- LFM 1.2B remains the floor and safety stress model, not a universal promotion
+  veto. LFM 2.6B is the edge-default candidate pending exact qualification, and
+  Gemma 26B-A4B remains the ceiling transfer check.
+- This is research policy only. Delivery remains exact-configuration-specific
+  through capability certificates. The reviewed 64-case Wiki regression at 8B
+  is direct evidence against production rules based on parameter count.
+- See [MODEL_TIER_CALIBRATION.md](../MODEL_TIER_CALIBRATION.md) for the complete
+  promotion, transfer, and recalibration contract.
 
 ### Typed selected-target Wiki operations
 

@@ -33,6 +33,11 @@ Declare which scorecard is primary and make the other two guardrails. A
 capability improvement may be valuable without raising MMLU, but it must not
 silently damage model-capacity or product-quality controls.
 
+Model experiments use the fixed evaluation panel and promotion sequence in
+[MODEL_TIER_CALIBRATION.md](MODEL_TIER_CALIBRATION.md). Panel roles select where
+to discover and transfer-test a mechanism; they are not production feature
+rules and do not replace same-model controls.
+
 ## Core loop
 
 ```text
