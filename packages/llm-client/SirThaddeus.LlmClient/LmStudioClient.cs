@@ -506,7 +506,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
             NormalizePath(GetOptionsSnapshot().ChatCompletionPath), body, _json, cancellationToken);
 
         if (response.IsSuccessStatusCode)
-            return await ParseResponse(response, cancellationToken);
+            return await ParseResponse(response, tools, cancellationToken);
 
         var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -522,7 +522,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
                 NormalizePath(GetOptionsSnapshot().ChatCompletionPath), bare, _json, cancellationToken);
 
             if (response.IsSuccessStatusCode)
-                return await ParseResponse(response, cancellationToken);
+                return await ParseResponse(response, tools, cancellationToken);
 
             errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -710,6 +710,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
     /// </summary>
     private async Task<LlmResponse> ParseResponse(
         HttpResponseMessage response,
+        IReadOnlyList<ToolDefinition>? advertisedTools,
         CancellationToken cancellationToken)
     {
         var raw = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -729,11 +730,20 @@ public sealed class LmStudioClient : IConfigurableLlmClient
         var choice = completion.Choices[0];
         var message = choice.Message;
 
-        var hasToolCalls = message?.ToolCalls is { Count: > 0 };
+        IReadOnlyList<ToolCallRequest>? toolCalls = message?.ToolCalls;
+        if (toolCalls is not { Count: > 0 } && message is not null)
+        {
+            toolCalls = DocumentedToolCallParser.TryParse(
+                [message.ReasoningContent, message.Reasoning, message.Content],
+                advertisedTools);
+        }
+        var hasToolCalls = toolCalls is { Count: > 0 };
 
         // Strip thinking scaffold at the transport layer so callers never
         // see raw <think> blocks regardless of model or path.
         var content = StripThinkBlocks(message?.Content);
+        if (hasToolCalls)
+            content = DocumentedToolCallParser.RemoveBalancedBlock(content);
 
         // When the model emitted only thinking in Content alongside tool
         // calls, null out Content so it doesn't leak into history.
@@ -745,7 +755,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
             IsComplete = !hasToolCalls,
             Content = content,
             ReasoningContent = message?.ReasoningContent,
-            ToolCalls = message?.ToolCalls,
+            ToolCalls = toolCalls,
             FinishReason = choice.FinishReason,
             Usage = completion.Usage
         };
@@ -1278,6 +1288,9 @@ public sealed class LmStudioClient : IConfigurableLlmClient
         /// </summary>
         [JsonPropertyName("reasoning_content")]
         public string? ReasoningContent { get; init; }
+
+        [JsonPropertyName("reasoning")]
+        public string? Reasoning { get; init; }
 
         [JsonPropertyName("tool_calls")]
         public List<ToolCallRequest>? ToolCalls { get; init; }

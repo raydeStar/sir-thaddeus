@@ -201,8 +201,10 @@ To add or customize a benchmark:
 See [EXPERIMENTATION.md](EXPERIMENTATION.md) for branch and promotion policy and
 [TESTING.md](TESTING.md) for local commands and artifact locations. The
 [calibrated improvement plan](CALIBRATED_IMPROVEMENT_PLAN.md) defines the active
-sequence of work; the [research findings](research/README.md) preserve current
-and historical verdicts.
+sequence of work; [model tier calibration](MODEL_TIER_CALIBRATION.md) defines
+the fixed discovery and transfer panel without creating runtime model-size
+rules; the [research findings](research/README.md) preserve current and
+historical verdicts.
 
 ## Interpreting the Wiki result
 

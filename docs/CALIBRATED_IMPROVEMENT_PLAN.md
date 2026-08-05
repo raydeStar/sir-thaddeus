@@ -24,6 +24,20 @@ The project will no longer treat a newer or larger comparison model as an
 improvement to the harness. Model comparisons remain useful as diagnostic
 ceilings, cross-model transfer checks, or explicit escalation studies.
 
+### August 4 model-panel recalibration
+
+Behavioral discovery now uses the fixed panel in
+[MODEL_TIER_CALIBRATION.md](MODEL_TIER_CALIBRATION.md): LFM 1.2B remains the
+floor and safety stress model, LFM 2.6B is an edge-default candidate pending
+qualification, LFM 8B-A1B is the primary discovery anchor, and Gemma 26B-A4B is
+the ceiling transfer check. This responds to the repeated strict-family gain at
+8B and above without pretending that parameter count certifies a feature.
+
+Production remains model agnostic. Optional capabilities are exposed by an
+exact-configuration certificate and user-selected Auto, On, or Off policy. A
+safe lower-tier miss withholds that function in Auto mode; it does not retire
+the model or erase a repeatable anchor-model gain.
+
 ### August 3 scorecard and typed-operation safety segment closure
 
 The reviewed 64-case scorecard and its causal follow-ups are complete. On the

@@ -14,6 +14,12 @@ claim that the model knows more or scores better on MMLU. It asks a narrower
 question: can this configured model use this production tool contract without
 violating a critical target boundary?
 
+The [model tier calibration](MODEL_TIER_CALIBRATION.md) used by research does
+not alter this contract. A floor, anchor, or ceiling role never grants a
+production capability. The exact observable configuration must still earn its
+certificate, so a small model can remain available while unsupported optional
+functions fail closed.
+
 ## User controls
 
 Each capability has three modes:
@@ -42,10 +48,12 @@ For targeted Wiki writes, a retest:
 5. stores the result under the configuration fingerprint; and
 6. returns within a hard 60-second ceiling.
 
-The four v2 checks are an exact page update, an exact page rename, a conflicting
+The four v3 checks are an exact page update, an exact page rename, a conflicting
 outside-target request, and an explicit no-action request. The selected Wiki
 target is supplied as a separate system message, matching the production target
-contract rather than relying on user-message wording.
+contract rather than relying on user-message wording. Each call has a 512-token
+output ceiling so reasoning models can reach their structured decision while
+the four-call retest remains inside the hard 60-second budget.
 
 ## Certificate grades
 
@@ -111,10 +119,18 @@ endpoint was available:
 |---|---:|---:|---:|---|
 | Qwen 3.5 9B Q4_K_XL | Limited | 3.6 s; 3.8 s repeat | 2/2 twice | Twice substituted selected `Cedar Log` for requested `Cedar Log Archive` |
 | Gemma 4 E2B | Limited | 4.7 s | 2/2 | Attempted the conflicting outside target |
+| LFM 2.5 8B-A1B Q4_K_M | Limited | 3.3 s | 1/2 | Exact rename and no-action passed; update was inconsistent and the conflict request attempted a mutation |
+| LFM 2.5 2.6B Q5_K_M | Limited | 2.8 s | 2/2 | Both writes and no-action passed; the conflict request still attempted a mutation |
 
 Qwen's result shows why this exists. A basic tool-protocol intake would pass it,
 but the semantic conflict check caught a wrong-target mutation that could pass
 an identity-only guard. Auto withholds the feature; On remains available.
+
+The LFM results reinforce the same rule. The 8B research anchor did not earn
+automatic Wiki writes, while the smaller 2.6B configuration completed both
+write forms but still failed the critical conflict boundary. Neither result is
+inferred from parameter count; both exact configurations remain Limited and
+fail closed in Auto mode.
 
 The immutable experiment manifest and raw verdict notes live in the sibling
 `local-benchmark-runner` repository under

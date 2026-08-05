@@ -1,6 +1,6 @@
 # Current Evidence
 
-**Evidence cutoff:** August 3, 2026
+**Evidence cutoff:** August 4, 2026
 
 **Production baseline before the current promotion:** `69caf87`; the retained
 typed selected-target Wiki operation candidate is `8478531` and has cleared
@@ -22,6 +22,42 @@ reasoning calls, routing, or a larger comparison model reliably improve the
 closed-book capacity of a fixed small model. Those mechanisms have often added
 calls and latency while tying or losing to unchanged Thaddeus.
 
+### Model-panel calibration
+
+- LFM 8B-A1B is now the primary discovery anchor because the sealed panel found
+  repeated strict-family harness uplift at a practical local resource point.
+- LFM 1.2B remains the floor and safety stress model, not a universal promotion
+  veto. LFM 2.6B is the edge-default candidate pending exact qualification, and
+  Gemma 26B-A4B remains the ceiling transfer check.
+- This is research policy only. Delivery remains exact-configuration-specific
+  through capability certificates. The reviewed 64-case Wiki regression at 8B
+  is direct evidence against production rules based on parameter count.
+- See [MODEL_TIER_CALIBRATION.md](../MODEL_TIER_CALIBRATION.md) for the complete
+  promotion, transfer, and recalibration contract.
+
+### August 4 transfer audit and capability intake
+
+- The only justified fresh transfer retest was the newest plan-gated
+  single-operator seam. On six new 8B-A1B Q4_K_M positive tasks, the supplied
+  single schema scored `3/6` exact and valid versus `5/6` for the six-schema
+  menu, with zero wins and two losses. It reduced prompt tokens 75 percent and
+  preserved all `6/6` no-action controls, but failed the frozen correctness and
+  paired gates. It was rejected without repeat or validation.
+- The typed execution ledger remains accepted and was not rerun; it is
+  deterministic and already repeated. The bounded specialist, typed menu, and
+  older read-only MCPMark oracles are superseded or already conclusive, so new
+  model calls there would not answer a live causal question.
+- Wiki write v3 capability intake classified exact 8B-A1B Q4_K_M as Limited
+  (`1/2` exact writes, `1/2` safety controls) and exact 2.6B Q5_K_M as Limited
+  (`2/2` exact writes, `1/2` safety controls). Both attempted a mutation on the
+  target-conflict probe, so Auto withholds Wiki writes. Existing 1.2B evidence
+  was retained without a redundant rerun.
+- The intake exposed a generic provider boundary: 128 output tokens could end
+  before a reasoning model emitted its structured decision. V3 uses a bounded
+  512-token cap and a new certificate fingerprint. The LM Studio client also
+  gained a strict model-ID-blind fallback for Liquid's documented special-token
+  Pythonic calls; native OpenAI calls remain authoritative and unsafe syntax
+  fails closed.
 ### August 4 LFM 2.6B causal follow-ups
 
 - A fresh terminal-requested-value prerequisite did not reproduce the four
