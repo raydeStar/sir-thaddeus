@@ -108,7 +108,7 @@ public class ToolLoopStepTests
             LlmReply.Tool("get_rows", "{\"ticker\":\"ACME\"}"),
             LlmReply.Tool(
                 StructuredToolResultViewStore.ToolName,
-                "{\"handle\":\"result_1\",\"operation\":\"aggregate\",\"field\":\"Close\",\"statistic\":\"max\"}"),
+                "{\"requests\":[{\"handle\":\"result_1\",\"operation\":\"aggregate\",\"field\":\"Close\",\"statistic\":\"max\"}]}"),
             LlmReply.Final("done"));
         var step = BuildStep(
             llm,
@@ -170,35 +170,28 @@ public class ToolLoopStepTests
     }
 
     [Fact]
-    public void Structured_result_views_support_filter_slice_and_fail_closed_for_unknown_handles()
+    public void Structured_result_views_batch_filter_and_slice_and_fail_closed_for_unknown_handles()
     {
         var store = new StructuredToolResultViewStore();
         Assert.True(store.TryProject("read", "{}", BuildLargeRows(), out var projection, out _));
 
         Assert.True(store.TryExecute(
             StructuredToolResultViewStore.ToolName,
-            $"{{\"handle\":\"{projection.Handle}\",\"operation\":\"filter\",\"field\":\"Close\",\"operator\":\"gte\",\"value\":495,\"limit\":3}}",
+            $"{{\"requests\":[{{\"handle\":\"{projection.Handle}\",\"operation\":\"filter\",\"field\":\"Close\",\"operator\":\"gte\",\"value\":495,\"limit\":3}},{{\"handle\":\"{projection.Handle}\",\"operation\":\"slice\",\"offset\":20,\"limit\":2}}]}}",
             out var filtered,
             out _,
             out var filteredBytes));
         Assert.True(filtered.Ok);
+        Assert.Contains("\"request_count\":2", filtered.ResultText, StringComparison.Ordinal);
         Assert.Contains("\"matched_count\":5", filtered.ResultText, StringComparison.Ordinal);
         Assert.Contains("\"returned_count\":3", filtered.ResultText, StringComparison.Ordinal);
+        Assert.Contains("\"offset\":20", filtered.ResultText, StringComparison.Ordinal);
+        Assert.Contains("\"returned_count\":2", filtered.ResultText, StringComparison.Ordinal);
         Assert.True(filteredBytes <= StructuredToolResultViewStore.MaximumViewBytes);
 
         Assert.True(store.TryExecute(
             StructuredToolResultViewStore.ToolName,
-            $"{{\"handle\":\"{projection.Handle}\",\"operation\":\"slice\",\"offset\":20,\"limit\":2}}",
-            out var sliced,
-            out _,
-            out _));
-        Assert.True(sliced.Ok);
-        Assert.Contains("\"offset\":20", sliced.ResultText, StringComparison.Ordinal);
-        Assert.Contains("\"returned_count\":2", sliced.ResultText, StringComparison.Ordinal);
-
-        Assert.True(store.TryExecute(
-            StructuredToolResultViewStore.ToolName,
-            "{\"handle\":\"result_999\",\"operation\":\"schema\"}",
+            "{\"requests\":[{\"handle\":\"result_999\",\"operation\":\"schema\"}]}",
             out var unknown,
             out _,
             out _));

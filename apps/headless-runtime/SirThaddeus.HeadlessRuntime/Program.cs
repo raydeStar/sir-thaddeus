@@ -248,6 +248,17 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         currentSettings.ActivePersonalityId,
         SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings));
 
+    Action<string, string> pipelineLog = (action, message) => audit.Append(new AuditEvent
+    {
+        Actor = "agent",
+        Action = action,
+        Result = "ok",
+        Details = new Dictionary<string, object>
+        {
+            ["message"] = message
+        }
+    });
+
     var toolLoop = new ToolLoopStep(
         llm,
         agentMcp,
@@ -263,7 +274,8 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
             new ExistenceSearchArgsRewriter()
         ],
         maxRoundTrips: 6,
-        maxOutputTokens: Math.Max(1, currentSettings.Llm.MaxTokens));
+        maxOutputTokens: Math.Max(1, currentSettings.Llm.MaxTokens),
+        log: pipelineLog);
 
     var sanitize = new Func<TurnContext, string, string>(
         (ctx, draft) => ApplyHeadlessQualityGuards(
@@ -314,17 +326,6 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
     var guardrails = new ReasoningGuardrailsPipeline(llm, audit);
     var completionValidator = new CompletionValidator(llm);
     var repairLoop = new RepairLoop(llm, completionValidator);
-    Action<string, string> pipelineLog = (action, message) => audit.Append(new AuditEvent
-    {
-        Actor = "agent",
-        Action = action,
-        Result = "ok",
-        Details = new Dictionary<string, object>
-        {
-            ["message"] = message
-        }
-    });
-
     var pipeline = ProductionChatPipelineFactory.Build(new ProductionChatPipelineOptions
     {
         Mcp = agentMcp,

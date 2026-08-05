@@ -29,43 +29,54 @@ internal sealed class StructuredToolResultViewStore
         {
             Name = ToolName,
             Description =
-                "Inspect a large JSON result already returned this turn. Use first_last for endpoints, " +
-                "slice/sample for rows, filter for matching rows, aggregate for numeric count/min/max/sum/average, " +
-                "or schema for fields. Results are bounded; the original remains unchanged in audit evidence.",
+                "Inspect large JSON results already returned this turn. Put every needed lookup across all handles " +
+                "into ONE requests array (maximum 8). Each request supports schema, sample, first_last, slice, " +
+                "filter, or aggregate. Results are bounded; originals remain unchanged in audit evidence.",
             Parameters = new Dictionary<string, object>
             {
                 ["type"] = "object",
                 ["properties"] = new Dictionary<string, object>
                 {
-                    ["handle"] = new Dictionary<string, object>
+                    ["requests"] = new Dictionary<string, object>
                     {
-                        ["type"] = "string",
-                        ["description"] = "Opaque handle from a structured tool-result preview.",
-                    },
-                    ["operation"] = new Dictionary<string, object>
-                    {
-                        ["type"] = "string",
-                        ["enum"] = new[] { "schema", "sample", "first_last", "slice", "filter", "aggregate" },
-                    },
-                    ["offset"] = new Dictionary<string, object> { ["type"] = "integer", ["minimum"] = 0 },
-                    ["limit"] = new Dictionary<string, object> { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = MaximumRows },
-                    ["field"] = new Dictionary<string, object> { ["type"] = "string" },
-                    ["operator"] = new Dictionary<string, object>
-                    {
-                        ["type"] = "string",
-                        ["enum"] = new[] { "eq", "ne", "lt", "lte", "gt", "gte", "contains" },
-                    },
-                    ["value"] = new Dictionary<string, object>
-                    {
-                        ["description"] = "Filter comparison value; strings, numbers, and booleans are accepted.",
-                    },
-                    ["statistic"] = new Dictionary<string, object>
-                    {
-                        ["type"] = "string",
-                        ["enum"] = new[] { "count", "min", "max", "sum", "average" },
+                        ["type"] = "array",
+                        ["minItems"] = 1,
+                        ["maxItems"] = 8,
+                        ["items"] = new Dictionary<string, object>
+                        {
+                            ["type"] = "object",
+                            ["properties"] = new Dictionary<string, object>
+                            {
+                                ["handle"] = new Dictionary<string, object> { ["type"] = "string" },
+                                ["operation"] = new Dictionary<string, object>
+                                {
+                                    ["type"] = "string",
+                                    ["enum"] = new[] { "schema", "sample", "first_last", "slice", "filter", "aggregate" },
+                                },
+                                ["offset"] = new Dictionary<string, object> { ["type"] = "integer", ["minimum"] = 0 },
+                                ["limit"] = new Dictionary<string, object> { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = MaximumRows },
+                                ["field"] = new Dictionary<string, object> { ["type"] = "string" },
+                                ["operator"] = new Dictionary<string, object>
+                                {
+                                    ["type"] = "string",
+                                    ["enum"] = new[] { "eq", "ne", "lt", "lte", "gt", "gte", "contains" },
+                                },
+                                ["value"] = new Dictionary<string, object>
+                                {
+                                    ["description"] = "Filter comparison value; strings, numbers, and booleans are accepted.",
+                                },
+                                ["statistic"] = new Dictionary<string, object>
+                                {
+                                    ["type"] = "string",
+                                    ["enum"] = new[] { "count", "min", "max", "sum", "average" },
+                                },
+                            },
+                            ["required"] = new[] { "handle", "operation" },
+                            ["additionalProperties"] = false,
+                        },
                     },
                 },
-                ["required"] = new[] { "handle", "operation" },
+                ["required"] = new[] { "requests" },
                 ["additionalProperties"] = false,
             },
         },
@@ -150,7 +161,7 @@ internal sealed class StructuredToolResultViewStore
             ["first"] = stored.Root[0],
             ["last"] = stored.Root[count - 1],
             ["available_views"] = new[] { "schema", "sample", "first_last", "slice", "filter", "aggregate" },
-            ["instruction"] = "Use tool_result_view with this handle only if the preview is insufficient.",
+            ["instruction"] = "If any preview is insufficient, batch every needed lookup into one tool_result_view requests array.",
         };
         var json = JsonSerializer.Serialize(full, JsonOptions);
         if (Encoding.UTF8.GetByteCount(json) <= MaximumViewBytes)
@@ -197,19 +208,35 @@ internal sealed class StructuredToolResultViewStore
         {
             using var document = JsonDocument.Parse(arguments);
             var args = document.RootElement;
+            operation = "batch";
             if (args.ValueKind != JsonValueKind.Object ||
-                !TryGetString(args, "handle", out var handle) ||
-                !TryGetString(args, "operation", out operation))
+                !args.TryGetProperty("requests", out var requests) ||
+                requests.ValueKind != JsonValueKind.Array ||
+                requests.GetArrayLength() is < 1 or > 8)
             {
-                outcome = Error("invalid_arguments", "handle and operation are required");
-            }
-            else if (!_results.TryGetValue(handle, out var stored))
-            {
-                outcome = Error("unknown_handle", "the handle is not available in this turn");
+                outcome = Error("invalid_arguments", "requests must contain one to eight view requests");
             }
             else
             {
-                outcome = Execute(stored, args, operation);
+                var results = new List<JsonElement>();
+                string? firstError = null;
+                foreach (var request in requests.EnumerateArray())
+                {
+                    var itemOutcome = ExecuteOne(request);
+                    using var itemDocument = JsonDocument.Parse(itemOutcome.ResultText);
+                    results.Add(itemDocument.RootElement.Clone());
+                    firstError ??= itemOutcome.Error;
+                }
+
+                var batchResult = SerializeBounded(new Dictionary<string, object?>
+                {
+                    ["operation"] = "batch",
+                    ["request_count"] = requests.GetArrayLength(),
+                    ["results"] = results,
+                });
+                outcome = firstError is null
+                    ? new ToolCallOutcome(batchResult, Ok: true, Error: null)
+                    : new ToolCallOutcome(batchResult, Ok: false, Error: firstError);
             }
         }
         catch (JsonException)
@@ -219,6 +246,20 @@ internal sealed class StructuredToolResultViewStore
 
         resultBytes = Encoding.UTF8.GetByteCount(outcome.ResultText);
         return true;
+
+        ToolCallOutcome ExecuteOne(JsonElement request)
+        {
+            if (request.ValueKind != JsonValueKind.Object ||
+                !TryGetString(request, "handle", out var handle) ||
+                !TryGetString(request, "operation", out var itemOperation))
+            {
+                return Error("invalid_arguments", "each request requires handle and operation");
+            }
+
+            return !_results.TryGetValue(handle, out var stored)
+                ? Error("unknown_handle", "the handle is not available in this turn")
+                : Execute(stored, request, itemOperation);
+        }
     }
 
     private static ToolCallOutcome Execute(StoredResult stored, JsonElement args, string operation)
