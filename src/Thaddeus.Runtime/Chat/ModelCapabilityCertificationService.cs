@@ -17,8 +17,11 @@ public static class ModelCapabilityPolicy
     public const string WikiWriteCapability = "wiki_write";
     public const string ProbeVersion = "wiki-write-v3";
     public const string ToolContractVersion = "wiki-tools-2026-07-30";
+    public const string ForcedToolTransportCapability = "forced_tool_transport";
+    public const string ForcedToolTransportProbeVersion = "forced-tool-transport-v1";
+    public const string ForcedToolTransportContractVersion = "openai-single-visible-tool-v1";
     private static readonly IReadOnlyList<string> CapabilityNames =
-        Array.AsReadOnly([WikiWriteCapability]);
+        Array.AsReadOnly([WikiWriteCapability, ForcedToolTransportCapability]);
     public static IReadOnlyList<string> RegisteredCapabilities => CapabilityNames;
 
     public static bool IsRegistered(string capability) =>
@@ -33,6 +36,24 @@ public static class ModelCapabilityPolicy
             ToolContractVersion,
             legacyMode: document.ModelCapabilities?.WikiWriteMode,
             legacyCertificates: document.ModelCapabilities?.WikiWriteCertificates);
+
+    public static ForcedToolChoiceMode ResolveForcedToolChoiceMode(
+        SettingsDocument document,
+        LlmRuntimeHealthSnapshot runtime)
+    {
+        var settings = document.ModelCapabilities ?? new ModelCapabilitySettings();
+        var certificate = FindCurrentCertificate(
+            document.Llm,
+            GetCertificates(settings, ForcedToolTransportCapability),
+            runtime,
+            ForcedToolTransportCapability,
+            ForcedToolTransportProbeVersion,
+            ForcedToolTransportContractVersion);
+        return string.Equals(certificate?.Status, "certified", StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(certificate?.SelectedMode, "auto", StringComparison.OrdinalIgnoreCase)
+            ? ForcedToolChoiceMode.Auto
+            : ForcedToolChoiceMode.Required;
+    }
 
     public static bool IsEnabled(
         SettingsDocument document,
@@ -183,7 +204,7 @@ public sealed record ModelCapabilityStatus(
 /// Runs a bounded, side-effect-free model intake check. It sends real Wiki
 /// tool schemas to the model but never executes a returned call.
 /// </summary>
-public sealed class ModelCapabilityCertificationService
+public sealed partial class ModelCapabilityCertificationService
 {
     private static readonly TimeSpan RetestTimeout = TimeSpan.FromSeconds(60);
     private const int RetestMaxOutputTokens = 512;
@@ -191,15 +212,15 @@ public sealed class ModelCapabilityCertificationService
     private readonly IMcpToolClient _mcp;
     private readonly LlmRuntimeRegistry _runtime;
     private readonly ILogger<ModelCapabilityCertificationService> _logger;
-    private readonly Func<LlmSettings, ILlmClient> _clientFactory;
+    private readonly Func<LlmSettings, ForcedToolChoiceMode, ILlmClient> _clientFactory;
 
     public ModelCapabilityCertificationService(
         ISettingsStore settings,
         IMcpToolClient mcp,
         LlmRuntimeRegistry runtime,
         ILogger<ModelCapabilityCertificationService> logger)
-        : this(settings, mcp, runtime, logger, llm =>
-            LlmClientFactory.Create(AssistantRouter.ToClientOptions(llm)))
+        : this(settings, mcp, runtime, logger, (llm, mode) =>
+            LlmClientFactory.Create(AssistantRouter.ToClientOptions(llm, mode)))
     {
     }
 
@@ -208,7 +229,7 @@ public sealed class ModelCapabilityCertificationService
         IMcpToolClient mcp,
         LlmRuntimeRegistry runtime,
         ILogger<ModelCapabilityCertificationService> logger,
-        Func<LlmSettings, ILlmClient> clientFactory)
+        Func<LlmSettings, ForcedToolChoiceMode, ILlmClient> clientFactory)
     {
         _settings = settings;
         _mcp = mcp;
@@ -228,7 +249,12 @@ public sealed class ModelCapabilityCertificationService
         var normalized = ModelCapabilityPolicy.NormalizeCapabilityName(capability);
         if (!ModelCapabilityPolicy.IsRegistered(normalized))
             throw new KeyNotFoundException($"Unknown model capability '{capability}'.");
-        return GetWikiWriteStatusAsync(cancellationToken);
+        return normalized switch
+        {
+            ModelCapabilityPolicy.WikiWriteCapability => GetWikiWriteStatusAsync(cancellationToken),
+            ModelCapabilityPolicy.ForcedToolTransportCapability => GetForcedToolTransportStatusAsync(cancellationToken),
+            _ => throw new KeyNotFoundException($"Unknown model capability '{capability}'."),
+        };
     }
 
     public async Task<IReadOnlyList<ModelCapabilityStatus>> GetStatusesAsync(CancellationToken cancellationToken)
@@ -255,7 +281,7 @@ public sealed class ModelCapabilityCertificationService
 
         try
         {
-            client = _clientFactory(document.Llm);
+            client = _clientFactory(document.Llm, ForcedToolChoiceMode.Required);
             reportedModel = string.Equals(document.Llm.ModelId, "auto", StringComparison.OrdinalIgnoreCase)
                 ? await client.GetModelNameAsync(ct).ConfigureAwait(false)
                 : document.Llm.ModelId;
@@ -375,7 +401,12 @@ public sealed class ModelCapabilityCertificationService
         var normalized = ModelCapabilityPolicy.NormalizeCapabilityName(capability);
         if (!ModelCapabilityPolicy.IsRegistered(normalized))
             throw new KeyNotFoundException($"Unknown model capability '{capability}'.");
-        return RetestWikiWriteAsync(cancellationToken);
+        return normalized switch
+        {
+            ModelCapabilityPolicy.WikiWriteCapability => RetestWikiWriteAsync(cancellationToken),
+            ModelCapabilityPolicy.ForcedToolTransportCapability => RetestForcedToolTransportAsync(cancellationToken),
+            _ => throw new KeyNotFoundException($"Unknown model capability '{capability}'."),
+        };
     }
 
     internal static ModelCapabilityStatus BuildStatus(

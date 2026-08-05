@@ -35,6 +35,8 @@ test.describe('settings smoke', () => {
     await expect(page.getByTestId('settings-capability-wiki-write-mode')).toBeVisible();
     await expect(page.getByTestId('settings-capability-wiki-write-status')).toBeVisible();
     await expect(page.getByTestId('settings-capability-wiki-write-retest')).toBeVisible();
+    await expect(page.getByTestId('settings-capability-forced-tool-transport-status')).toBeVisible();
+    await expect(page.getByTestId('settings-capability-forced-tool-transport-retest')).toBeVisible();
 
     // The gatekeeper status banner must render (regardless of reachability).
     // Its `data-state` is one of: checking / active / unreachable /

@@ -126,6 +126,7 @@ export interface ModelCapabilityCertificate {
   elapsedMilliseconds: number;
   testedAt: string;
   probes: ModelCapabilityProbeResult[];
+  selectedMode?: 'required' | 'auto' | null;
 }
 
 export interface ModelCapabilitySettings {

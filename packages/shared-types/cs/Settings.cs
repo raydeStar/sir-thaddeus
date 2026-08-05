@@ -236,6 +236,7 @@ public sealed record ModelCapabilitySettings(
             hash.Add(certificate.Status, StringComparer.Ordinal);
             hash.Add(certificate.ConfigurationFingerprint, StringComparer.Ordinal);
             hash.Add(certificate.TestedAt);
+            hash.Add(certificate.SelectedMode, StringComparer.Ordinal);
         }
     }
 
@@ -264,6 +265,7 @@ public sealed record ModelCapabilitySettings(
                 a.ModelCalls != b.ModelCalls ||
                 a.ElapsedMilliseconds != b.ElapsedMilliseconds ||
                 a.TestedAt != b.TestedAt ||
+                !string.Equals(a.SelectedMode, b.SelectedMode, StringComparison.Ordinal) ||
                 !a.Probes.SequenceEqual(b.Probes))
                 return false;
         }
@@ -285,7 +287,8 @@ public sealed record ModelCapabilityCertificate(
     int ModelCalls,
     long ElapsedMilliseconds,
     DateTimeOffset TestedAt,
-    IReadOnlyList<ModelCapabilityProbeResult> Probes);
+    IReadOnlyList<ModelCapabilityProbeResult> Probes,
+    string? SelectedMode = null);
 
 /// <summary>One deterministic check within a capability certificate.</summary>
 public sealed record ModelCapabilityProbeResult(string Id, bool Passed, string Reason);

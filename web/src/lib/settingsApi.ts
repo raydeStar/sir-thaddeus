@@ -67,11 +67,12 @@ export interface ModelCapabilityCertificate {
   elapsedMilliseconds: number;
   testedAt: string;
   probes: ModelCapabilityProbeResult[];
+  selectedMode?: 'required' | 'auto' | null;
 }
 
 export interface ModelCapabilityStatusResponse {
   capability: string;
-  mode: 'auto' | 'on' | 'off';
+  mode: 'auto' | 'on' | 'off' | 'required';
   status: 'untested' | 'stale' | 'certified' | 'limited' | 'unsupported' | 'error';
   enabled: boolean;
   current: boolean;
@@ -89,6 +90,20 @@ export async function retestWikiWriteCapability(): Promise<ModelCapabilityStatus
   const res = await runtimeFetch(token(), '/api/settings/model-capabilities/wiki-write/retest', {
     method: 'POST',
   });
+  return asJson<ModelCapabilityStatusResponse>(res);
+}
+
+export async function getForcedToolTransportStatus(): Promise<ModelCapabilityStatusResponse> {
+  const res = await runtimeFetch(token(), '/api/settings/model-capabilities/forced-tool-transport');
+  return asJson<ModelCapabilityStatusResponse>(res);
+}
+
+export async function retestForcedToolTransport(): Promise<ModelCapabilityStatusResponse> {
+  const res = await runtimeFetch(
+    token(),
+    '/api/settings/model-capabilities/forced-tool-transport/retest',
+    { method: 'POST' },
+  );
   return asJson<ModelCapabilityStatusResponse>(res);
 }
 

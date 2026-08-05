@@ -285,6 +285,16 @@ public sealed class ConfiguredLlmModelRouter : ILlmModelRouter
 // ─────────────────────────────────────────────────────────────────────────
 
 /// <summary>
+/// OpenAI-compatible transport mode used after the orchestrator has already
+/// selected one exact tool and the client has narrowed the visible schema to it.
+/// </summary>
+public enum ForcedToolChoiceMode
+{
+    Required,
+    Auto,
+}
+
+/// <summary>
 /// Configuration for the LLM client.
 /// Maps 1:1 with the "llm" section in settings.json.
 /// </summary>
@@ -349,6 +359,13 @@ public sealed record LlmClientOptions
 
     public IReadOnlyDictionary<LlmTaskKind, string> ModelRoutes { get; init; } =
         new Dictionary<LlmTaskKind, string>();
+
+    /// <summary>
+    /// Transport mode for a caller-selected tool. Unknown configurations keep
+    /// the conservative <see cref="ForcedToolChoiceMode.Required"/> default.
+    /// Both modes still advertise only the selected tool.
+    /// </summary>
+    public ForcedToolChoiceMode ForcedToolChoiceMode { get; init; } = ForcedToolChoiceMode.Required;
 
     /// <summary>
     /// Maximum tokens in the response.

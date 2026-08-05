@@ -15,6 +15,7 @@ public static class RuntimeLlmOptionsFactory
             BaseUrl = settings.Llm.BaseUrl,
             ChatCompletionPath = settings.Llm.ChatCompletionPath,
             Model = settings.Llm.Model,
+            ForcedToolChoiceMode = ParseForcedToolChoiceMode(settings.Llm.ForcedToolChoiceMode),
             CodexCliPath = settings.Llm.CodexCliPath,
             CodexReasoningEffort = settings.Llm.CodexReasoningEffort,
             PreloadModelKey = settings.Llm.PreloadModelKey,
@@ -79,6 +80,11 @@ public static class RuntimeLlmOptionsFactory
         return UriHostsMatch(settings.Llm.BaseUrl, gatekeeperUrl) &&
                string.Equals(settings.Llm.Model, settings.Llm.GatekeeperModelId, StringComparison.OrdinalIgnoreCase);
     }
+
+    internal static ForcedToolChoiceMode ParseForcedToolChoiceMode(string? mode) =>
+        string.Equals(mode?.Trim(), "auto", StringComparison.OrdinalIgnoreCase)
+            ? ForcedToolChoiceMode.Auto
+            : ForcedToolChoiceMode.Required;
 
     private static bool UriHostsMatch(string left, string right)
     {

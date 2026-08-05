@@ -1,4 +1,5 @@
 using SirThaddeus.Config;
+using SirThaddeus.LlmClient;
 using SirThaddeus.RuntimeHost;
 
 namespace SirThaddeus.Tests;
@@ -31,6 +32,23 @@ public sealed class RuntimeLlmOptionsFactoryTests
         Assert.Equal("gpt-5.6-luna", options.Model);
         Assert.Equal("C:\\Tools\\codex.exe", options.CodexCliPath);
         Assert.Equal("high", options.CodexReasoningEffort);
+    }
+
+    [Theory]
+    [InlineData(null, ForcedToolChoiceMode.Required)]
+    [InlineData("required", ForcedToolChoiceMode.Required)]
+    [InlineData("unknown", ForcedToolChoiceMode.Required)]
+    [InlineData(" AUTO ", ForcedToolChoiceMode.Auto)]
+    public void BuildPrimary_NormalizesForcedToolChoiceMode(
+        string? configured,
+        ForcedToolChoiceMode expected)
+    {
+        var settings = new AppSettings
+        {
+            Llm = new LlmSettings { ForcedToolChoiceMode = configured! }
+        };
+
+        Assert.Equal(expected, RuntimeLlmOptionsFactory.BuildPrimary(settings).ForcedToolChoiceMode);
     }
 
     [Fact]

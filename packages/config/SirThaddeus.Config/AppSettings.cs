@@ -193,6 +193,14 @@ public sealed record LlmSettings
     [JsonPropertyName("model")]
     public string Model { get; init; } = "";
 
+    /// <summary>
+    /// Transport choice for a caller-selected single tool. The hybrid runtime
+    /// resolves this from an exact-configuration certificate; the legacy
+    /// headless host exposes the same explicit knob and defaults to required.
+    /// </summary>
+    [JsonPropertyName("forcedToolChoiceMode")]
+    public string ForcedToolChoiceMode { get; init; } = "required";
+
     [JsonPropertyName("codexCliPath")]
     public string? CodexCliPath { get; init; }
 
