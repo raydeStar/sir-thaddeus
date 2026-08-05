@@ -58,6 +58,37 @@ calls and latency while tying or losing to unchanged Thaddeus.
   gained a strict model-ID-blind fallback for Liquid's documented special-token
   Pythonic calls; native OpenAI calls remain authoritative and unsafe syntax
   fails closed.
+### August 4 LFM 2.6B causal follow-ups
+
+- A fresh terminal-requested-value prerequisite did not reproduce the four
+  ordering misses seen in the retired sealed bank. All three positives that
+  obtained successful requested evidence already ended on the requested value
+  and passed strict scoring (`3/3`); the frozen three-miss headroom gate was
+  therefore `0/3`. No product prompt, response rewriter, or dormant switch was
+  added. The historical ordering failures remain audit evidence only.
+- A separate clause-boundary Wiki-root referential selector established real
+  outcome headroom. Development and its byte-identical repeat each improved
+  intended writes `4/8 -> 7/8`, with three wins and zero losses. Disjoint
+  validation improved `6/10 -> 10/10`, with four wins, zero losses, exact
+  activation (`10/10` intended and `0/6` controls), full validity, and no state
+  regression. It remains validated but unmerged research because validation
+  model calls rose `40 -> 42` and tool calls `20 -> 23`, violating the frozen
+  no-added-calls gate. Candidate product SHA `6ce6d772` must not be described as
+  shipped behavior or tuned against the consumed holdout.
+- Blank Wiki-root outcomes supplied a distinct, promotable communication seam.
+  A response-composer receipt activates only when the draft is blank and the
+  outcome is already established by a successful typed root result, a failed
+  attempted root call, or explicit no-action intent. Development and exact
+  repeat improved `3/10 -> 8/10` with five wins and zero losses. Disjoint
+  validation improved `2/14 -> 9/14`; five wins were causally activated
+  receipts, two were inactive model variance, and there were zero paired
+  losses, false successes, state changes, or permission changes. The mechanism
+  cannot add provider calls because it runs after provider and tool work;
+  validation's observed `35 -> 36` call difference occurred only on inactive
+  paths and is disclosed as variance. The experiment switch was removed at
+  product SHA `4ba03c0b`; focused tests passed `21/21` and the full local gate
+  passed 2,960 tests with one skip. Protected delivery remains separate from
+  this local promotion branch.
 
 ### Typed selected-target Wiki operations
 

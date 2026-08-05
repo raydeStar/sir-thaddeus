@@ -114,6 +114,136 @@ public class ResponseComposerStepTests
     }
 
     [Fact]
+    public async Task Candidate_builds_verified_receipt_for_blank_successful_root_creation()
+    {
+        var step = new ResponseComposerStep();
+        var ctx = new TurnContext
+        {
+            ThreadId = "t1",
+            MessageId = "m1",
+            UserText = "Create a Wiki root named Alder Notes.",
+            AssistantDraft = "",
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "wiki_root_create",
+                    Arguments = "{\"name\":\"Alder Notes\"}",
+                    Result = "{\"ok\":true,\"root\":{\"name\":\"Alder Notes\"}}",
+                    Success = true,
+                }
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Equal("Created the Wiki root **Alder Notes**.", term.Response.Text);
+    }
+
+    [Fact]
+    public async Task Candidate_builds_truthful_receipt_for_blank_failed_root_creation()
+    {
+        var step = new ResponseComposerStep();
+        var ctx = new TurnContext
+        {
+            ThreadId = "t1",
+            MessageId = "m1",
+            UserText = "Create a Wiki root named Cedar Notes.",
+            AssistantDraft = null,
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "wiki_root_create",
+                    Arguments = "{\"name\":\"Cedar Notes\"}",
+                    Result = "Permission denied.",
+                    Success = false,
+                }
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Equal("I couldn't create the Wiki root **Cedar Notes**, so no changes were made.", term.Response.Text);
+    }
+
+    [Fact]
+    public async Task Candidate_acknowledges_blank_explicit_no_action_without_claiming_success()
+    {
+        var step = new ResponseComposerStep();
+        var ctx = new TurnContext
+        {
+            ThreadId = "t1",
+            MessageId = "m1",
+            UserText = "Do not create a Wiki Canvas root named Scratch.",
+            AssistantDraft = " ",
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Equal("No changes were made; I haven't created that Wiki root.", term.Response.Text);
+    }
+
+    [Fact]
+    public async Task Candidate_does_not_replace_nonblank_conversational_response()
+    {
+        var step = new ResponseComposerStep();
+        var ctx = new TurnContext
+        {
+            ThreadId = "t1",
+            MessageId = "m1",
+            UserText = "Create a Wiki root named Cedar Notes.",
+            AssistantDraft = "Done — Cedar Notes is ready.",
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "wiki_root_create",
+                    Arguments = "{\"name\":\"Cedar Notes\"}",
+                    Result = "{\"ok\":true,\"root\":{\"name\":\"Cedar Notes\"}}",
+                    Success = true,
+                }
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Equal("Done — Cedar Notes is ready.", term.Response.Text);
+    }
+
+    [Fact]
+    public async Task Successful_root_record_with_malformed_untrusted_result_fails_closed()
+    {
+        var step = new ResponseComposerStep();
+        var ctx = new TurnContext
+        {
+            ThreadId = "t1",
+            MessageId = "m1",
+            UserText = "Create a Wiki root named Cedar Notes.",
+            AssistantDraft = null,
+            ToolCallsMade =
+            [
+                new ToolCallRecord
+                {
+                    ToolName = "wiki_root_create",
+                    Arguments = "{\"name\":\"Cedar Notes\"}",
+                    Result = "not valid verified JSON",
+                    Success = true,
+                }
+            ],
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Equal("(The model returned an empty response.)", term.Response.Text);
+    }
+
+    [Fact]
     public async Task Honours_pre_cancelled_token()
     {
         var step = new ResponseComposerStep();
@@ -124,4 +254,5 @@ public class ResponseComposerStepTests
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
             step.ExecuteAsync(ctx, cts.Token));
     }
+
 }

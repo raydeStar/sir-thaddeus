@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using SirThaddeus.Agent;
 using SirThaddeus.Agent.Routing;
+using SirThaddeus.Agent.Validation;
 using SirThaddeus.Agent.Workflow;
 using SirThaddeus.AuditLog;
 using SirThaddeus.Config;
@@ -248,6 +249,27 @@ internal sealed class WorkflowChatRunCoordinator
         {
             selectedResponse = selectedResponse with { Text = normalizedExplicitLookupContract };
             workflowState.DraftAnswer = normalizedExplicitLookupContract;
+        }
+
+        if (ExplicitJsonOutputContractNormalizer.TryNormalize(
+                selectedResponse.Text,
+                request.JsonOutputTemplate,
+                out var normalizedJsonContract,
+                out var normalizedValueCount))
+        {
+            selectedResponse = selectedResponse with { Text = normalizedJsonContract };
+            workflowState.DraftAnswer = normalizedJsonContract;
+            _audit.Append(new AuditEvent
+            {
+                Actor = "runtime",
+                Action = "JSON_OUTPUT_CONTRACT_NORMALIZED",
+                Target = runState.RunId,
+                Result = "ok",
+                Details = new Dictionary<string, object>
+                {
+                    ["changed_value_count"] = normalizedValueCount
+                }
+            });
         }
 
         var completionReason = _completionReasonResolver.Resolve(

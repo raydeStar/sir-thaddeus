@@ -195,6 +195,25 @@ completion validation, create a conversational fast path, or weaken safety and
 response-contract checks. Any changed repair text still follows the complete
 existing validation and adoption path.
 
+## Explicit typed JSON output templates
+
+Headless API callers may attach a caller-owned `jsonOutputTemplate` to a chat
+request. The template is ordinary JSON whose placeholder values describe the
+requested response types. At the final response boundary, a path whose template
+value begins with `[NUMBER]` may convert an unambiguous numeric string to a JSON
+number. For example, a declared numeric value of `"26.06%"` becomes `26.06`;
+the magnitude is not scaled or recalculated.
+
+The contract is answer-blind. It never derives, rounds, compares, verifies, or
+replaces answer values. Invalid JSON, ambiguous prose, undeclared paths, keys,
+and already-correct values are preserved. With no explicit template, the step
+is inactive and ordinary conversational behavior is byte-for-byte unchanged.
+Activation records only a content-free changed-value count in the audit log.
+
+This is an integration response contract, not a benchmark route. Templates,
+expected answers, scorer predicates, task identifiers, and domain-specific
+rules remain outside production assemblies.
+
 ## Supported diagnostics
 
 `ST_ROUTING_LATENCY_TRACE=1` enables duration-only routing diagnostics. It may

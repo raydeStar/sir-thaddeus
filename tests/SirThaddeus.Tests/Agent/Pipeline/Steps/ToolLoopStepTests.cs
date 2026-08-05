@@ -67,6 +67,80 @@ public class ToolLoopStepTests
     }
 
     [Fact]
+    public async Task Read_only_dated_rows_retry_once_when_requested_market_close_date_is_missing()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool(
+                "get_rows",
+                "{\"ticker\":\"AMD\",\"start_date\":\"2024-03-15\",\"end_date\":\"2025-03-14\"}"),
+            LlmReply.Final("done"));
+        var calls = new List<string>();
+        var mcp = new StubMcp((_, arguments) =>
+        {
+            calls.Add(arguments);
+            return arguments.Contains("2025-03-15", StringComparison.Ordinal)
+                ? "[{\"Date\":\"2025-03-14T04:00:00.000Z\",\"Close\":100}]"
+                : "[{\"Date\":\"2025-03-13T04:00:00.000Z\",\"Close\":90}]";
+        });
+        var logs = new List<(string Event, string Message)>();
+        var step = BuildStep(llm, mcp: mcp, log: (name, message) => logs.Add((name, message)));
+        var context = NewContext() with
+        {
+            UserText = "Calculate the value through market close on March 14, 2025.",
+            LlmMessages =
+            [
+                ChatMessage.System("sys"),
+                ChatMessage.User("Calculate the value through market close on March 14, 2025."),
+            ],
+            ToolDefs = [ToolDefinitionFor("get_rows")],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Equal(2, calls.Count);
+        Assert.Contains("2025-03-14", calls[0], StringComparison.Ordinal);
+        Assert.Contains("2025-03-15", calls[1], StringComparison.Ordinal);
+        Assert.Equal(2, next.ToolCallsMade.Count);
+        Assert.Contains("2025-03-13", next.ToolCallsMade[0].Result, StringComparison.Ordinal);
+        Assert.Contains("2025-03-14", next.ToolCallsMade[1].Result, StringComparison.Ordinal);
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=requested_terminal_date_evidence", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Mutating_tool_is_never_retried_for_requested_date_coverage()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("wiki_page_update", "{\"end_date\":\"2025-03-14\"}"),
+            LlmReply.Final("done"));
+        var callCount = 0;
+        var mcp = new StubMcp(_ =>
+        {
+            callCount++;
+            return "[{\"Date\":\"2025-03-13T04:00:00.000Z\"}]";
+        });
+        var step = BuildStep(llm, mcp: mcp);
+        var context = NewContext() with
+        {
+            UserText = "Apply it through market close on March 14, 2025.",
+            LlmMessages =
+            [
+                ChatMessage.System("sys"),
+                ChatMessage.User("Apply it through market close on March 14, 2025."),
+            ],
+            ToolDefs = [ToolDefinitionFor("wiki_page_update")],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Equal(1, callCount);
+        Assert.Single(next.ToolCallsMade);
+    }
+
+    [Fact]
     public async Task Permission_denial_records_failure_and_skips_mcp()
     {
         // Gate denies; the step must not call MCP, must surface an error
