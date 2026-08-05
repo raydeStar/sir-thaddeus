@@ -67,6 +67,146 @@ public class ToolLoopStepTests
     }
 
     [Fact]
+    public async Task Large_read_only_json_is_projected_for_model_but_raw_evidence_is_preserved()
+    {
+        var raw = BuildLargeRows();
+        var llm = new FakeLlm(
+            LlmReply.Tool("get_rows", "{\"ticker\":\"ACME\"}"),
+            LlmReply.Final("done"));
+        var logs = new List<(string Event, string Message)>();
+        var step = BuildStep(
+            llm,
+            mcp: new StubMcp(_ => raw),
+            log: (name, message) => logs.Add((name, message)));
+        var context = NewContext() with { ToolDefs = [ToolDefinitionFor("get_rows")] };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Equal(raw, Assert.Single(next.ToolCallsMade).Result);
+        var visible = Assert.Single(llm.ReceivedMessages[1], message => message.Role == "tool").Content;
+        Assert.NotNull(visible);
+        Assert.DoesNotContain("2025-01-01", visible, StringComparison.Ordinal);
+        Assert.Contains("structured_tool_result", visible, StringComparison.Ordinal);
+        Assert.Contains("result_1", visible, StringComparison.Ordinal);
+        Assert.Contains("ACME", visible, StringComparison.Ordinal);
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(visible) <= StructuredToolResultViewStore.MaximumViewBytes);
+        Assert.Contains(
+            Assert.IsAssignableFrom<IEnumerable<ToolDefinition>>(llm.ReceivedTools[1]!),
+            tool => tool.Function.Name == StructuredToolResultViewStore.ToolName);
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=structured_tool_result_view decision=activated", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Progressive_view_is_turn_local_bounded_and_does_not_call_mcp_again()
+    {
+        var raw = BuildLargeRows();
+        var mcpCalls = 0;
+        var llm = new FakeLlm(
+            LlmReply.Tool("get_rows", "{\"ticker\":\"ACME\"}"),
+            LlmReply.Tool(
+                StructuredToolResultViewStore.ToolName,
+                "{\"handle\":\"result_1\",\"operation\":\"aggregate\",\"field\":\"Close\",\"statistic\":\"max\"}"),
+            LlmReply.Final("done"));
+        var step = BuildStep(
+            llm,
+            mcp: new StubMcp(_ =>
+            {
+                mcpCalls++;
+                return raw;
+            }));
+        var context = NewContext() with { ToolDefs = [ToolDefinitionFor("get_rows")] };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Equal(1, mcpCalls);
+        Assert.Equal(2, next.ToolCallsMade.Count);
+        Assert.Equal(raw, next.ToolCallsMade[0].Result);
+        Assert.Equal(StructuredToolResultViewStore.ToolName, next.ToolCallsMade[1].ToolName);
+        Assert.Contains("\"statistic\":\"max\"", next.ToolCallsMade[1].Result, StringComparison.Ordinal);
+        Assert.Contains("\"value\":499", next.ToolCallsMade[1].Result, StringComparison.Ordinal);
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(next.ToolCallsMade[1].Result) <= StructuredToolResultViewStore.MaximumViewBytes);
+    }
+
+    [Fact]
+    public async Task Large_mutating_json_result_stays_on_the_raw_model_path()
+    {
+        var raw = BuildLargeRows();
+        var llm = new FakeLlm(
+            LlmReply.Tool("memory_store_facts", "{\"text\":\"remember\"}"),
+            LlmReply.Final("done"));
+        var step = BuildStep(llm, mcp: new StubMcp(_ => raw));
+        var context = NewContext() with { ToolDefs = [ToolDefinitionFor("memory_store_facts")] };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Equal(raw, Assert.Single(next.ToolCallsMade).Result);
+        var visible = Assert.Single(llm.ReceivedMessages[1], message => message.Role == "tool").Content;
+        Assert.Equal(raw, visible);
+        Assert.DoesNotContain(
+            Assert.IsAssignableFrom<IEnumerable<ToolDefinition>>(llm.ReceivedTools[1]!),
+            tool => tool.Function.Name == StructuredToolResultViewStore.ToolName);
+    }
+
+    [Fact]
+    public void Structured_result_store_rejects_small_malformed_and_non_array_values()
+    {
+        var store = new StructuredToolResultViewStore();
+
+        Assert.False(store.TryProject("read", "{}", "[{\"x\":1}]", out _, out var smallReason));
+        Assert.Equal("below-byte-threshold", smallReason);
+
+        var malformed = new string('x', StructuredToolResultViewStore.MinimumResultBytes);
+        Assert.False(store.TryProject("read", "{}", malformed, out _, out var malformedReason));
+        Assert.Equal("invalid-json", malformedReason);
+
+        var nonArray = JsonSerializer.Serialize(new { value = new string('x', StructuredToolResultViewStore.MinimumResultBytes) });
+        Assert.False(store.TryProject("read", "{}", nonArray, out _, out var shapeReason));
+        Assert.Equal("root-not-array", shapeReason);
+    }
+
+    [Fact]
+    public void Structured_result_views_support_filter_slice_and_fail_closed_for_unknown_handles()
+    {
+        var store = new StructuredToolResultViewStore();
+        Assert.True(store.TryProject("read", "{}", BuildLargeRows(), out var projection, out _));
+
+        Assert.True(store.TryExecute(
+            StructuredToolResultViewStore.ToolName,
+            $"{{\"handle\":\"{projection.Handle}\",\"operation\":\"filter\",\"field\":\"Close\",\"operator\":\"gte\",\"value\":495,\"limit\":3}}",
+            out var filtered,
+            out _,
+            out var filteredBytes));
+        Assert.True(filtered.Ok);
+        Assert.Contains("\"matched_count\":5", filtered.ResultText, StringComparison.Ordinal);
+        Assert.Contains("\"returned_count\":3", filtered.ResultText, StringComparison.Ordinal);
+        Assert.True(filteredBytes <= StructuredToolResultViewStore.MaximumViewBytes);
+
+        Assert.True(store.TryExecute(
+            StructuredToolResultViewStore.ToolName,
+            $"{{\"handle\":\"{projection.Handle}\",\"operation\":\"slice\",\"offset\":20,\"limit\":2}}",
+            out var sliced,
+            out _,
+            out _));
+        Assert.True(sliced.Ok);
+        Assert.Contains("\"offset\":20", sliced.ResultText, StringComparison.Ordinal);
+        Assert.Contains("\"returned_count\":2", sliced.ResultText, StringComparison.Ordinal);
+
+        Assert.True(store.TryExecute(
+            StructuredToolResultViewStore.ToolName,
+            "{\"handle\":\"result_999\",\"operation\":\"schema\"}",
+            out var unknown,
+            out _,
+            out _));
+        Assert.False(unknown.Ok);
+        Assert.Equal("unknown_handle", unknown.Error);
+    }
+
+    [Fact]
     public async Task Read_only_dated_rows_retry_once_when_requested_market_close_date_is_missing()
     {
         var llm = new FakeLlm(
@@ -1612,6 +1752,14 @@ public class ToolLoopStepTests
             },
         },
     };
+
+    private static string BuildLargeRows() => JsonSerializer.Serialize(
+        Enumerable.Range(0, 500).Select(index => new
+        {
+            Date = new DateOnly(2024, 8, 19).AddDays(index).ToString("yyyy-MM-dd"),
+            Close = index,
+            Volume = 1_000_000 + index,
+        }));
 
     private sealed class FakeLlm : ILlmClient
     {

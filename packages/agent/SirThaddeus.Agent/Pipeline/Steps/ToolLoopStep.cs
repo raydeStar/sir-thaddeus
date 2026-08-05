@@ -94,6 +94,7 @@ public sealed class ToolLoopStep : ITurnStep
         // rounds, so a local mutable copy is cheaper than .With() per call.
         var messages = context.LlmMessages.ToList();
         var toolCallsMade = context.ToolCallsMade.ToList();
+        var structuredResultViews = new StructuredToolResultViewStore();
 
         // Spin-detection state: counts failed (tool, normalized-args) signatures
         // across rounds. Two consecutive identical failures nudges the model
@@ -292,6 +293,12 @@ public sealed class ToolLoopStep : ITurnStep
             if (round == 0 && string.IsNullOrWhiteSpace(forcedTool) && tools is not null)
             {
                 forcedTool = ResolveMemoryRetrieveForPersonalContext(context, tools);
+            }
+
+            if (tools is not null && structuredResultViews.HasResults &&
+                !IsAdvertisedTool(tools, StructuredToolResultViewStore.ToolName))
+            {
+                tools = tools.Append(StructuredToolResultViewStore.Definition).ToArray();
             }
 
             // Tool-loop turns should be concise: either choose a tool or
@@ -512,12 +519,14 @@ public sealed class ToolLoopStep : ITurnStep
                         Ok: false,
                         Error: "wiki_bound_effect_mismatch")
                     : await ExecuteSingleCallAsync(
-                            context, toolName, args, activityId, pureComputeResults, cancellationToken)
+                            context, toolName, args, activityId, pureComputeResults,
+                            structuredResultViews, cancellationToken)
                         .ConfigureAwait(false);
 
                 List<ToolCallRecord>? requestedDateCoverageCalls = null;
                 if (outcome.Ok &&
                     !effect.Mutating &&
+                    !string.Equals(toolName, StructuredToolResultViewStore.ToolName, StringComparison.OrdinalIgnoreCase) &&
                     RequestedTerminalDateEvidenceCoveragePolicy.TryBuildCorrection(
                         context.UserText,
                         args,
@@ -540,6 +549,7 @@ public sealed class ToolLoopStep : ITurnStep
                             dateCorrection.CorrectedArguments,
                             activityId,
                             pureComputeResults,
+                            structuredResultViews,
                             cancellationToken)
                         .ConfigureAwait(false);
                     requestedDateCoverageCalls.Add(new ToolCallRecord
@@ -580,7 +590,44 @@ public sealed class ToolLoopStep : ITurnStep
                         cancellationToken)
                     .ConfigureAwait(false);
 
-                messages.Add(ChatMessage.ToolResult(call.Id, outcome.ResultText));
+                var modelVisibleResult = outcome.ResultText;
+                if (outcome.Ok && !effect.Mutating &&
+                    !string.Equals(toolName, StructuredToolResultViewStore.ToolName, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (structuredResultViews.TryProject(
+                            toolName,
+                            args,
+                            outcome.ResultText,
+                            out var projection,
+                            out var projectionReason))
+                    {
+                        modelVisibleResult = projection.Preview;
+                        _log?.Invoke(
+                            "EXPERIMENT_ACTIVATION",
+                            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+                            "event=structured_tool_result_view decision=activated " +
+                            $"handle={projection.Handle} original_bytes={projection.OriginalBytes} " +
+                            $"preview_bytes={projection.PreviewBytes} item_count={projection.ItemCount}");
+                    }
+                    else
+                    {
+                        _log?.Invoke(
+                            "EXPERIMENT_ACTIVATION",
+                            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+                            "event=structured_tool_result_view decision=not_activated " +
+                            $"reason={projectionReason}");
+                    }
+                }
+                else if (!outcome.Ok || effect.Mutating)
+                {
+                    _log?.Invoke(
+                        "EXPERIMENT_ACTIVATION",
+                        $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+                        "event=structured_tool_result_view decision=not_activated " +
+                        $"reason={(effect.Mutating ? "mutating-result" : "failed-result")}");
+                }
+
+                messages.Add(ChatMessage.ToolResult(call.Id, modelVisibleResult));
                 if (requestedDateCoverageCalls is not null)
                 {
                     toolCallsMade.AddRange(requestedDateCoverageCalls);
@@ -928,6 +975,7 @@ public sealed class ToolLoopStep : ITurnStep
                 args,
                 activityId,
                 new Dictionary<string, ToolCallOutcome>(StringComparer.Ordinal),
+                structuredResultViews: null,
                 cancellationToken)
             .ConfigureAwait(false);
         sw.Stop();
@@ -1851,8 +1899,25 @@ public sealed class ToolLoopStep : ITurnStep
         string args,
         string activityId,
         IDictionary<string, ToolCallOutcome> pureComputeResults,
+        StructuredToolResultViewStore? structuredResultViews,
         CancellationToken ct)
     {
+        if (structuredResultViews is not null &&
+            structuredResultViews.TryExecute(
+                toolName,
+                args,
+                out var viewOutcome,
+                out var viewOperation,
+                out var viewResultBytes))
+        {
+            _log?.Invoke(
+                "EXPERIMENT_ACTIVATION",
+                $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+                "event=structured_tool_result_view_call decision=activated " +
+                $"operation={viewOperation} result_bytes={viewResultBytes} ok={viewOutcome.Ok}");
+            return viewOutcome;
+        }
+
         var targetDecision = WikiMutationTargetGuard.Evaluate(
             context.WikiMutationTarget,
             toolName,
