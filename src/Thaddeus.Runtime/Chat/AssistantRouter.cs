@@ -163,14 +163,17 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         return doc =>
         {
             var llm = doc.Llm;
-            var fp = $"{llm.Provider}|{llm.BaseUrl}|{llm.ModelId}|{llm.ApiKey}|{llm.MaxTokens}|{llm.ContextWindowTokens}|{llm.Temperature}|{llm.CodexCliPath}|{llm.CodexReasoningEffort}";
+            var forcedToolChoiceMode = ModelCapabilityPolicy.ResolveForcedToolChoiceMode(
+                doc,
+                llmRuntime.GetSnapshot());
+            var fp = $"{llm.Provider}|{llm.BaseUrl}|{llm.ModelId}|{llm.ApiKey}|{llm.MaxTokens}|{llm.ContextWindowTokens}|{llm.Temperature}|{llm.CodexCliPath}|{llm.CodexReasoningEffort}|{forcedToolChoiceMode}";
             var gatekeeperPolicy = ResolveGatekeeperPolicy(llm);
             var gfp = gatekeeperPolicy.Fingerprint;
             lock (cacheLock)
             {
                 if (cached is null || fingerprint != fp)
                 {
-                    var options = ToClientOptions(llm);
+                    var options = ToClientOptions(llm, forcedToolChoiceMode);
                     if (cached is null)
                     {
                         cached = LlmClientFactory.Create(options, loggerFactory: loggerFactory);
@@ -338,13 +341,16 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         return GatekeeperPolicy.SeparateLlm(llm, gkBaseUrl);
     }
 
-    internal static LlmClientOptions ToClientOptions(LlmSettings llm)
+    internal static LlmClientOptions ToClientOptions(
+        LlmSettings llm,
+        ForcedToolChoiceMode forcedToolChoiceMode = ForcedToolChoiceMode.Required)
     {
         return new LlmClientOptions
         {
             Provider = llm.Provider,
             BaseUrl = llm.BaseUrl!,
             Model = llm.ModelId,
+            ForcedToolChoiceMode = forcedToolChoiceMode,
             CodexCliPath = llm.CodexCliPath,
             CodexReasoningEffort = llm.CodexReasoningEffort,
             MaxTokens = llm.MaxTokens,

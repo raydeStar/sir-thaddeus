@@ -3,8 +3,9 @@
 Model-dependent tool families can be narrowed before the normal pipeline by
 the user-controlled capability certificate policy. See
 [MODEL_CAPABILITY_CERTIFICATION.md](MODEL_CAPABILITY_CERTIFICATION.md) for the
-`Auto / On / Off` contract, fingerprint limits, probe budget, and current Wiki
-write evidence. Certification never replaces permissions or target guards.
+exposure controls, typed forced-tool transport result, fingerprint limits,
+probe budget, and current evidence. Certification never replaces permissions
+or target guards.
 
 New model/provider pairs are described by sourced, pre-load qualification
 profiles rather than production model-family branches. See
@@ -22,6 +23,13 @@ literals, and never evaluates code. Ambiguous delimiters, positional or spread
 arguments, expressions, unadvertised functions, and malformed input fail
 closed. This is transport compatibility, not tool authorization; normal
 selection, permission, target, execution, and verification boundaries remain.
+
+When orchestration has already selected one exact tool, the client advertises
+only that definition. A current exact-configuration transport certificate may
+use `tool_choice: auto` for providers whose `required` grammar fails to produce
+an effective structured call. Unknown, stale, unsupported, and error states use
+`required`; ordinary chat never runs the certification probe. The decision is
+model-ID-blind and does not affect unforced multi-tool turns.
 
 This document is the production contract for Sir Thaddeus chat orchestration.
 It describes behavior that is active on the default desktop and headless paths,

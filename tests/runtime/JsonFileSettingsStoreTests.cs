@@ -108,7 +108,8 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
             1,
             10,
             DateTimeOffset.UtcNow,
-            [new ModelCapabilityProbeResult("json", true, "pass")]);
+            [new ModelCapabilityProbeResult("json", true, "pass")],
+            "auto");
         var updated = defaults with
         {
             ModelCapabilities = new ModelCapabilitySettings(
@@ -127,7 +128,9 @@ public sealed class JsonFileSettingsStoreTests : IDisposable
         var preference = Assert.Single(capabilities.Preferences!);
         Assert.Equal("structured_output", preference.Capability);
         Assert.Equal("auto", preference.Mode);
-        Assert.Equal("structured_output", Assert.Single(capabilities.Certificates!).Capability);
+        var savedCertificate = Assert.Single(capabilities.Certificates!);
+        Assert.Equal("structured_output", savedCertificate.Capability);
+        Assert.Equal("auto", savedCertificate.SelectedMode);
     }
 
     [Fact]

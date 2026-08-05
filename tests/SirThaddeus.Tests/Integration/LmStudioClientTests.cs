@@ -411,6 +411,35 @@ public class LmStudioClientSelfHealingTests : IDisposable
     }
 
     [Fact]
+    public async Task CertifiedAutoForcedTool_StillAdvertisesOnlyTheNamedTool()
+    {
+        string? capturedBody = null;
+        var handler = new SequenceHttpHandler(
+            [MakeSuccessResponse("ok")],
+            onRequest: body => capturedBody = body);
+        var options = DefaultOptions with { ForcedToolChoiceMode = ForcedToolChoiceMode.Auto };
+        using var client = new LmStudioClient(options, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(options.BaseUrl)
+        });
+        var tools = new[]
+        {
+            MakeToolDefinition("weather_geocode"),
+            MakeToolDefinition("weather_forecast")
+        };
+
+        await client.ChatAsync(SimpleMessages, tools, forcedToolName: "weather_geocode");
+
+        Assert.NotNull(capturedBody);
+        using var doc = JsonDocument.Parse(capturedBody);
+        Assert.Equal("auto", doc.RootElement.GetProperty("tool_choice").GetString());
+        var advertised = Assert.Single(doc.RootElement.GetProperty("tools").EnumerateArray());
+        Assert.Equal(
+            "weather_geocode",
+            advertised.GetProperty("function").GetProperty("name").GetString());
+    }
+
+    [Fact]
     public async Task DocumentedPythonicToolCall_IsStrictlyNormalized_WhenOpenAiCallsAreAbsent()
     {
         var body = JsonSerializer.Serialize(new

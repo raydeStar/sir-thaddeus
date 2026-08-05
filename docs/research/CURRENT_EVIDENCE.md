@@ -1,6 +1,6 @@
 # Current Evidence
 
-**Evidence cutoff:** August 4, 2026
+**Evidence cutoff:** August 5, 2026
 
 **Production baseline before the current promotion:** `69caf87`; the retained
 typed selected-target Wiki operation candidate is `8478531` and has cleared
@@ -34,6 +34,31 @@ calls and latency while tying or losing to unchanged Thaddeus.
   is direct evidence against production rules based on parameter count.
 - See [MODEL_TIER_CALIBRATION.md](../MODEL_TIER_CALIBRATION.md) for the complete
   promotion, transfer, and recalibration contract.
+
+### August 5 forced-tool transport certification
+
+- A model-agnostic transport certificate now tests the effective structured
+  call after the real client parser. It retains `required` when two bounded
+  probes pass and tries single-visible-tool `auto` only after a required-path
+  failure. Unknown, stale, unsupported, and error states fail closed to
+  `required`; probes execute no tool and ordinary chat adds no certification
+  call.
+- The raw diagnostic covered 64 HTTP-valid development, exact-repeat, and
+  disjoint-validation episodes. `auto` returned `32/32` exact native calls;
+  `required` returned `8/32`, with 24 paired auto wins and zero losses. Changed
+  tool names, prompts, argument counts, scalar types, enums, and constraints
+  preserved the direction.
+- Product-boundary live certification selected `auto` for exact Qwen 3.6 35B
+  A3B Q3_K_S in four calls, `required` for LFM 2.5 2.6B Q5_K_M in two, and
+  `required` for LFM 2.5 8B-A1B Q4_K_M in two. All three subsequent activation
+  calls were exact. Qwen's unsupported XML-like required output remained
+  rejected; LFM 2.6B kept the existing strict documented-format recovery; LFM
+  8B kept native required calls. There is no model-name, family, or size branch.
+- Focused backend tests, TypeScript, lint, the Settings browser smoke, and the
+  full local gate passed. The full gate recorded 2,987 passing tests and two
+  intentionally opt-in live skips. The LFM 1.2B casual-chat guard remained
+  `1.00` with no tool call. Protected delivery and post-merge confirmation
+  remain required before this is described as shipped behavior.
 
 ### August 4 transfer audit and capability intake
 

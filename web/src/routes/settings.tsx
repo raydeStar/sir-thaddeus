@@ -34,6 +34,8 @@ import {
   getGatekeeperStatus,
   getWikiWriteCapabilityStatus,
   retestWikiWriteCapability,
+  getForcedToolTransportStatus,
+  retestForcedToolTransport,
   type TestLlmResponse,
   type AudioDevicesResponse,
   type PiperVoiceEntry,
@@ -178,6 +180,8 @@ function SettingsRoute() {
   const [gatekeeperStatus, setGatekeeperStatus] = useState<GatekeeperStatusResponse | null>(null);
   const [wikiWriteStatus, setWikiWriteStatus] = useState<ModelCapabilityStatusResponse | null>(null);
   const [capabilityTesting, setCapabilityTesting] = useState(false);
+  const [transportStatus, setTransportStatus] = useState<ModelCapabilityStatusResponse | null>(null);
+  const [transportTesting, setTransportTesting] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     if (typeof window === 'undefined') return 'general';
     const fromQuery = new URLSearchParams(window.location.search).get('tab') as TabId | null;
@@ -284,6 +288,18 @@ function SettingsRoute() {
     return () => { cancelled = true; };
   }, [savedAt, doc?.llm.provider, doc?.llm.baseUrl, doc?.llm.modelId, doc?.llm.contextWindowTokens, doc?.llm.temperature]);
 
+  useEffect(() => {
+    let cancelled = false;
+    getForcedToolTransportStatus()
+      .then((status) => {
+        if (!cancelled) setTransportStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setTransportStatus(null);
+      });
+    return () => { cancelled = true; };
+  }, [savedAt, doc?.llm.provider, doc?.llm.baseUrl, doc?.llm.modelId, doc?.llm.contextWindowTokens, doc?.llm.temperature]);
+
   const onCapabilityRetest = async () => {
     if (!doc || capabilityTesting) return;
     setCapabilityTesting(true);
@@ -294,6 +310,7 @@ function SettingsRoute() {
         setDoc({
           ...doc,
           modelCapabilities: {
+            ...doc.modelCapabilities,
             wikiWriteMode: doc.modelCapabilities?.wikiWriteMode ?? 'on',
             wikiWriteCertificates: [
               status.certificate,
@@ -308,6 +325,36 @@ function SettingsRoute() {
       setError((e as Error).message);
     } finally {
       setCapabilityTesting(false);
+    }
+  };
+
+  const onTransportRetest = async () => {
+    if (!doc || transportTesting) return;
+    setTransportTesting(true);
+    try {
+      const status = await retestForcedToolTransport();
+      setTransportStatus(status);
+      if (status.certificate) {
+        setDoc({
+          ...doc,
+          modelCapabilities: {
+            ...doc.modelCapabilities,
+            wikiWriteMode: doc.modelCapabilities?.wikiWriteMode ?? 'on',
+            certificates: [
+              status.certificate,
+              ...(doc.modelCapabilities?.certificates ?? []).filter(
+                (certificate) =>
+                  certificate.capability !== status.certificate?.capability ||
+                  certificate.configurationFingerprint !== status.certificate?.configurationFingerprint,
+              ),
+            ],
+          },
+        });
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setTransportTesting(false);
     }
   };
 
@@ -423,6 +470,9 @@ function SettingsRoute() {
                 wikiWriteStatus={wikiWriteStatus}
                 capabilityTesting={capabilityTesting}
                 onCapabilityRetest={onCapabilityRetest}
+                transportStatus={transportStatus}
+                transportTesting={transportTesting}
+                onTransportRetest={onTransportRetest}
               />
             ) : null}
             {activeTab === 'audio' ? <AudioTab doc={doc} setDoc={setDoc} /> : null}
@@ -693,6 +743,9 @@ function ModelsTab({
   wikiWriteStatus,
   capabilityTesting,
   onCapabilityRetest,
+  transportStatus,
+  transportTesting,
+  onTransportRetest,
 }: {
   doc: SettingsDocument;
   setDoc: (d: SettingsDocument) => void;
@@ -705,6 +758,9 @@ function ModelsTab({
   wikiWriteStatus: ModelCapabilityStatusResponse | null;
   capabilityTesting: boolean;
   onCapabilityRetest: () => void;
+  transportStatus: ModelCapabilityStatusResponse | null;
+  transportTesting: boolean;
+  onTransportRetest: () => void;
 }) {
   return (
     <div className="space-y-6" role="tabpanel" aria-labelledby="settings-tab-models">
@@ -802,6 +858,7 @@ function ModelsTab({
               setDoc({
                 ...doc,
                 modelCapabilities: {
+                  ...doc.modelCapabilities,
                   wikiWriteMode: mode as 'auto' | 'on' | 'off',
                   wikiWriteCertificates: doc.modelCapabilities?.wikiWriteCertificates ?? [],
                 },
@@ -869,6 +926,59 @@ function ModelsTab({
           ) : null}
           <p className="mt-3 text-[11px] text-ink-subtle">
             Retest uses the saved model settings and has a four-call, 60-second ceiling.
+          </p>
+        </div>
+
+        <div
+          data-testid="settings-capability-forced-tool-transport-status"
+          className="rounded-xl border border-line bg-canvas-sunken/50 p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-ink">Forced-tool transport</div>
+              <p className="mt-1 text-xs text-ink-muted">
+                {transportStatus?.message ?? 'Status has not loaded yet.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onTransportRetest}
+              disabled={transportTesting}
+              data-testid="settings-capability-forced-tool-transport-retest"
+              className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas-raised px-3.5 py-1.5 text-sm font-medium text-ink shadow-soft transition hover:bg-accent-soft disabled:opacity-50"
+            >
+              {transportTesting ? (
+                <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+              ) : (
+                <RefreshCw className="h-4 w-4" strokeWidth={1.75} />
+              )}
+              {transportTesting ? 'Testing...' : 'Test transport'}
+            </button>
+          </div>
+          {transportStatus?.certificate ? (
+            <div className="mt-3 space-y-2">
+              <div className="text-[11px] text-ink-subtle">
+                Selected <code>{transportStatus.certificate.selectedMode ?? 'required'}</code>{' / '}
+                {transportStatus.certificate.modelCalls} model calls{' / '}
+                {(transportStatus.certificate.elapsedMilliseconds / 1000).toFixed(1)}s{' / '}fingerprint{' '}
+                <code>{transportStatus.certificate.configurationFingerprint.slice(0, 12)}</code>
+              </div>
+              <ul className="grid gap-1 sm:grid-cols-2">
+                {transportStatus.certificate.probes.map((probe) => (
+                  <li key={probe.id} className="flex items-start gap-1.5 text-[11px] text-ink-muted">
+                    {probe.passed ? (
+                      <Check className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" strokeWidth={2} />
+                    ) : (
+                      <X className="mt-0.5 h-3 w-3 shrink-0 text-rose-500" strokeWidth={2} />
+                    )}
+                    <span>{formatProbeId(probe.id)}: {probe.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <p className="mt-3 text-[11px] text-ink-subtle">
+            Required is the safe default. The test tries it first and only uses auto when both alternate calls pass. No tool is executed.
           </p>
         </div>
       </Section>

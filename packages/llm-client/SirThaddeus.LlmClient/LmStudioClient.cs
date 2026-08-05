@@ -685,9 +685,10 @@ public sealed class LmStudioClient : IConfigurableLlmClient
             // values (none / auto / required). The per-function object form
             // that OpenAI ships is rejected with HTTP 400 ("Invalid
             // tool_choice type: 'object'"). When a caller forces a specific
-            // tool, advertise only that definition and use "required". This
-            // preserves LM Studio compatibility while making the forced-tool
-            // contract deterministic instead of allowing any visible tool.
+            // tool, advertise only that definition. Exact-configuration
+            // certification may select "auto" for providers whose required
+            // grammar emits non-native markup; unknown configurations retain
+            // "required". Either way, no unrelated tool remains visible.
             var forcedTool = !string.IsNullOrWhiteSpace(forcedToolName)
                 ? tools.FirstOrDefault(t =>
                     string.Equals(t.Function?.Name, forcedToolName, StringComparison.Ordinal))
@@ -695,7 +696,11 @@ public sealed class LmStudioClient : IConfigurableLlmClient
 
             body["tools"] = forcedTool is null ? tools : new[] { forcedTool };
 
-            body["tool_choice"] = forcedTool is null ? "auto" : "required";
+            body["tool_choice"] = forcedTool is null
+                ? "auto"
+                : options.ForcedToolChoiceMode == ForcedToolChoiceMode.Auto
+                    ? "auto"
+                    : "required";
         }
         // When tools is null/empty, intentionally omit both fields.
         // Sending tools:[] or tool_choice:"none" can trigger LM Studio's
