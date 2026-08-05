@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace SirThaddeus.Contracts;
 
 /// <summary>
@@ -12,7 +14,8 @@ public sealed record ChatRequest(
     string Prompt,
     string? ConversationId = null,
     string? SessionId = null,
-    IReadOnlyList<ChatHistoryMessage>? Messages = null);
+    IReadOnlyList<ChatHistoryMessage>? Messages = null,
+    JsonElement? JsonOutputTemplate = null);
 
 public sealed record ChatStartResponse(
     string RunId,
