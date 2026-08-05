@@ -514,6 +514,56 @@ public sealed class ToolLoopStep : ITurnStep
                     : await ExecuteSingleCallAsync(
                             context, toolName, args, activityId, pureComputeResults, cancellationToken)
                         .ConfigureAwait(false);
+
+                List<ToolCallRecord>? requestedDateCoverageCalls = null;
+                if (outcome.Ok &&
+                    !effect.Mutating &&
+                    RequestedTerminalDateEvidenceCoveragePolicy.TryBuildCorrection(
+                        context.UserText,
+                        args,
+                        outcome.ResultText,
+                        out var dateCorrection))
+                {
+                    requestedDateCoverageCalls =
+                    [
+                        new ToolCallRecord
+                        {
+                            ToolName = toolName,
+                            Arguments = args,
+                            Result = outcome.ResultText,
+                            Success = true,
+                        }
+                    ];
+                    var correctedOutcome = await ExecuteSingleCallAsync(
+                            context,
+                            toolName,
+                            dateCorrection.CorrectedArguments,
+                            activityId,
+                            pureComputeResults,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    requestedDateCoverageCalls.Add(new ToolCallRecord
+                    {
+                        ToolName = toolName,
+                        Arguments = dateCorrection.CorrectedArguments,
+                        Result = correctedOutcome.ResultText,
+                        Success = correctedOutcome.Ok,
+                    });
+
+                    if (correctedOutcome.Ok &&
+                        RequestedTerminalDateEvidenceCoveragePolicy.ContainsRequestedDate(
+                            correctedOutcome.ResultText,
+                            dateCorrection.RequestedDate))
+                    {
+                        args = dateCorrection.CorrectedArguments;
+                        outcome = correctedOutcome;
+                        _log?.Invoke(
+                            "EXPERIMENT_ACTIVATION",
+                            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+                            "event=requested_terminal_date_evidence decision=activated " +
+                            $"outcome=corrected tool={toolName}");
+                    }
+                }
                 sw.Stop();
 
                 await _sink.ToolCompletedAsync(
@@ -531,13 +581,20 @@ public sealed class ToolLoopStep : ITurnStep
                     .ConfigureAwait(false);
 
                 messages.Add(ChatMessage.ToolResult(call.Id, outcome.ResultText));
-                toolCallsMade.Add(new ToolCallRecord
+                if (requestedDateCoverageCalls is not null)
                 {
-                    ToolName = toolName,
-                    Arguments = args,
-                    Result = outcome.ResultText,
-                    Success = outcome.Ok,
-                });
+                    toolCallsMade.AddRange(requestedDateCoverageCalls);
+                }
+                else
+                {
+                    toolCallsMade.Add(new ToolCallRecord
+                    {
+                        ToolName = toolName,
+                        Arguments = args,
+                        Result = outcome.ResultText,
+                        Success = outcome.Ok,
+                    });
+                }
 
                 if (explicitReadBinding.Active &&
                     explicitReadBinding.Allowed &&
