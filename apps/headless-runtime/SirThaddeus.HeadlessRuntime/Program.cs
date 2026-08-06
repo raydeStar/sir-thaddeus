@@ -37,6 +37,7 @@ Log.Logger = LoggingBootstrap.BuildSerilogLogger(new LoggingOptions
 {
     ComponentName = "headless-runtime",
 });
+using var loggerFactory = LoggingBootstrap.CreateLoggerFactory(Log.Logger);
 AppDomain.CurrentDomain.ProcessExit += (_, _) => Log.CloseAndFlush();
 AppDomain.CurrentDomain.UnhandledException += (_, _) => Log.CloseAndFlush();
 
@@ -131,8 +132,12 @@ else
     await EnsureManagedSearxngSerializedAsync(settings, CancellationToken.None);
 }
 
-using var llm = LlmClientFactory.Create(RuntimeLlmOptionsFactory.BuildPrimary(settings));
-using var gatekeeperLlm = LlmClientFactory.Create(RuntimeLlmOptionsFactory.BuildGatekeeper(settings));
+using var llm = LlmClientFactory.Create(
+    RuntimeLlmOptionsFactory.BuildPrimary(settings),
+    loggerFactory: loggerFactory);
+using var gatekeeperLlm = LlmClientFactory.Create(
+    RuntimeLlmOptionsFactory.BuildGatekeeper(settings),
+    loggerFactory: loggerFactory);
 
 var mcp = await RuntimeMcpClientFactory.CreateAsync(
     enableTools: options.EnableTools,
@@ -248,16 +253,26 @@ PipelineBackedAgentOrchestrator BuildPipelineBackedOrchestrator(AppSettings curr
         currentSettings.ActivePersonalityId,
         SettingsManager.ResolvePersonalityProfilesDirectory(currentSettings));
 
-    Action<string, string> pipelineLog = (action, message) => audit.Append(new AuditEvent
+    Action<string, string> pipelineLog = (action, message) =>
     {
-        Actor = "agent",
-        Action = action,
-        Result = "ok",
-        Details = new Dictionary<string, object>
+        audit.Append(new AuditEvent
         {
-            ["message"] = message
-        }
-    });
+            Actor = "agent",
+            Action = action,
+            Result = "ok",
+            Details = new Dictionary<string, object>
+            {
+                ["message"] = message
+            }
+        });
+
+        // The audit stream remains the canonical pipeline record. Mirror only
+        // this frozen, content-free boundary event into the runtime sink so an
+        // isolated harness can classify the provider-to-action handoff without
+        // exporting prompts, responses, reasoning, tool names, or arguments.
+        if (string.Equals(action, "TOOL_LOOP_DECISION", StringComparison.Ordinal))
+            Log.Information("{Action} {Message}", action, message);
+    };
 
     var toolLoop = new ToolLoopStep(
         llm,
