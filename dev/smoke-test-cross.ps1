@@ -175,13 +175,19 @@ elseif ($targetIsMacOS) {
     }
 }
 
-# Managed payload DLLs
+# Self-contained single-file publishes intentionally have no managed DLLs next
+# to the executable. Accept either loose support assemblies or the verified UI
+# binary as the package payload, matching the Windows package smoke contract.
 $dllCount = @(Get-ChildItem -Path $testDir -Filter "*.dll" -File -Recurse).Count
+$singleFileRuntime = (Test-Path $uiBinary) -and -not (Test-Path (Join-Path $testDir "Thaddeus.Runtime.dll"))
 if ($dllCount -gt 0) {
-    Pass "Managed payload present ($dllCount DLLs)"
+    Pass "Support DLL payload present ($dllCount DLLs)"
+}
+elseif ($singleFileRuntime) {
+    Pass "Single-file runtime payload present"
 }
 else {
-    Fail "No managed payload DLLs found"
+    Fail "No runtime payload found in package"
 }
 
 # No PDB files in release packages
