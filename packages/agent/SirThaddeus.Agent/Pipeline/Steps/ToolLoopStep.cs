@@ -356,6 +356,13 @@ public sealed class ToolLoopStep : ITurnStep
                 throw;
             }
 
+            LogToolLoopDecision(
+                context,
+                round + 1,
+                forcedToolChoice,
+                tools?.Count ?? 0,
+                response);
+
             if (response.ToolCalls is null || response.ToolCalls.Count == 0)
             {
                 // INTERVENTION 2 (class C, answer selection): on a strict-compute
@@ -856,6 +863,33 @@ public sealed class ToolLoopStep : ITurnStep
                string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void LogToolLoopDecision(
+        TurnContext context,
+        int round,
+        string? forcedTool,
+        int advertisedToolCount,
+        LlmResponse response)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        var effectiveToolCalls = response.ToolCalls?.Count ?? 0;
+        var decision = effectiveToolCalls > 0
+            ? "tool_calls"
+            : !string.IsNullOrWhiteSpace(response.Content)
+                ? "final_text"
+                : response.IsComplete
+                    ? "empty_final"
+                    : "empty_noncomplete";
+
+        _log(
+            "TOOL_LOOP_DECISION",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            $"round={round} forced_tool={!string.IsNullOrWhiteSpace(forcedTool)} " +
+            $"advertised_tools={advertisedToolCount} effective_tool_calls={effectiveToolCalls} " +
+            $"decision={decision}");
     }
 
     private void LogWikiRootNonActionActivation(TurnContext context, bool activated)

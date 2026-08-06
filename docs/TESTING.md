@@ -436,6 +436,12 @@ evaluator uses that proof and an explicit candidate activation event to reject
 misrouted or incompletely attributed experiment rows before correctness is
 scored.
 
+Schema v2 also exports content-free response-boundary and tool-loop decisions:
+finish reason, content/reasoning presence and character counts, native versus
+normalized tool-call counts, output-budget metadata, round number, forced-tool
+presence, advertised/effective tool counts, and the selected action class. It
+does not export the associated text, tool identity, arguments, or results.
+
 ### Routing latency diagnostics
 
 Routing diagnostics are opt-in and do not change normal execution:

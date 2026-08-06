@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using SirThaddeus.LlmClient;
+using SirThaddeus.Tests.Agent.Pipeline;
 
 namespace SirThaddeus.Tests;
 
@@ -15,6 +18,7 @@ namespace SirThaddeus.Tests;
 // without any network calls.
 // ─────────────────────────────────────────────────────────────────────────
 
+[Collection(RoutingLatencyEnvironmentCollection.Name)]
 public class LmStudioClientSelfHealingTests : IDisposable
 {
     private static readonly LlmClientOptions DefaultOptions = new()
@@ -546,6 +550,77 @@ public class LmStudioClientSelfHealingTests : IDisposable
         Assert.Equal("native-1", Assert.Single(response.ToolCalls!).Id);
     }
 
+    [Fact]
+    public async Task ResponseBoundaryTelemetry_IsOptInContentFreeAndClassifiesNormalization()
+    {
+        const string secretReasoning = "SECRET-REASONING-CONTENT";
+        var body = JsonSerializer.Serialize(new
+        {
+            choices = new[]
+            {
+                new
+                {
+                    message = new
+                    {
+                        role = "assistant",
+                        content = (string?)null,
+                        reasoning_content = secretReasoning +
+                            "<|tool_call_start|>[wiki_update(page='Cedar')]<|tool_call_end|>"
+                    },
+                    finish_reason = "stop"
+                }
+            },
+            usage = new { prompt_tokens = 12, completion_tokens = 18, total_tokens = 30 }
+        });
+        var logs = new List<string>();
+        var logger = new CaptureLogger<LmStudioClient>(logs);
+        var handler = new SequenceHttpHandler(
+        [
+            (HttpStatusCode.OK, body),
+            (HttpStatusCode.OK, body)
+        ]);
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        }, logger);
+        var prior = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE", null);
+            await client.ChatAsync(SimpleMessages, [MakeToolDefinition("wiki_update")]);
+            Assert.DoesNotContain(logs, line =>
+                line.Contains("LLM_RESPONSE_BOUNDARY", StringComparison.Ordinal));
+
+            logs.Clear();
+            Environment.SetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE", "1");
+            using var activity = new Activity("telemetry-test");
+            activity.AddBaggage("thread_id", "thread-safe");
+            activity.AddBaggage("turn_id", "turn-safe");
+            activity.Start();
+
+            var response = await client.ChatAsync(
+                SimpleMessages,
+                [MakeToolDefinition("wiki_update")],
+                maxTokensOverride: 64);
+
+            Assert.Single(response.ToolCalls!);
+            var boundary = Assert.Single(logs, line =>
+                line.Contains("LLM_RESPONSE_BOUNDARY", StringComparison.Ordinal));
+            Assert.Contains("turnId=turn-safe", boundary, StringComparison.Ordinal);
+            Assert.Contains("tool_call_parser_outcome=normalized", boundary, StringComparison.Ordinal);
+            Assert.Contains("provider_tool_calls=0", boundary, StringComparison.Ordinal);
+            Assert.Contains("effective_tool_calls=1", boundary, StringComparison.Ordinal);
+            Assert.Contains("reasoning_present=True", boundary, StringComparison.Ordinal);
+            Assert.Contains("requested_output_tokens=64", boundary, StringComparison.Ordinal);
+            Assert.DoesNotContain(secretReasoning, boundary, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE", prior);
+        }
+    }
+
     // ── Response Builders ──────────────────────────────────────────────
 
     [Fact]
@@ -663,6 +738,21 @@ public class LmStudioClientSelfHealingTests : IDisposable
 /// Tracks how many requests were made for assertion.
 /// Optionally captures request bodies for inspection.
 /// </summary>
+internal sealed class CaptureLogger<T>(List<string> messages) : ILogger<T>
+{
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+        LogLevel logLevel,
+        EventId eventId,
+        TState state,
+        Exception? exception,
+        Func<TState, Exception?, string> formatter) =>
+        messages.Add(formatter(state, exception));
+}
+
 internal sealed class SequenceHttpHandler : HttpMessageHandler
 {
     private readonly IReadOnlyList<(HttpStatusCode Status, string Body)> _responses;

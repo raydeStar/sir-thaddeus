@@ -238,6 +238,15 @@ non-empty-generation, changed-generation, revalidation-pass, and adoption
 counts. They expose repair outcomes without retaining either the draft or the
 generated text.
 
+Provider-boundary diagnostics may record the finish reason, presence and length
+of content or dedicated reasoning fields, native and effective tool-call counts,
+strict parser outcome, requested and observed output-token counts, and whether
+the output limit was reached. The tool loop may record its round, whether one
+tool was forced, the advertised and effective tool counts, and the resulting
+action decision. These are metadata-only signals: prompt text, response text,
+reasoning text, tool names, arguments, results, and benchmark identity remain
+excluded.
+
 `ST_HARNESS_PRESERVE_SANDBOX=1` is a test-support option for retaining v1 or v2
 local logs and audit records during diagnosis. It is not a production route.
 

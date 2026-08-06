@@ -336,6 +336,8 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
             "routing.latency turnId=turn-1 stage=first_ui_delta elapsedMs=45 durationMs=2",
             "routing.latency turnId=turn-1 stage=pipeline_complete elapsedMs=90 durationMs=1",
             "EXPERIMENT_ACTIVATION turn_id=turn-1 event=generalized_candidate decision=activated suite_id=SECRET",
+            "LLM_RESPONSE_BOUNDARY threadId=thread-1 turnId=turn-1 finish_reason=length content_present=false content_chars=0 reasoning_present=true reasoning_chars=512 provider_tool_calls=0 effective_tool_calls=0 tool_call_parser_outcome=none completion_tokens=1024 requested_output_tokens=1024 output_limit_reached=true reasoning=SECRET",
+            "TOOL_LOOP_DECISION thread_id=thread-1 turn_id=turn-1 round=1 forced_tool=true advertised_tools=1 effective_tool_calls=0 decision=empty_final prompt=SECRET",
             "PIPELINE_TIMING turn_id=another-turn outcome=ok elapsed_ms=999"
         ]);
         using var liveWriter = new FileStream(
@@ -356,6 +358,18 @@ public sealed class HybridRuntimeHostAdapterTests : IDisposable
         Assert.Equal(1, diagnostics.CallCounts.ProviderRequests);
         Assert.Contains(diagnostics.Events, item =>
             item.Name == "experiment.activation" && item.Stage == "generalized_candidate");
+        var boundary = Assert.Single(diagnostics.Events, item => item.Name == "LLM_RESPONSE_BOUNDARY");
+        Assert.Equal("length", boundary.FinishReason);
+        Assert.False(boundary.ContentPresent);
+        Assert.True(boundary.ReasoningPresent);
+        Assert.Equal(512, boundary.ReasoningChars);
+        Assert.Equal("none", boundary.ToolCallParserOutcome);
+        Assert.True(boundary.OutputLimitReached);
+        var decision = Assert.Single(diagnostics.Events, item => item.Name == "TOOL_LOOP_DECISION");
+        Assert.Equal(1, decision.Round);
+        Assert.True(decision.ForcedTool);
+        Assert.Equal(1, decision.AdvertisedTools);
+        Assert.Equal("empty_final", decision.Decision);
         Assert.DoesNotContain("SECRET", json, StringComparison.Ordinal);
     }
 
