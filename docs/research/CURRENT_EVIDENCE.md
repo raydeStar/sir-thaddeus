@@ -315,6 +315,13 @@ calls and latency while tying or losing to unchanged Thaddeus.
   of better closed-book reasoning.
 - Completion validation and bounded retry remain net-positive globally.
   Experiments that removed them broadly reduced quality.
+- Semantic tool-result success classification prevents transport-successful
+  JSON, plain-text, and MCP Markdown error envelopes from becoming successful
+  evidence while preserving model-visible recovery. On the consumed MCPMark
+  Playwright birth-year task, all three observed budget-error records changed
+  from false-success to failure with real browser results preserved. The
+  official task remained `0/1` (`1990` became `17`), so this is a product-quality
+  and evidence-validity gain, not benchmark uplift.
 - A narrow answer-only successful-tool-evidence projection improved a disjoint
   16-item local file/Wiki validation slice from `8/16` unchanged to `12/16`,
   with four paired wins, zero losses, `16/16` validity, and zero activations on
