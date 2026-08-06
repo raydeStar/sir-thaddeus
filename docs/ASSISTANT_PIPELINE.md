@@ -190,6 +190,15 @@ call for that turn. When it does not succeed, the existing completion validation
 and bounded repair path is unchanged. This is a narrow response-contract seam,
 not a router, retriever, benchmark path, or global validation removal.
 
+## Semantic tool-result success
+
+An external tool call counts as successful evidence only when its transport
+completes and the returned payload is not a recognized error envelope. JSON
+errors, plain-text errors, and MCP Markdown `### Error` envelopes remain visible
+to the model for recovery, but are recorded as unsuccessful for confidence,
+retry selection, response guards, and audit evidence. A recoverable tool error
+does not terminate the tool loop by itself.
+
 ## Exact-identity repair termination
 
 Completion repair remains bounded and validation-led. After a failed completion

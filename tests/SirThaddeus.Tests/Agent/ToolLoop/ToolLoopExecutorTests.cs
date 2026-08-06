@@ -974,6 +974,100 @@ public class ToolLoopExecutorTests
         Assert.Equal(1, llmCallCount);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_WhenMcpReturnsMarkdownError_RecordsFailureAndAllowsRecovery()
+    {
+        var llmCallCount = 0;
+        var llm = new FakeLlmClient((_, _) =>
+        {
+            llmCallCount++;
+            return llmCallCount switch
+            {
+                1 => new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_open",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "browser_navigate",
+                                Arguments = "{}"
+                            }
+                        }
+                    ]
+                },
+                2 => new LlmResponse
+                {
+                    IsComplete = false,
+                    FinishReason = "tool_calls",
+                    ToolCalls =
+                    [
+                        new ToolCallRequest
+                        {
+                            Id = "call_install",
+                            Function = new FunctionCallDetails
+                            {
+                                Name = "browser_install",
+                                Arguments = "{}"
+                            }
+                        }
+                    ]
+                },
+                _ => new LlmResponse
+                {
+                    IsComplete = true,
+                    Content = "Browser recovered.",
+                    FinishReason = "stop"
+                }
+            };
+        });
+
+        var mcp = new FakeMcpClient(
+            (tool, _) => tool == "browser_navigate"
+                ? "### Error\nError: Browser chromium is not installed."
+                : "### Result\nBrowser chromium installed.",
+            FakeMcpClient.StandardToolSet);
+
+        var executor = new ToolLoopExecutor(llm, mcp);
+        var response = await executor.ExecuteAsync(new ToolLoopExecutionRequest
+        {
+            History =
+            [
+                ChatMessage.System("test"),
+                ChatMessage.User("Open the page and recover if the browser is missing.")
+            ],
+            Tools =
+            [
+                MakeToolDefinition("browser_navigate"),
+                MakeToolDefinition("browser_install")
+            ],
+            ToolCallsMade = [],
+            InitialRoundTrips = 0,
+            MaxRoundTrips = 5,
+            Decision = new SirThaddeus.Agent.Orchestration.IntentDecisionV2 { Intent = "ToolTask" },
+            SanitizeAssistantText = static s => s
+        });
+
+        Assert.Equal("Browser recovered.", response.Text);
+        Assert.Equal(3, llmCallCount);
+        Assert.Collection(
+            response.ToolCallsMade,
+            failed =>
+            {
+                Assert.Equal("browser_navigate", failed.ToolName);
+                Assert.False(failed.Success);
+            },
+            recovered =>
+            {
+                Assert.Equal("browser_install", recovered.ToolName);
+                Assert.True(recovered.Success);
+            });
+    }
+
     private static ToolDefinition MakeToolDefinition(string name)
     {
         return new ToolDefinition

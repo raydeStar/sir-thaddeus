@@ -211,24 +211,26 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
                 log("AGENT_TOOL_CALL", $"{toolCall.Function.Name}({redactedInput})");
 
                 string result;
-                bool success;
+                bool transportSuccess;
                 try
                 {
                     result = await _mcp.CallToolAsync(
                         toolCall.Function.Name,
                         toolCall.Function.Arguments,
                         cancellationToken);
-                    success = true;
+                    transportSuccess = true;
                 }
                 catch (Exception ex)
                 {
                     result = $"Tool error: {ex.Message}";
-                    success = false;
+                    transportSuccess = false;
                 }
+
+                var success = transportSuccess && !LooksLikeStructuredError(result);
 
                 executedWinnerCount++;
                 executedToolNames.Add(toolCall.Function.Name);
-                if (success && !LooksLikeStructuredError(result))
+                if (success)
                     successfulPayloadCount++;
                 if (success && LooksLikeNoResultsPayload(result))
                     noResultsPayloadCount++;
@@ -449,7 +451,8 @@ public sealed class ToolLoopExecutor : IToolLoopExecutor
         catch
         {
             var trimmed = payload.TrimStart();
-            return trimmed.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
+            return trimmed.StartsWith("### Error", StringComparison.OrdinalIgnoreCase) ||
+                   trimmed.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) ||
                    payload.Contains("tool error", StringComparison.OrdinalIgnoreCase) ||
                    payload.Contains("tool execution failed", StringComparison.OrdinalIgnoreCase) ||
                    payload.Contains("tool call blocked", StringComparison.OrdinalIgnoreCase);
