@@ -16,7 +16,7 @@ namespace SirThaddeus.Logging;
 /// Components that run under a generic <see cref="IHostApplicationBuilder"/> (headless
 /// runtime, voice host, MCP server) call <see cref="UseSirThaddeusLogging"/> during
 /// setup. Components without a host — notably the Avalonia UI — call
-/// <see cref="CreateLoggerFactory"/> and register the resulting factory in whatever
+/// <see cref="CreateLoggerFactory(LoggingOptions)"/> and register the resulting factory in whatever
 /// DI container they manage themselves.
 /// </remarks>
 public static class LoggingBootstrap
@@ -74,6 +74,17 @@ public static class LoggingBootstrap
         ArgumentNullException.ThrowIfNull(options);
         var serilog = BuildSerilogLogger(options);
         return new SerilogLoggerFactory(serilog, dispose: true);
+    }
+
+    /// <summary>
+    /// Adapt an existing Serilog logger to the Microsoft logging abstraction.
+    /// This keeps legacy hosts that already own <see cref="Log.Logger"/> from
+    /// silently constructing product services with null loggers.
+    /// </summary>
+    public static ILoggerFactory CreateLoggerFactory(SerilogILogger serilog, bool dispose = false)
+    {
+        ArgumentNullException.ThrowIfNull(serilog);
+        return new SerilogLoggerFactory(serilog, dispose);
     }
 
     /// <summary>

@@ -14,6 +14,7 @@ namespace SirThaddeus.Tests.Agent.Pipeline;
 /// where a step mutates context in a way that breaks the next step, or
 /// where event emission is out of order. Fast — no real LLM, no real MCP.
 /// </summary>
+[Collection(RoutingLatencyEnvironmentCollection.Name)]
 public class PipelineIntegrationTests
 {
     [Fact]
@@ -57,6 +58,46 @@ public class PipelineIntegrationTests
         Assert.True(response.Success);
         Assert.Equal("Hello, friend.", response.Text);
         Assert.Equal(1, llm.CallCount);
+    }
+
+    [Fact]
+    public async Task Tool_loop_decision_telemetry_is_content_free_and_behavior_preserving()
+    {
+        const string finalText = "SECRET-FINAL-TEXT";
+        var events = new List<string>();
+        var prior = Environment.GetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE", "1");
+            var llm = new QueuedLlm(
+                LlmReplyFactory.Tool("web_search", "{\"q\":\"private query\"}"),
+                LlmReplyFactory.Final(finalText));
+            var orch = BuildOrchestrator(
+                llm,
+                new StubMcp(["web_search"]),
+                log: (name, detail) => events.Add($"{name} {detail}"));
+
+            var response = await orch.ProcessAsync("private user prompt");
+
+            Assert.Equal(finalText, response.Text);
+            Assert.Single(response.ToolCallsMade);
+            Assert.Contains(events, line =>
+                line.Contains("TOOL_LOOP_DECISION", StringComparison.Ordinal) &&
+                line.Contains("decision=tool_calls", StringComparison.Ordinal) &&
+                line.Contains("effective_tool_calls=1", StringComparison.Ordinal));
+            Assert.Contains(events, line =>
+                line.Contains("TOOL_LOOP_DECISION", StringComparison.Ordinal) &&
+                line.Contains("decision=final_text", StringComparison.Ordinal));
+            Assert.DoesNotContain(events, line =>
+                line.Contains(finalText, StringComparison.Ordinal) ||
+                line.Contains("private query", StringComparison.Ordinal) ||
+                line.Contains("private user prompt", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ST_ROUTING_LATENCY_TRACE", prior);
+        }
     }
 
     [Fact]
@@ -209,14 +250,16 @@ public class PipelineIntegrationTests
         IMcpToolClient mcp,
         IChatEventSink? sink = null,
         IMemoryContextProvider? memoryProvider = null,
-        IAutoMemoryExtractor? extractor = null)
+        IAutoMemoryExtractor? extractor = null,
+        Action<string, string>? log = null)
     {
         var effectiveSink = sink ?? NullChatEventSink.Instance;
 
         var toolLoop = new ToolLoopStep(
             llm, mcp, effectiveSink,
             permissionGate: new AlwaysGrantGate(),
-            maxRoundTrips: 6);
+            maxRoundTrips: 6,
+            log: log);
 
         var sanitize = new Func<TurnContext, string, string>((_, draft) => draft);
 

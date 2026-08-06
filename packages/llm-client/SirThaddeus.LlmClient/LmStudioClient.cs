@@ -497,6 +497,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
         requestMessages = ApplyPromptBudget(
             requestMessages,
             new LlmRequestContext { TaskKind = _requestTaskKind.Value });
+        var requestedOutputTokens = GetOptionsSnapshot().EffectiveMaxTokens(maxTokensOverride);
 
         // ── Attempt 1: full request with stop + repetition_penalty ───
         var body = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, temperatureOverride, includeExtras: true);
@@ -506,7 +507,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
             NormalizePath(GetOptionsSnapshot().ChatCompletionPath), body, _json, cancellationToken);
 
         if (response.IsSuccessStatusCode)
-            return await ParseResponse(response, tools, cancellationToken);
+            return await ParseResponse(response, tools, requestedOutputTokens, cancellationToken);
 
         var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -522,7 +523,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
                 NormalizePath(GetOptionsSnapshot().ChatCompletionPath), bare, _json, cancellationToken);
 
             if (response.IsSuccessStatusCode)
-                return await ParseResponse(response, tools, cancellationToken);
+                return await ParseResponse(response, tools, requestedOutputTokens, cancellationToken);
 
             errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -716,6 +717,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
     private async Task<LlmResponse> ParseResponse(
         HttpResponseMessage response,
         IReadOnlyList<ToolDefinition>? advertisedTools,
+        int requestedOutputTokens,
         CancellationToken cancellationToken)
     {
         var raw = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -735,6 +737,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
         var choice = completion.Choices[0];
         var message = choice.Message;
 
+        var providerToolCallCount = message?.ToolCalls?.Count ?? 0;
         IReadOnlyList<ToolCallRequest>? toolCalls = message?.ToolCalls;
         if (toolCalls is not { Count: > 0 } && message is not null)
         {
@@ -743,6 +746,20 @@ public sealed class LmStudioClient : IConfigurableLlmClient
                 advertisedTools);
         }
         var hasToolCalls = toolCalls is { Count: > 0 };
+        var parserOutcome = providerToolCallCount > 0
+            ? "native"
+            : hasToolCalls
+                ? "normalized"
+                : "none";
+
+        LogResponseBoundary(
+            choice,
+            message,
+            providerToolCallCount,
+            toolCalls?.Count ?? 0,
+            parserOutcome,
+            completion.Usage,
+            requestedOutputTokens);
 
         // Strip thinking scaffold at the transport layer so callers never
         // see raw <think> blocks regardless of model or path.
@@ -764,6 +781,53 @@ public sealed class LmStudioClient : IConfigurableLlmClient
             FinishReason = choice.FinishReason,
             Usage = completion.Usage
         };
+    }
+
+    private void LogResponseBoundary(
+        CompletionChoice choice,
+        ChoiceMessage? message,
+        int providerToolCallCount,
+        int effectiveToolCallCount,
+        string parserOutcome,
+        TokenUsage? usage,
+        int requestedOutputTokens)
+    {
+        if (!IsLatencyTracingEnabled())
+            return;
+
+        var turnId = Activity.Current?.GetBaggageItem("turn_id") ?? string.Empty;
+        var threadId = Activity.Current?.GetBaggageItem("thread_id") ?? string.Empty;
+        var contentChars = message?.Content?.Length ?? 0;
+        var reasoningChars = (message?.ReasoningContent?.Length ?? 0) +
+                             (message?.Reasoning?.Length ?? 0);
+        var completionTokens = usage?.CompletionTokens ?? 0;
+        var outputLimitReached = string.Equals(
+                                     choice.FinishReason,
+                                     "length",
+                                     StringComparison.OrdinalIgnoreCase) ||
+                                 (requestedOutputTokens > 0 &&
+                                  completionTokens >= requestedOutputTokens);
+
+        _logger.LogInformation(
+            "LLM_RESPONSE_BOUNDARY threadId={ThreadId} turnId={TurnId} " +
+            "finish_reason={FinishReason} content_present={ContentPresent} content_chars={ContentChars} " +
+            "reasoning_present={ReasoningPresent} reasoning_chars={ReasoningChars} " +
+            "provider_tool_calls={ProviderToolCalls} effective_tool_calls={EffectiveToolCalls} " +
+            "tool_call_parser_outcome={ParserOutcome} completion_tokens={CompletionTokens} " +
+            "requested_output_tokens={RequestedOutputTokens} output_limit_reached={OutputLimitReached}",
+            threadId,
+            turnId,
+            choice.FinishReason ?? "unknown",
+            contentChars > 0,
+            contentChars,
+            reasoningChars > 0,
+            reasoningChars,
+            providerToolCallCount,
+            effectiveToolCallCount,
+            parserOutcome,
+            completionTokens,
+            requestedOutputTokens,
+            outputLimitReached);
     }
 
     public LlmUsageSnapshot GetUsageSnapshot()

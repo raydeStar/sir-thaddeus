@@ -6,7 +6,7 @@ namespace SirThaddeus.Harness.Artifacts;
 
 public sealed record HarnessRuntimeDiagnostics
 {
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
     public required string TurnId { get; init; }
     public bool FullCompositionObserved { get; init; }
     public IReadOnlyList<HarnessDiagnosticEvent> Events { get; init; } = [];
@@ -26,6 +26,21 @@ public sealed record HarnessDiagnosticEvent
     public bool? Changed { get; init; }
     public int? Messages { get; init; }
     public int? Tools { get; init; }
+    public string? FinishReason { get; init; }
+    public bool? ContentPresent { get; init; }
+    public int? ContentChars { get; init; }
+    public bool? ReasoningPresent { get; init; }
+    public int? ReasoningChars { get; init; }
+    public int? ProviderToolCalls { get; init; }
+    public int? EffectiveToolCalls { get; init; }
+    public string? ToolCallParserOutcome { get; init; }
+    public int? CompletionTokens { get; init; }
+    public int? RequestedOutputTokens { get; init; }
+    public bool? OutputLimitReached { get; init; }
+    public int? Round { get; init; }
+    public bool? ForcedTool { get; init; }
+    public int? AdvertisedTools { get; init; }
+    public string? Decision { get; init; }
 }
 
 public sealed record HarnessDiagnosticTimings
@@ -59,6 +74,8 @@ internal static partial class HarnessRuntimeDiagnosticsReader
         "COMPLETION_VALIDATION_DECISION",
         "COMPLETION_REPAIR_TIMING",
         "llm.request_completed",
+        "LLM_RESPONSE_BOUNDARY",
+        "TOOL_LOOP_DECISION",
         "EXPERIMENT_ACTIVATION"
     ];
 
@@ -170,7 +187,22 @@ internal static partial class HarnessRuntimeDiagnosticsReader
             RepairNeeded = Boolean(line, "repair_needed"),
             Changed = Boolean(line, "changed"),
             Messages = Integer(line, "messages"),
-            Tools = Integer(line, "tools")
+            Tools = Integer(line, "tools"),
+            FinishReason = Value(line, "finish_reason"),
+            ContentPresent = Boolean(line, "content_present"),
+            ContentChars = Integer(line, "content_chars"),
+            ReasoningPresent = Boolean(line, "reasoning_present"),
+            ReasoningChars = Integer(line, "reasoning_chars"),
+            ProviderToolCalls = Integer(line, "provider_tool_calls"),
+            EffectiveToolCalls = Integer(line, "effective_tool_calls"),
+            ToolCallParserOutcome = Value(line, "tool_call_parser_outcome"),
+            CompletionTokens = Integer(line, "completion_tokens"),
+            RequestedOutputTokens = Integer(line, "requested_output_tokens"),
+            OutputLimitReached = Boolean(line, "output_limit_reached"),
+            Round = Integer(line, "round"),
+            ForcedTool = Boolean(line, "forced_tool"),
+            AdvertisedTools = Integer(line, "advertised_tools"),
+            Decision = Value(line, "decision")
         };
     }
 

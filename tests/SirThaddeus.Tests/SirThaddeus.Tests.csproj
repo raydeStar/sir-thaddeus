@@ -43,6 +43,7 @@
     <ProjectReference Include="..\..\packages\document-reader\SirThaddeus.DocumentReader\SirThaddeus.DocumentReader.csproj" />
     <ProjectReference Include="..\..\packages\contracts\SirThaddeus.Contracts\SirThaddeus.Contracts.csproj" />
     <ProjectReference Include="..\..\packages\startup-diagnostics\SirThaddeus.StartupDiagnostics\SirThaddeus.StartupDiagnostics.csproj" />
+    <ProjectReference Include="..\..\packages\logging\SirThaddeus.Logging\SirThaddeus.Logging.csproj" />
     <ProjectReference Include="..\..\apps\mcp-server\SirThaddeus.McpServer\SirThaddeus.McpServer.csproj" />
     <ProjectReference Include="..\..\tools\SirThaddeus.Harness\SirThaddeus.Harness.csproj" />
     <ProjectReference Include="..\..\tools\SirThaddeus.DirectEval\SirThaddeus.DirectEval.csproj" />
