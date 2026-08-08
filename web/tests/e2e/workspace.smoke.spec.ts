@@ -34,4 +34,63 @@ test.describe('workspace smoke', () => {
     // Connection dot becomes "connected" once the WS handshake completes.
     await expect(page.getByTestId('runtime-connection-dot')).toHaveAttribute('data-connected', 'true', { timeout: 10_000 });
   });
+
+  test('the runtime socket redials after the connection drops', async ({ page, context }) => {
+    const baseUrl = process.env.RUNTIME_BASE_URL!;
+    const token = process.env.RUNTIME_TOKEN!;
+    await context.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
+
+    // Proxy /ws so the test can sever the connection the way a runtime restart
+    // or a machine wake would. Without a redial the whole app goes quiet —
+    // streaming text, tool pills, permission prompts, run state — with no
+    // indication beyond the connection dot, and only a reload recovers it.
+    let connectionCount = 0;
+    const routes: Array<{ close: () => void }> = [];
+    await page.routeWebSocket(/\/ws/, (ws) => {
+      connectionCount += 1;
+      routes.push(ws);
+      // No message handlers: Playwright relays both directions automatically.
+      ws.connectToServer();
+    });
+
+    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+    const dot = page.getByTestId('runtime-connection-dot');
+    await expect(dot).toHaveAttribute('data-connected', 'true', { timeout: 10_000 });
+    expect(connectionCount).toBe(1);
+
+    routes[0].close();
+
+    // A fresh connection is established without a reload, and the app reports
+    // itself connected again.
+    await expect
+      .poll(() => connectionCount, { timeout: 15_000 })
+      .toBeGreaterThan(1);
+    await expect(dot).toHaveAttribute('data-connected', 'true', { timeout: 15_000 });
+    await expect(page.getByTestId('runtime-state-badge')).toHaveAttribute('data-state', 'Idle', {
+      timeout: 15_000,
+    });
+  });
+
+  test('leaving compact mode does not disconnect the application socket', async ({ page, context }) => {
+    const baseUrl = process.env.RUNTIME_BASE_URL!;
+    const token = process.env.RUNTIME_TOKEN!;
+    await context.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
+
+    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+    const dot = page.getByTestId('runtime-connection-dot');
+    await expect(dot).toHaveAttribute('data-connected', 'true', { timeout: 10_000 });
+
+    // Navigate client-side so the root layout stays mounted while CompactRoute
+    // mounts and unmounts. The previous compact cleanup closed the singleton
+    // socket even though the root layout still owned the live application.
+    await page.evaluate(() => {
+      window.history.pushState({}, '', '/compact');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect(page.getByTestId('route-compact')).toBeVisible();
+
+    await page.evaluate(() => window.history.back());
+    await expect(page.getByTestId('route-home')).toBeVisible({ timeout: 10_000 });
+    await expect(dot).toHaveAttribute('data-connected', 'true', { timeout: 10_000 });
+  });
 });

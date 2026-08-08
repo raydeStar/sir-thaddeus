@@ -37,6 +37,7 @@ function ChatThreadRoute() {
   const thread = useChatStore((s) => s.activeThread);
   const activeTurn = useChatStore((s) => s.activeTurn);
   const activeRun = useChatStore((s) => s.activeRun);
+  const pendingSince = useChatStore((s) => s.pendingSince);
   const sending = useChatStore((s) => s.sending);
   const error = useChatStore((s) => s.error);
   const openThread = useChatStore((s) => s.openThread);
@@ -88,18 +89,26 @@ function ChatThreadRoute() {
     activeRun?.plan &&
     (activeRun.state === 'awaitingapproval' || activeRun.state === 'awaiting_approval'),
   );
+  // A turn is "in flight" from the instant the user submits — before the
+  // runtime's `chat.turn.start` lands — so the work surface, the elapsed timer,
+  // and the mid-turn guards all key off this rather than off `activeTurn`.
+  //
+  // Exception: a queued turn parked on plan approval is not working on anything.
+  // The plan card is the surface the user must act on; a "Working on your
+  // request" card next to it would be a lie and would compete for attention.
+  const turnInFlight = Boolean(activeTurn) || (pendingSince !== null && !blockedByPlan);
 
   useEffect(() => {
     void openThread(threadId);
   }, [openThread, threadId]);
 
   useEffect(() => {
-    if (activeTurn && turnStartedAtRef.current === null) {
-      turnStartedAtRef.current = Date.now();
-    } else if (!activeTurn) {
+    if (turnInFlight && turnStartedAtRef.current === null) {
+      turnStartedAtRef.current = pendingSince ?? Date.now();
+    } else if (!turnInFlight) {
       turnStartedAtRef.current = null;
     }
-  }, [activeTurn]);
+  }, [pendingSince, turnInFlight]);
 
   useEffect(() => {
     let disposed = false;
@@ -157,7 +166,7 @@ function ChatThreadRoute() {
         : Math.max(0, Math.min(targetTopInScrollCoords - TOP_PADDING, maxScroll));
 
     container.scrollTo({ top: nextScrollTop, behavior: 'smooth' });
-  }, [thread?.messages.length, activeTurn?.text]);
+  }, [thread?.messages.length, activeTurn?.text, turnInFlight]);
 
   useEffect(() => () => {
     speechRequestRef.current += 1;
@@ -181,6 +190,7 @@ function ChatThreadRoute() {
       setDraft('');
       return;
     }
+    if (turnInFlight) return;
     if (voiceTranscript !== null) {
       pendingVoiceResponseRef.current = true;
     }
@@ -328,7 +338,7 @@ function ChatThreadRoute() {
   }, [activeRun?.state, pauseActiveRun, resumeActiveRun]);
 
   useEffect(() => {
-    if (!activeTurn) return;
+    if (!turnInFlight) return;
     const handler = (event: KeyboardEvent) => {
       if ((event.key !== '.' && event.key !== ' ') || event.altKey || event.ctrlKey || event.metaKey) return;
       const target = event.target as HTMLElement | null;
@@ -342,7 +352,7 @@ function ChatThreadRoute() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeTurn, pauseOrResumeActiveWork, triggerShutup]);
+  }, [pauseOrResumeActiveWork, triggerShutup, turnInFlight]);
 
   const beginVoiceCapture = useCallback(async () => {
     if (recorderRef.current || voiceState !== 'idle') {
@@ -350,7 +360,7 @@ function ChatThreadRoute() {
       return;
     }
 
-    if (sending || activeTurn) {
+    if (sending || turnInFlight) {
       await triggerShutup();
       return;
     }
@@ -427,7 +437,7 @@ function ChatThreadRoute() {
       }
       abortPendingCaptureRef.current = false;
     }
-  }, [activeTurn, ensureVoiceWarmup, sending, stopSpeech, triggerShutup, voiceState]);
+  }, [ensureVoiceWarmup, sending, stopSpeech, triggerShutup, turnInFlight, voiceState]);
 
   const finishVoiceCapture = useCallback(async () => {
     const recorder = recorderRef.current;
@@ -535,10 +545,10 @@ function ChatThreadRoute() {
   const messages = useMemo(() => thread?.messages ?? [], [thread?.messages]);
   const latestMessage = messages[messages.length - 1];
   const latestAssistantResponseId =
-    !activeTurn && String(latestMessage?.role || '').toLowerCase() === 'assistant' && latestMessage?.text?.trim()
+    !turnInFlight && String(latestMessage?.role || '').toLowerCase() === 'assistant' && latestMessage?.text?.trim()
       ? latestMessage.id
       : null;
-  const empty = messages.length === 0 && !activeTurn;
+  const empty = messages.length === 0 && !turnInFlight;
 
   useEffect(() => {
     if (!focusMessageId) return;
@@ -560,12 +570,12 @@ function ChatThreadRoute() {
   }, [focusMessageId, messages.length, activeTurn?.messageId]);
 
   useEffect(() => {
-    if (!pendingVoiceResponseRef.current || activeTurn) return;
+    if (!pendingVoiceResponseRef.current || turnInFlight) return;
     const latest = messages[messages.length - 1];
     if (String(latest?.role || '').toLowerCase() !== 'assistant' || !latest?.text?.trim()) return;
     pendingVoiceResponseRef.current = false;
     void onSpeakMessage(latest.id, latest.text);
-  }, [activeTurn, messages, onSpeakMessage]);
+  }, [messages, onSpeakMessage, turnInFlight]);
 
   useEffect(() => {
     if (error) pendingVoiceResponseRef.current = false;
@@ -598,7 +608,7 @@ function ChatThreadRoute() {
         role="log"
         aria-live="polite"
         aria-relevant="additions"
-        aria-busy={Boolean(activeTurn)}
+        aria-busy={turnInFlight}
         className="flex-1 overflow-y-auto px-4 md:px-10"
       >
         <div className="mx-auto w-full max-w-[720px] py-6 pb-40">
@@ -623,7 +633,7 @@ function ChatThreadRoute() {
                     threadId={threadId}
                     isLatestAssistantResponse={m.id === latestAssistantResponseId}
                     onRetryLatest={() => void retryLatestResponse({ ephemeralMemory })}
-                    retryDisabled={sending || Boolean(activeTurn)}
+                    retryDisabled={sending || turnInFlight}
                     speechStatus={speechState?.messageId === m.id ? speechState.status : null}
                     onSpeak={() => void onSpeakMessage(m.id, m.text)}
                     highlighted={m.id === highlightedMessageId}
@@ -631,14 +641,20 @@ function ChatThreadRoute() {
                   />
                 );
               })}
-              {activeTurn ? (
+              {turnInFlight ? (
                 <MessageRow
                   role="assistant"
-                  text={activeTurn.text || ''}
-                  messageId={activeTurn.messageId}
+                  text={activeTurn?.text || ''}
+                  // Before `chat.turn.start` lands there is no server message id
+                  // yet. The placeholder only keys tool-activity lookups, which
+                  // are legitimately empty until the turn actually begins.
+                  messageId={activeTurn?.messageId ?? 'pending-turn'}
                   threadId={threadId}
                   streaming
-                  startedAt={turnStartedAtRef.current ?? undefined}
+                  // 'queued' until the runtime's chat.turn.start assigns a real
+                  // message id; 'streaming' once the turn is genuinely underway.
+                  turnState={activeTurn ? 'streaming' : 'queued'}
+                  startedAt={pendingSince ?? turnStartedAtRef.current ?? undefined}
                   runState={activeRun?.state}
                   checkpoint={activeRun?.checkpoint}
                   plan={activeRun?.plan}
@@ -720,7 +736,7 @@ function ChatThreadRoute() {
               <button
                 type="button"
                 onClick={() => void onSubmit(draft)}
-                disabled={!draft.trim() || blockedByPermission}
+                disabled={!draft.trim() || blockedByPermission || turnInFlight}
                 className="btn-primary mt-2 min-h-9 px-3 text-xs"
               >
                 <Send className="h-3.5 w-3.5" />
@@ -780,7 +796,7 @@ function ChatThreadRoute() {
             value={draft}
             onChange={setDraft}
             onSubmit={onSubmit}
-            sending={sending || blockedByPermission || blockedByPlan}
+            sending={sending || turnInFlight || blockedByPermission || blockedByPlan}
             placeholder={
               blockedByPermission
                 ? 'Permission decision required above'
@@ -892,6 +908,13 @@ interface MessageRowProps {
   messageId?: string;
   threadId?: string;
   streaming?: boolean;
+  /**
+   * Distinguishes a turn the user has submitted but the runtime has not started
+   * yet ('queued') from one that is actively producing output ('streaming').
+   * Surfaced as `data-turn-state` so tests and styling can tell them apart —
+   * both render an assistant row, only one has a server-assigned message id.
+   */
+  turnState?: 'queued' | 'streaming';
   startedAt?: number;
   isLatestAssistantResponse?: boolean;
   onRetryLatest?: () => void;
@@ -916,6 +939,7 @@ function MessageRow({
   messageId,
   threadId,
   streaming,
+  turnState,
   startedAt,
   isLatestAssistantResponse,
   onRetryLatest,
@@ -960,6 +984,7 @@ function MessageRow({
         data-testid={testId}
         data-role={role}
         data-streaming={streaming ? 'true' : undefined}
+        data-turn-state={turnState}
         className={highlightClass}
       >
         <div className="flex justify-end">
@@ -980,6 +1005,7 @@ function MessageRow({
       data-testid={testId}
       data-role={role}
       data-streaming={streaming ? 'true' : undefined}
+      data-turn-state={turnState}
       className={highlightClass}
     >
       {streaming && messageId && onPauseResume && onRedirect && onTakeOver && onStop ? (

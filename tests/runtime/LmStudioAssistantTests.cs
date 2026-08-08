@@ -104,6 +104,54 @@ public class LmStudioAssistantTests : IDisposable
     }
 
     [Fact]
+    public async Task RespondAsync_coalesces_deltas_instead_of_one_frame_per_word()
+    {
+        // The reply is fully composed before the first delta is published, so
+        // delta granularity buys nothing but frames: each one is a JSON
+        // serialization plus a WebSocket send behind a per-client semaphore plus
+        // a store commit in the UI. Guard against regressing to word-at-a-time.
+        var words = Enumerable.Repeat("lorem", 400).ToArray();
+        var reply = string.Join(' ', words);
+        var (store, assistant, captured, _) = NewSut(reply: reply);
+        var thread = await store.CreateAsync("t", CancellationToken.None);
+
+        var msg = await assistant.RespondAsync(thread.Id, "hi", CancellationToken.None);
+
+        var deltas = captured
+            .Where(e => e.Type == ChatTurnEvents.Delta)
+            .Select(e => ((ChatTurnDelta)e.Payload!).Text)
+            .ToArray();
+
+        // Concatenation must still reproduce the reply byte-for-byte — the UI
+        // appends deltas verbatim without inserting whitespace.
+        Assert.Equal(reply, string.Concat(deltas));
+        Assert.Equal(reply, msg.Text);
+        Assert.True(
+            deltas.Length < words.Length / 4,
+            $"expected coalesced deltas, got {deltas.Length} frames for {words.Length} words");
+    }
+
+    [Fact]
+    public void RespondAsync_publishes_deltas_without_artificial_pacing_by_default()
+    {
+        // Default construction (no DeltaDelay override) must not pace: pacing a
+        // reply that already exists is latency charged to the user for nothing.
+        var store = new JsonFileThreadStore(_root, NullLogger<JsonFileThreadStore>.Instance);
+        var bus = new EventBus(NullLogger<EventBus>.Instance);
+        var publisher = new ChatTurnPublisher(bus);
+        var assistant = new LmStudioAssistant(
+            new FakeLlmClient { Reply = "a b c d e f g h" },
+            new FakeMcpClient { Tools = Array.Empty<McpToolInfo>() },
+            new ToolPermissionGate(new FakeSettingsStore(), bus, NullLogger<ToolPermissionGate>.Instance),
+            store,
+            publisher,
+            new TestAuditLogger(),
+            NullLogger<LmStudioAssistant>.Instance);
+
+        Assert.Equal(TimeSpan.Zero, assistant.DeltaDelay);
+    }
+
+    [Fact]
     public async Task RespondAsync_hides_wiki_write_tools_when_capability_is_disabled()
     {
         var tools = new[]

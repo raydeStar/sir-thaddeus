@@ -1,12 +1,18 @@
 import { create } from 'zustand';
-import type { RuntimeState, RuntimeStateEvent, RuntimeEvent } from '@thaddeus/shared-types';
-import { buildRuntimeWebSocketUrl, readRuntimeMetadata } from '../lib/runtime';
-import { publishWsEvent } from '../lib/wsEvents';
+import type { RuntimeState, RuntimeStateEvent } from '@thaddeus/shared-types';
+import { subscribeWsEvents } from '../lib/wsEvents';
+import {
+  connectRuntimeSocket,
+  disconnectRuntimeSocket,
+  isRuntimeSocketConnected,
+  subscribeRuntimeSocketStatus,
+} from '../lib/runtimeSocket';
 
 /**
- * Zustand store mirroring the runtime's authoritative state, fed by the WebSocket
- * stream the runtime publishes on /ws. Phase 1 only consumes `runtime.state` events;
- * later phases will add tool-call, permission, and TTS events as separate slices.
+ * Zustand store mirroring the runtime's authoritative state. The socket itself
+ * is owned by `lib/runtimeSocket` (one connection, one reconnect policy, shared
+ * by every feature store); this store just projects the `runtime.state` slice
+ * and the connection flag the header badge renders.
  */
 interface RuntimeStoreState {
   connected: boolean;
@@ -17,7 +23,8 @@ interface RuntimeStoreState {
   disconnect: () => void;
 }
 
-let socket: WebSocket | null = null;
+let unsubscribeBus: (() => void) | null = null;
+let unsubscribeStatus: (() => void) | null = null;
 
 export const useRuntimeStore = create<RuntimeStoreState>((set) => ({
   connected: false,
@@ -26,47 +33,30 @@ export const useRuntimeStore = create<RuntimeStoreState>((set) => ({
   lastError: null,
 
   connect: () => {
-    if (socket) return;
-    const { token } = readRuntimeMetadata();
-    const url = buildRuntimeWebSocketUrl(token);
-    if (!url) return;
-
-    try {
-      socket = new WebSocket(url);
-    } catch (e) {
-      set({ lastError: (e as Error).message });
-      return;
-    }
-
-    socket.addEventListener('open', () => set({ connected: true, lastError: null }));
-    socket.addEventListener('close', () => set({ connected: false }));
-    socket.addEventListener('error', () =>
-      set({ lastError: 'WebSocket connection failed.' }),
-    );
-    socket.addEventListener('message', (msg) => {
-      try {
-        const evt = JSON.parse(msg.data as string) as RuntimeEvent<RuntimeStateEvent>;
-        // Runtime-state slice lives here; everything else goes on the bus.
-        if (evt.type === 'runtime.state' && evt.payload) {
-          set({ state: evt.payload.state, lastEvent: evt.payload });
-        }
-        publishWsEvent({
-          type: evt.type,
-          id: evt.id,
-          timestamp: evt.timestamp,
-          correlationId: evt.correlationId ?? null,
-          payload: evt.payload,
-        });
-      } catch {
-        // ignore malformed frames; the runtime is the authority
-      }
+    unsubscribeBus ??= subscribeWsEvents((evt) => {
+      if (evt.type !== 'runtime.state' || !evt.payload) return;
+      const payload = evt.payload as RuntimeStateEvent;
+      set({ state: payload.state, lastEvent: payload });
     });
+
+    unsubscribeStatus ??= subscribeRuntimeSocketStatus((connected) => {
+      set(connected
+        ? { connected: true, lastError: null }
+        // Keep the last error text out of the way while a reconnect is pending;
+        // the badge already communicates "not connected" from the flag.
+        : { connected: false });
+    });
+
+    connectRuntimeSocket();
+    set({ connected: isRuntimeSocketConnected() });
   },
 
   disconnect: () => {
-    if (!socket) return;
-    socket.close();
-    socket = null;
+    unsubscribeBus?.();
+    unsubscribeBus = null;
+    unsubscribeStatus?.();
+    unsubscribeStatus = null;
+    disconnectRuntimeSocket();
     set({ connected: false });
   },
 }));

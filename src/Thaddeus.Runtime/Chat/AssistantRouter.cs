@@ -115,7 +115,10 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         {
             _logger.LogWarning(ex, "assistant_router.lm_build_failed provider={Provider} base={Base}",
                 llm.Provider, llm.BaseUrl);
-            return await _stub.RespondAsync(threadId, userText, ct).ConfigureAwait(false);
+            return await _stub.RespondWithAsync(
+                threadId,
+                DescribeMisconfiguredProvider(llm),
+                ct).ConfigureAwait(false);
         }
 
         try
@@ -124,10 +127,85 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "assistant_router.lm_unreachable thread={ThreadId} provider={Provider} base={Base}",
-                threadId, llm.Provider, llm.BaseUrl);
-            return await _stub.RespondAsync(threadId, userText, ct).ConfigureAwait(false);
+            _logger.LogWarning(ex, "assistant_router.lm_call_failed thread={ThreadId} provider={Provider} base={Base} status={Status}",
+                threadId, llm.Provider, llm.BaseUrl, ex.StatusCode);
+            return await _stub.RespondWithAsync(
+                threadId,
+                DescribeTransportFailure(llm, ex),
+                ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Reply used when the model call fails. The user still gets an answer for
+    /// every turn, but it says what actually went wrong instead of echoing
+    /// their message back through the development stub — an echo reads as a
+    /// real, confidently wrong answer, which is a false success on the product
+    /// scorecard.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="HttpRequestException"/> covers two very different failures:
+    /// the provider was unreachable, or the provider answered and rejected the
+    /// request. Reporting the second as "I could not reach the model" sends the
+    /// user to check a server that is running fine, so the two are separated
+    /// here. Provider-controlled response text stays in the diagnostic log; the
+    /// chat surface receives a bounded, locally-authored explanation.
+    /// </remarks>
+    private static string DescribeTransportFailure(LlmSettings llm, HttpRequestException ex)
+    {
+        var where = string.IsNullOrWhiteSpace(llm.BaseUrl) ? "the configured endpoint" : llm.BaseUrl;
+        var model = string.IsNullOrWhiteSpace(llm.ModelId) ? "the configured model" : llm.ModelId;
+        var preamble =
+            "I was not able to answer your message. No usable answer was produced, " +
+            "and your message remains in this conversation.\n\n";
+
+        if (ex.StatusCode is null)
+        {
+            return preamble +
+                $"I could not reach `{model}` at `{where}`. Check that the provider is running " +
+                $"and that the model is loaded, then press Retry.";
+        }
+
+        return preamble +
+            $"`{model}` at `{where}` received the request, but rejected it " +
+            $"with HTTP {(int)ex.StatusCode}. {DescribeProviderRejection(ex)}";
+    }
+
+    /// <summary>
+    /// Converts untrusted provider text into one of the small number of useful,
+    /// locally-authored explanations the product supports.
+    /// </summary>
+    private static string DescribeProviderRejection(HttpRequestException ex)
+    {
+        var message = ex.Message;
+        if (message.Contains("n_ctx", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("context length", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("context window", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The request did not fit the model's available context window. " +
+                   "Increase the loaded context length or shorten the conversation, then press Retry.";
+        }
+
+        if (message.Contains("tool schema", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("tool_choice", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("regex", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The provider could not process the advertised tool schema. " +
+                   "Check that the loaded model supports instruction-following and tool calls, then press Retry.";
+        }
+
+        return "This is a request or configuration problem rather than a connection problem. " +
+               "Check the model settings and local runtime log, then press Retry.";
+    }
+
+    /// <summary>Reply used when provider settings can't produce a usable client.</summary>
+    private static string DescribeMisconfiguredProvider(LlmSettings llm)
+    {
+        var provider = string.IsNullOrWhiteSpace(llm.Provider) ? "the configured provider" : llm.Provider;
+        return
+            $"I could not start the model client, so I have not answered your message.\n\n" +
+            $"Provider `{provider}` could not be initialized. " +
+            $"Check the model settings and local runtime log, then press Retry.";
     }
 
     private static bool UseStub(LlmSettings llm) =>

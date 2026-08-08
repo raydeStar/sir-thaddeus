@@ -207,4 +207,61 @@ test.describe('chat smoke', () => {
       timeout: 10_000,
     });
   });
+
+  test('the work surface appears before the server acknowledges the send', async ({ page, context }) => {
+    const baseUrl = process.env.RUNTIME_BASE_URL!;
+    const token = process.env.RUNTIME_TOKEN!;
+    await context.setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
+
+    const created = await context.request.post(`${baseUrl}/api/threads`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { title: 'Immediate feedback proof' },
+    });
+    const thread = await created.json() as { id: string };
+
+    await page.goto(`${baseUrl}/chat/${thread.id}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('route-chat-thread')).toBeVisible({ timeout: 10_000 });
+
+    // Hold the append response so the pre-acknowledgement window is observable.
+    // Nothing in the UI should be waiting on this round-trip to tell the user
+    // their message was received and work is starting.
+    let releaseAppend: (() => void) | null = null;
+    const appendHeld = new Promise<void>((resolve) => { releaseAppend = resolve; });
+    await page.route(`**/api/threads/${thread.id}/messages`, async (route) => {
+      await appendHeld;
+      await route.continue();
+    });
+
+    await page.getByTestId('chat-input').fill('are you there');
+    await page.getByTestId('chat-send').click();
+
+    // Both the user's own bubble and a queued work surface must be on screen
+    // while the POST is still in flight. Before this was wired up the UI showed
+    // nothing at all until chat.turn.start arrived over the socket — and on the
+    // new-conversation path that event was routinely missed entirely, because
+    // the socket was still shaking hands and the broadcaster has no replay.
+    await expect(page.getByTestId('chat-message-list')).toContainText('are you there', {
+      timeout: 2_000,
+    });
+    const queued = page.getByTestId('chat-message-list').locator('[data-turn-state="queued"]');
+    await expect(queued).toBeVisible({ timeout: 2_000 });
+    await expect(page.getByTestId('steerable-progress-card')).toBeVisible({ timeout: 2_000 });
+    await expect(page.getByTestId('chat-input')).toBeDisabled();
+
+    releaseAppend!();
+
+    // And the turn still resolves normally once released.
+    await expect(page.getByTestId('chat-message-streaming')).toBeHidden({ timeout: 60_000 });
+    await expect(
+      page.getByTestId('chat-message-list').locator('[data-role="assistant"]'),
+    ).toHaveCount(1, { timeout: 5_000 });
+
+    // Exactly one user bubble. Folding the server's thread snapshot into local
+    // state has to retire the optimistic bubble it replaces — the roles arrive
+    // from the runtime capitalized ("User"), so a case-sensitive match leaves
+    // both on screen and the user sees their message twice.
+    await expect(
+      page.getByTestId('chat-message-list').locator('[data-role="User"], [data-role="user"]'),
+    ).toHaveCount(1, { timeout: 5_000 });
+  });
 });

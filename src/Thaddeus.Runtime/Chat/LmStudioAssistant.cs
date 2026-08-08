@@ -40,8 +40,16 @@ public sealed partial class LmStudioAssistant : IAssistant
     private readonly IAuditLogger _audit;
     private readonly ILogger<LmStudioAssistant> _logger;
 
-    /// <summary>Delay between streamed deltas. Tests override to zero.</summary>
-    public TimeSpan DeltaDelay { get; init; } = TimeSpan.FromMilliseconds(20);
+    /// <summary>
+    /// Delay between streamed deltas. Zero by default and it should stay that
+    /// way: the pipeline has already produced the complete, sanitized, validated
+    /// answer before the first delta is published, so any pacing here is latency
+    /// the user pays on top of a reply that already exists. A 500-word answer at
+    /// 20ms/word spent ten seconds typing out text the runtime was holding in a
+    /// StringBuilder. Kept as a seam only so a future real token stream (or a
+    /// test) can set it deliberately.
+    /// </summary>
+    public TimeSpan DeltaDelay { get; init; } = TimeSpan.Zero;
 
     /// <summary>
     /// Optional footman (gatekeeper) router. When set, each turn starts by
@@ -548,18 +556,34 @@ public sealed partial class LmStudioAssistant : IAssistant
             yield return LlmChatMessage.User(currentUserText);
     }
 
+    /// <summary>
+    /// Splits the reply into delta payloads. Every chunk carries its trailing
+    /// space so the UI can append without re-inserting whitespace, and
+    /// concatenating all chunks reproduces the input exactly.
+    /// </summary>
+    /// <remarks>
+    /// Chunks are coalesced to at least <see cref="MinDeltaChunkChars"/>
+    /// characters. One frame per word meant a long answer became hundreds of
+    /// JSON serializations, WebSocket sends (serialized behind a per-client
+    /// semaphore), and React store commits — enough to make the tail of a long
+    /// reply visibly janky. Coalescing keeps the frame count proportionate while
+    /// staying fine-grained enough to read as streaming when
+    /// <see cref="DeltaDelay"/> is non-zero.
+    /// </remarks>
     private static IEnumerable<string> Chunkify(string text)
     {
+        const int MinDeltaChunkChars = 48;
+
         var start = 0;
         for (var i = 0; i < text.Length; i++)
         {
-            if (text[i] == ' ')
-            {
-                yield return text.Substring(start, i - start + 1);
-                start = i + 1;
-            }
+            if (text[i] != ' ') continue;
+            var length = i - start + 1;
+            if (length < MinDeltaChunkChars) continue;
+            yield return text.Substring(start, length);
+            start = i + 1;
         }
-        if (start < text.Length) yield return text.Substring(start);
+        if (start < text.Length) yield return text[start..];
     }
 
 
