@@ -187,6 +187,9 @@ public sealed record LlmSettings
     [JsonPropertyName("baseUrl")]
     public string BaseUrl { get; init; } = "http://localhost:1234";
 
+    [JsonPropertyName("apiKey")]
+    public string? ApiKey { get; init; }
+
     [JsonPropertyName("chatCompletionPath")]
     public string ChatCompletionPath { get; init; } = "/v1/chat/completions";
 

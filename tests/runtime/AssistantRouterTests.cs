@@ -78,6 +78,23 @@ public class AssistantRouterTests : IDisposable
         };
 
     [Fact]
+    public void ToClientOptions_preserves_authenticated_provider_key()
+    {
+        var llm = new LlmSettings(
+            "openai",
+            "frontier-model",
+            "https://api.example.test",
+            "test-secret",
+            MaxTokens: 2048,
+            ContextWindowTokens: 8192,
+            Temperature: 0.7);
+
+        var options = AssistantRouter.ToClientOptions(llm);
+
+        Assert.Equal("test-secret", options.ApiKey);
+    }
+
+    [Fact]
     public async Task RespondAsync_uses_stub_when_provider_is_stub()
     {
         var (stub, store) = NewDeps();
