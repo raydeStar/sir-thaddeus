@@ -1,6 +1,6 @@
 # Current Evidence
 
-**Evidence cutoff:** August 5, 2026
+**Evidence cutoff:** August 7, 2026
 
 **Production baseline before the current promotion:** `69caf87`; the retained
 typed selected-target Wiki operation candidate is `8478531` and has cleared
@@ -34,6 +34,65 @@ calls and latency while tying or losing to unchanged Thaddeus.
   is direct evidence against production rules based on parameter count.
 - See [MODEL_TIER_CALIBRATION.md](../MODEL_TIER_CALIBRATION.md) for the complete
   promotion, transfer, and recalibration contract.
+
+### August 7 MCPMark continuation: escalation qualification and WebArena feasibility
+
+- Escalation qualification on six untouched filesystem-standard tasks was
+  rejected at its predeclared triage gate: the Gemma 4 26B-A4B Q4_K_S
+  escalation arm scored `0/3` valid and the frozen Qwen arm passed none of
+  its valid episodes. Escalation changed the failure layer (one successful
+  mutation with wrong target/content) but not the outcome. Evaluator verdict:
+  `experiments/verdicts/2026-08-07-mcpmark-escalation-qualification-v1.md`.
+- WebArena Phase 0 passed with zero model calls: the official
+  `shopping_admin_final_0719` site image was acquired from the CMU mirror
+  (the archive.org mirror is dark), the upstream Docker state manager ran
+  setup/configuration/readiness/cleanup through a mounted socket with
+  `--network host`, and the zero-model adapter smoke kept the exact 22-tool
+  Playwright catalog. Evaluator verdict:
+  `experiments/verdicts/2026-08-07-mcpmark-webarena-phase0-v1.md`.
+- The WebArena shopping_admin easy feasibility campaign was rejected at its
+  predeclared stop rule: unchanged Sir with frozen Qwen scored `0/3`
+  official on three valid untouched tasks. Every episode reached the live
+  site; failures were sustained browser-workflow depth (early termination,
+  failed-click give-up, round-envelope exhaustion), not source acquisition.
+  Evaluator verdict:
+  `experiments/verdicts/2026-08-07-mcpmark-webarena-shopping-admin-v1.md`.
+- The same-day WebArena escalation probe was rejected: Gemma 4 26B-A4B
+  Q4_K_S under unchanged Sir scored `0/3` official on the exact three paired
+  tasks. Behavioral depth improved (login forms filled, successful typing
+  where Qwen stopped after navigation), but no episode completed a sustained
+  admin workflow. Two local model families now show the same boundary on
+  identical untouched tasks. Evaluator verdict:
+  `experiments/verdicts/2026-08-07-mcpmark-webarena-escalation-probe-v1.md`.
+- A predeclared gold-action-shape oracle on untouched
+  `shopping_admin/ny_expansion_analysis_easy` was rejected: the answer-blind
+  skeleton (URL paths, menu labels, and operation shape observed with a
+  zero-model script; no data values; `verify.py` never read) activated
+  exactly and still scored `0/1` where the unchanged baseline also failed
+  `0/1`. Action knowledge is not the bottleneck; sustained action
+  execution/perception is. This reproduces the filesystem gold-action-
+  skeleton lesson on a second benchmark family and closes MCPMark mechanism
+  work absent a materially new perception/grounding-class hypothesis.
+  Evaluator verdict:
+  `experiments/verdicts/2026-08-07-mcpmark-webarena-gold-action-shape-v1.md`.
+- Two evaluator-envelope/invocation defects were fixed mid-session without
+  product changes: the pinned image's misleading `--k 4` default is pinned
+  to 1, and the assistant envelope now carries `status: completed` as the
+  Playwright/WebArena verifiers require. Adapter `Cancelled` episodes were
+  root-caused to the product workflow time budget cancelling a stalled first
+  provider call; a bounded post-run quiescence wait mitigates orphaned
+  generations at the single-slot provider.
+- Combined reading: filesystem-standard, public-web Playwright, and
+  locally-hosted WebArena now agree on one boundary, confirmed across two
+  local model families and an action-shape oracle — evidence reachability
+  works, isolated actions are partial, sustained state-changing workflows
+  fail, and the constraint is action execution/perception rather than action
+  knowledge or source access. No harness machinery is added from this;
+  visible qualification/escalation as a product-quality feature and
+  materially new perception/grounding mechanisms remain the documented
+  candidate paths. Full session handoff:
+  `experiments/handoffs/2026-08-07-benchmark-continuation-handoff.md` in the
+  evaluator repository.
 
 ### August 5 forced-tool transport certification
 
