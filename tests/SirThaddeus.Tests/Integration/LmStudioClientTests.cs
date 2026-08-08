@@ -73,6 +73,43 @@ public class LmStudioClientSelfHealingTests : IDisposable
     }
 
     [Fact]
+    public async Task ApiKey_IsSentAsBearerAuthorization()
+    {
+        string? authorization = null;
+        var handler = new SequenceHttpHandler(
+            [MakeSuccessResponse("authenticated")],
+            onHttpRequest: request => authorization = request.Headers.Authorization?.ToString());
+        var options = DefaultOptions with { ApiKey = "test-secret" };
+
+        using var client = new LmStudioClient(options, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(options.BaseUrl)
+        });
+
+        await client.ChatAsync(SimpleMessages);
+
+        Assert.Equal("Bearer test-secret", authorization);
+    }
+
+    [Fact]
+    public async Task MissingApiKey_DoesNotSendAuthorization()
+    {
+        string? authorization = "not-observed";
+        var handler = new SequenceHttpHandler(
+            [MakeSuccessResponse("local")],
+            onHttpRequest: request => authorization = request.Headers.Authorization?.ToString());
+
+        using var client = new LmStudioClient(DefaultOptions, new HttpClient(handler)
+        {
+            BaseAddress = new Uri(DefaultOptions.BaseUrl)
+        });
+
+        await client.ChatAsync(SimpleMessages);
+
+        Assert.Null(authorization);
+    }
+
+    [Fact]
     public async Task TemperatureOverride_isSentInRequestBody()
     {
         string? capturedBody = null;
@@ -757,21 +794,25 @@ internal sealed class SequenceHttpHandler : HttpMessageHandler
 {
     private readonly IReadOnlyList<(HttpStatusCode Status, string Body)> _responses;
     private readonly Action<string>? _onRequest;
+    private readonly Action<HttpRequestMessage>? _onHttpRequest;
     private int _callIndex;
 
     public int CallCount => _callIndex;
 
     public SequenceHttpHandler(
         IReadOnlyList<(HttpStatusCode Status, string Body)> responses,
-        Action<string>? onRequest = null)
+        Action<string>? onRequest = null,
+        Action<HttpRequestMessage>? onHttpRequest = null)
     {
         _responses = responses;
         _onRequest = onRequest;
+        _onHttpRequest = onHttpRequest;
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        _onHttpRequest?.Invoke(request);
         // Capture the request body if a callback was provided
         if (_onRequest is not null && request.Content is not null)
         {

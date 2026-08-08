@@ -34,6 +34,23 @@ public sealed class RuntimeLlmOptionsFactoryTests
         Assert.Equal("high", options.CodexReasoningEffort);
     }
 
+    [Fact]
+    public void BuildPrimary_PreservesOpenAiCompatibleApiKey()
+    {
+        var settings = new AppSettings
+        {
+            Llm = new LlmSettings
+            {
+                BaseUrl = "https://api.example.test",
+                ApiKey = "test-secret"
+            }
+        };
+
+        var options = RuntimeLlmOptionsFactory.BuildPrimary(settings);
+
+        Assert.Equal("test-secret", options.ApiKey);
+    }
+
     [Theory]
     [InlineData(null, ForcedToolChoiceMode.Required)]
     [InlineData("required", ForcedToolChoiceMode.Required)]
@@ -92,6 +109,23 @@ public sealed class RuntimeLlmOptionsFactoryTests
         var options = RuntimeLlmOptionsFactory.BuildGatekeeper(settings);
 
         Assert.Equal("small-footman-model", options.Model);
+    }
+
+    [Fact]
+    public void BuildGatekeeper_PreservesOpenAiCompatibleApiKey()
+    {
+        var settings = new AppSettings
+        {
+            Llm = new LlmSettings
+            {
+                ApiKey = "test-secret",
+                GatekeeperModelId = "small-footman-model"
+            }
+        };
+
+        var options = RuntimeLlmOptionsFactory.BuildGatekeeper(settings);
+
+        Assert.Equal("test-secret", options.ApiKey);
     }
 
     [Fact]

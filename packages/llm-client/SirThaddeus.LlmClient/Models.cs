@@ -311,6 +311,12 @@ public sealed record LlmClientOptions
     /// </summary>
     public string BaseUrl { get; init; } = "http://localhost:1234";
 
+    /// <summary>
+    /// Optional bearer token for authenticated OpenAI-compatible endpoints.
+    /// Local providers normally leave this unset.
+    /// </summary>
+    public string? ApiKey { get; init; }
+
     public string ChatCompletionPath { get; init; } = "/v1/chat/completions";
 
     public string ModelsPath { get; init; } = "/v1/models";

@@ -13,6 +13,7 @@ public static class RuntimeLlmOptionsFactory
         {
             Provider = settings.Llm.Provider,
             BaseUrl = settings.Llm.BaseUrl,
+            ApiKey = settings.Llm.ApiKey,
             ChatCompletionPath = settings.Llm.ChatCompletionPath,
             Model = settings.Llm.Model,
             ForcedToolChoiceMode = ParseForcedToolChoiceMode(settings.Llm.ForcedToolChoiceMode),
@@ -51,6 +52,7 @@ public static class RuntimeLlmOptionsFactory
         {
             Provider = settings.Llm.Provider,
             BaseUrl = gatekeeperUrl,
+            ApiKey = settings.Llm.ApiKey,
             Model = gatekeeperModel,
             CodexCliPath = settings.Llm.CodexCliPath,
             CodexReasoningEffort = settings.Llm.CodexReasoningEffort,

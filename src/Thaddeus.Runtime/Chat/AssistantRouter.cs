@@ -427,6 +427,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         {
             Provider = llm.Provider,
             BaseUrl = llm.BaseUrl!,
+            ApiKey = llm.ApiKey,
             Model = llm.ModelId,
             ForcedToolChoiceMode = forcedToolChoiceMode,
             CodexCliPath = llm.CodexCliPath,
@@ -472,6 +473,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
         GatekeeperPolicyMode Mode,
         string? BaseUrl,
         string? ModelId,
+        string? ApiKey,
         string Fingerprint)
     {
         public bool AllowsHelperLlm => Mode is GatekeeperPolicyMode.SharedPrimary or GatekeeperPolicyMode.SeparateLlm;
@@ -495,6 +497,7 @@ public sealed class AssistantRouter : IAssistant, IDisposable
             return new LlmClientOptions
             {
                 BaseUrl = BaseUrl,
+                ApiKey = ApiKey,
                 Model = ModelId,
                 MaxTokens = 120,
                 ContextWindowTokens = 2048,
@@ -518,9 +521,10 @@ public sealed class AssistantRouter : IAssistant, IDisposable
                 llm.GatekeeperEnabled,
                 llm.GatekeeperBaseUrl ?? string.Empty,
                 llm.GatekeeperModelId ?? string.Empty,
+                llm.ApiKey ?? string.Empty,
                 llm.ReusePrimaryForGatekeeperOnSharedEndpoint);
 
-            return new GatekeeperPolicy(mode, baseUrl, modelId, fingerprint);
+            return new GatekeeperPolicy(mode, baseUrl, modelId, llm.ApiKey, fingerprint);
         }
     }
 

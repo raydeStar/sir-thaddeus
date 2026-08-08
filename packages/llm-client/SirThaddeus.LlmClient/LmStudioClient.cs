@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -68,7 +69,10 @@ public sealed class LmStudioClient : IConfigurableLlmClient
             ?? throw new ArgumentNullException(nameof(codexClientFactory));
         _http = httpClient ?? new HttpClient();
         if (!LlmProvider.IsCodexCli(options.Provider))
+        {
             _http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/'));
+            ApplyAuthorizationHeader(_http, options.ApiKey);
+        }
         else
             _codexCli = _codexClientFactory(options);
 
@@ -142,6 +146,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
                     BaseAddress = new Uri(targetBase),
                     Timeout = TimeSpan.FromSeconds(Math.Max(1, options.RequestTimeoutSeconds))
                 };
+                ApplyAuthorizationHeader(_http, options.ApiKey);
                 _requestGate = GetEndpointGate(options);
                 _confirmedLoadedModels.Clear();
 
@@ -154,6 +159,13 @@ public sealed class LmStudioClient : IConfigurableLlmClient
                 });
             }
         }
+    }
+
+    private static void ApplyAuthorizationHeader(HttpClient client, string? apiKey)
+    {
+        client.DefaultRequestHeaders.Authorization = string.IsNullOrWhiteSpace(apiKey)
+            ? null
+            : new AuthenticationHeaderValue("Bearer", apiKey.Trim());
     }
 
     /// <inheritdoc />
