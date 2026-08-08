@@ -18,6 +18,25 @@ writes on missing-value and ambiguous-target requests. The next useful
 difficulty should come from state depth, uncertainty, policy, and external tool
 protocols rather than obscure phrasing around an operation that already passes.
 
+## Status update: August 8
+
+The thin external adapter has progressed through filesystem, public Playwright,
+and locally hosted WebArena execution. WebArena setup, cleanup, the official
+22-tool catalog, pinned Chromium, and programmatic verification are proven as
+evaluator infrastructure. Frozen Qwen and Gemma controls, a gold action-shape
+oracle, and a compact state-observation oracle all failed sustained
+shopping-admin workflows; none authorizes a production behavior change.
+
+The current gate is a one-task, same-model cross-scaffold frontier control. The
+task was mechanically selected and hash-locked without reading its contents.
+Upstream MCPMark and unchanged Sir will use the same `gpt-5.6-sol` endpoint,
+task, tool catalog, sampling configuration, and verifier while disclosing their
+native turn budgets. Authenticated provider support is merged in product PR
+`#325` and evaluator PR `#193`, but the experiment is blocked before model or
+Docker execution until `OPENAI_API_KEY` is available. This preserves the
+original attribution rule: a stronger model localizes the ceiling; it does not
+count as fixed-model harness uplift.
+
 ## Difficulty without benchmark theatre
 
 Retain the reviewed 64-case bank as an immutable continuity bank. If a local

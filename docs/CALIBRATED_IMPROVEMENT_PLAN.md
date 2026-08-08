@@ -3,9 +3,9 @@
 **Status:** maintenance-ready; harness-capability work may continue, while the
 MMLU capacity campaign is paused pending a materially different mechanism
 
-**Calibrated:** July 21, 2026; segment closure updated August 3, 2026
+**Calibrated:** July 21, 2026; evidence closure updated August 8, 2026
 **Production baseline at calibration:** `84f96e6`
-**Current production baseline:** `a36937bf`
+**Current production baseline:** `88a81759`
 
 ## Decision
 
@@ -89,6 +89,24 @@ by protocol shape rather than task or benchmark identity. ToolSandbox is the
 targeted safety follow-up; tau-bench custom and AgentBeats are later public
 interoperability lanes. The complete contract is maintained in the
 [standardized agent evaluation path](research/STANDARDIZED_AGENT_EVALUATION_PATH_2026-08-03.md).
+
+### August 8 WebArena causal stop and frontier gate
+
+A compact answer-blind browser-state projection activated on a mechanically
+selected untouched WebArena standard task but tied unchanged Sir at `0/1`
+official. It stopped after the first navigation, so its lower tokens and wall
+time are incomplete work rather than a product-quality gain. Combined with the
+failed gold action-shape oracle, separately supplying action structure or
+compact current state does not justify another local-model WebArena mechanism.
+
+The next causal question is now a same-model cross-scaffold frontier control,
+not another prompt, planner, retry, budget, or state representation. Generalized
+authenticated OpenAI-compatible transport shipped through product PR `#325`
+and evaluator PR `#193`. One untouched standard task is hash-locked for
+upstream MCPMark versus unchanged Sir with `gpt-5.6-sol`; the stronger model is
+a ceiling diagnostic only. The campaign remains blocked before any provider
+call because no API credential is configured. Preserve the task as untouched
+and make no score claim until the credential gate and transport sentinel pass.
 
 ### July 19 harness redirect result
 
