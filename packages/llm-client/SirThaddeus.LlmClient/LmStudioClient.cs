@@ -102,6 +102,12 @@ public sealed class LmStudioClient : IConfigurableLlmClient
         lock (_optionsGate)
         {
             _options = options;
+            // A provider-reported context window belongs to the exact loaded
+            // configuration that produced it. The same client instance is
+            // deliberately reused across settings/model changes, so carrying
+            // this observation forward would let an old 8K model permanently
+            // clamp a newly selected 32K model (or let the reverse overrun).
+            Interlocked.Exchange(ref _observedContextWindowTokens, 0);
 
             if (LlmProvider.IsCodexCli(options.Provider))
             {
@@ -325,9 +331,12 @@ public sealed class LmStudioClient : IConfigurableLlmClient
         try
         {
             var promptPreparationStarted = Stopwatch.GetTimestamp();
-            budgetedMessages = ApplyPromptBudget(messages, requestContext);
+            budgetedMessages = ApplyPromptBudget(messages, tools, requestContext);
             var estimatedTokens = EstimateTokens(budgetedMessages);
-            var requestedOutputTokens = GetOptionsSnapshot().EffectiveMaxTokens(maxTokensOverride);
+            // Telemetry only — the request that actually goes out is budgeted
+            // again in ChatCoreLegacyAsync, which owns the final number.
+            var requestedOutputTokens = ResolveOutputTokenBudget(
+                budgetedMessages, tools, maxTokensOverride, GetOptionsSnapshot());
             if (IsLatencyTracingEnabled())
             {
                 var promptPreparationMs = Stopwatch.GetElapsedTime(promptPreparationStarted).TotalMilliseconds;
@@ -496,11 +505,13 @@ public sealed class LmStudioClient : IConfigurableLlmClient
             : NormalizeMessagesForPlainChat(messages);
         requestMessages = ApplyPromptBudget(
             requestMessages,
+            tools,
             new LlmRequestContext { TaskKind = _requestTaskKind.Value });
-        var requestedOutputTokens = GetOptionsSnapshot().EffectiveMaxTokens(maxTokensOverride);
+        var requestedOutputTokens = ResolveOutputTokenBudget(
+            requestMessages, tools, maxTokensOverride, GetOptionsSnapshot());
 
         // ── Attempt 1: full request with stop + repetition_penalty ───
-        var body = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, temperatureOverride, includeExtras: true);
+        var body = BuildRequestBody(requestMessages, tools, requestedOutputTokens, forcedToolName, temperatureOverride, includeExtras: true);
 
         System.Threading.Interlocked.Increment(ref _requestCount);
         var response = await _http.PostAsJsonAsync(
@@ -511,12 +522,76 @@ public sealed class LmStudioClient : IConfigurableLlmClient
 
         var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
+        // ── Self-healing: context overflow → learn the real window, re-budget ─
+        // The server just told us its actual n_ctx, which beats anything in
+        // settings (a model can be loaded at a different size than we asked
+        // for). Record it, re-budget against it, and retry once. Without this a
+        // single stale context number in settings fails every tool-using turn.
+        if ((int)response.StatusCode == 400 &&
+            TryParseContextOverflow(errorBody, out var observedContextWindow))
+        {
+            var isNews = LearnContextWindowTokens(observedContextWindow);
+            _logger.LogWarning(
+                "llm.context_window_observed contextWindowTokens={ContextWindowTokens} changed={Changed} " +
+                "configuredContextWindowTokens={ConfiguredContextWindowTokens}",
+                observedContextWindow,
+                isNews,
+                GetOptionsSnapshot().ContextWindowTokens);
+
+            var rebudgetedMessages = ApplyPromptBudget(
+                requestMessages,
+                tools,
+                new LlmRequestContext { TaskKind = _requestTaskKind.Value });
+            var rebudgetedOutputTokens = ResolveOutputTokenBudget(
+                rebudgetedMessages, tools, maxTokensOverride, GetOptionsSnapshot());
+
+            // When the prompt alone can't fit, no completion budget rescues the
+            // request and retrying is theatre. Report the shortfall in the terms
+            // that let someone act on it — raw "n_keep >= n_ctx" tells a user
+            // nothing about which part of their setup is oversized.
+            var promptTokens = EstimateTokens(rebudgetedMessages);
+            var toolTokens = EstimateToolTokens(tools);
+            if (promptTokens + toolTokens + MinOutputTokens > observedContextWindow)
+            {
+                throw new HttpRequestException(
+                    BuildContextExhaustedMessage(
+                        observedContextWindow, promptTokens, toolTokens, tools?.Count ?? 0),
+                    inner: null,
+                    statusCode: response.StatusCode);
+            }
+
+            // Only retry if re-budgeting actually changed the request; retrying
+            // an identical body would just burn another round-trip.
+            if (rebudgetedOutputTokens < requestedOutputTokens ||
+                rebudgetedMessages.Count < requestMessages.Count)
+            {
+                // These become the effective request values for any later
+                // compatibility fallback as well. Otherwise a retry that then
+                // hits the regex fallback would accidentally resend the
+                // original over-budget body.
+                requestMessages = rebudgetedMessages;
+                requestedOutputTokens = rebudgetedOutputTokens;
+                var rebudgeted = BuildRequestBody(
+                    requestMessages, tools, requestedOutputTokens, forcedToolName, temperatureOverride,
+                    includeExtras: true);
+
+                System.Threading.Interlocked.Increment(ref _requestCount);
+                response = await _http.PostAsJsonAsync(
+                    NormalizePath(GetOptionsSnapshot().ChatCompletionPath), rebudgeted, _json, cancellationToken);
+
+                if (response.IsSuccessStatusCode)
+                    return await ParseResponse(response, tools, requestedOutputTokens, cancellationToken);
+
+                errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            }
+        }
+
         // ── Self-healing: regex failure → retry without extras ────────
         // Sir Thaddeus notes: When the magic fizzles, try a simpler spell.
         if ((int)response.StatusCode == 400 &&
             errorBody.Contains("Failed to process regex", StringComparison.OrdinalIgnoreCase))
         {
-            var bare = BuildRequestBody(requestMessages, tools, maxTokensOverride, forcedToolName, temperatureOverride, includeExtras: false);
+            var bare = BuildRequestBody(requestMessages, tools, requestedOutputTokens, forcedToolName, temperatureOverride, includeExtras: false);
 
             System.Threading.Interlocked.Increment(ref _requestCount);
             response = await _http.PostAsJsonAsync(
@@ -530,9 +605,11 @@ public sealed class LmStudioClient : IConfigurableLlmClient
             // If the bare request still fails, it is highly likely the local model 
             // is not properly instructed for tool schemas. We must inform the user elegantly.
             throw new HttpRequestException(
-                $"Enterprise Alert: The local model failed to parse the tool schema. " +
-                $"Please ensure you are using an 'Instruct' or tool-calling capable model in LM Studio. " +
-                $"Original LLM error: {(int)response.StatusCode} ({response.ReasonPhrase}): {errorBody}");
+                $"The local model failed to parse the tool schema. " +
+                $"Check that the loaded model is an instruct / tool-calling build. " +
+                $"Original LLM error: {(int)response.StatusCode} ({response.ReasonPhrase}): {errorBody}",
+                inner: null,
+                statusCode: response.StatusCode);
         }
 
         var options = GetOptionsSnapshot();
@@ -541,11 +618,19 @@ public sealed class LmStudioClient : IConfigurableLlmClient
         if ((int)response.StatusCode == 500 && errorBody.Contains("<!DOCTYPE html>", StringComparison.OrdinalIgnoreCase))
         {
             throw new HttpRequestException(
-                $"The LLM server encountered an internal error. Please verify that the model '{options.Model}' is currently loaded and running in LM Studio.");
+                $"The LLM server encountered an internal error. Please verify that the model '{options.Model}' is currently loaded and running in LM Studio.",
+                inner: null,
+                statusCode: response.StatusCode);
         }
 
+        // Carry the status code on the exception. Callers need to tell "the
+        // provider is down" apart from "the provider rejected this request" —
+        // they are different problems with different fixes, and a bare message
+        // string forces everything into the first bucket.
         throw new HttpRequestException(
-            $"LLM returned {(int)response.StatusCode} ({response.ReasonPhrase}): {errorBody}");
+            $"LLM returned {(int)response.StatusCode} ({response.ReasonPhrase}): {errorBody}",
+            inner: null,
+            statusCode: response.StatusCode);
     }
 
     /// <summary>
@@ -644,14 +729,22 @@ public sealed class LmStudioClient : IConfigurableLlmClient
     // ─────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Builds the JSON request body. When <paramref name="includeExtras"/>
-    /// is false, non-standard parameters (stop sequences, repetition
-    /// penalty) are omitted for maximum model compatibility.
+    /// Builds the chat-completions request body.
     /// </summary>
+    /// <remarks>
+    /// <c>maxTokensFinal</c> is the already-resolved completion budget and is
+    /// used verbatim. Callers run it through
+    /// <see cref="ResolveOutputTokenBudget"/> first; re-deriving it here would
+    /// re-apply the thinking-model boost in
+    /// <see cref="LlmClientOptions.EffectiveMaxTokens"/> and undo the context
+    /// clamp that keeps the request inside the window.
+    /// When <paramref name="includeExtras"/> is false, non-standard parameters
+    /// are omitted for maximum model compatibility.
+    /// </remarks>
     private Dictionary<string, object> BuildRequestBody(
         IReadOnlyList<ChatMessage> messages,
         IReadOnlyList<ToolDefinition>? tools,
-        int? maxTokensOverride,
+        int maxTokensFinal,
         string? forcedToolName,
         double? temperatureOverride,
         bool includeExtras)
@@ -663,7 +756,7 @@ public sealed class LmStudioClient : IConfigurableLlmClient
         {
             ["model"] = routedModel,
             ["messages"] = messages,
-            ["max_tokens"] = options.EffectiveMaxTokens(maxTokensOverride),
+            ["max_tokens"] = maxTokensFinal,
             ["temperature"] = temperatureOverride ?? options.Temperature,
             ["stream"] = false
         };
@@ -1141,12 +1234,159 @@ public sealed class LmStudioClient : IConfigurableLlmClient
         };
     }
 
+    /// <summary>
+    /// Smallest completion we will ever ask for. Below this a reply is not
+    /// worth generating, and squeezing further is the prompt budget's job.
+    /// </summary>
+    private const int MinOutputTokens = 256;
+
+    /// <summary>
+    /// Slack left between (input + output) and the context window to absorb the
+    /// gap between our character-based token estimate and the model's real
+    /// tokenizer, plus whatever the chat template adds.
+    /// </summary>
+    private const int ContextSafetyMarginTokens = 256;
+
+    /// <summary>
+    /// Context window observed from the provider itself, which outranks
+    /// configuration. 0 until something authoritative is seen. Settings carry a
+    /// user's *intent* (and drift out of date — a model can be loaded at a
+    /// different size than <c>ContextLength</c> requested); the server's own
+    /// numbers are ground truth.
+    /// </summary>
+    private int _observedContextWindowTokens;
+
+    /// <summary>
+    /// Best current estimate of the loaded model's context window, preferring
+    /// an observed value over configuration.
+    /// </summary>
+    private int ResolveContextWindowTokens(LlmClientOptions options)
+    {
+        var observed = Volatile.Read(ref _observedContextWindowTokens);
+        if (observed > 0) return observed;
+        if (options.ContextWindowTokens > 0) return options.ContextWindowTokens;
+        if (options.ContextLength > 0) return options.ContextLength;
+        return 8192;
+    }
+
+    /// <summary>
+    /// Records a context window learned from the provider so later requests are
+    /// budgeted against the truth. Returns true when this is new information.
+    /// </summary>
+    private bool LearnContextWindowTokens(int contextWindowTokens)
+    {
+        if (contextWindowTokens <= 0) return false;
+        var previous = Interlocked.Exchange(ref _observedContextWindowTokens, contextWindowTokens);
+        return previous != contextWindowTokens;
+    }
+
+    /// <summary>
+    /// Resolves <c>max_tokens</c> for a request so that
+    /// <c>input + output</c> fits the context window.
+    /// </summary>
+    /// <remarks>
+    /// Without this the client happily sends an arithmetically impossible
+    /// request — e.g. a 6.4k-token tool-loop prompt plus <c>max_tokens: 4096</c>
+    /// against an 8k context — and llama.cpp rejects the whole thing with
+    /// "n_keep &gt;= n_ctx". The configured output cap is a ceiling, never a
+    /// promise; physics wins.
+    /// </remarks>
+    private int ResolveOutputTokenBudget(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
+        int? maxTokensOverride,
+        LlmClientOptions options)
+    {
+        var requested = options.EffectiveMaxTokens(maxTokensOverride);
+        var contextWindow = ResolveContextWindowTokens(options);
+        var available = contextWindow
+            - EstimateTokens(messages)
+            - EstimateToolTokens(tools)
+            - ContextSafetyMarginTokens;
+
+        // When even the floor doesn't fit, the prompt itself is over budget.
+        // Ask for the floor anyway: the provider's own error is then the honest
+        // signal, rather than us silently requesting a negative budget.
+        if (available < MinOutputTokens) return MinOutputTokens;
+        return Math.Min(requested, available);
+    }
+
+    /// <summary>
+    /// Explains a context overflow the client cannot budget its way out of,
+    /// naming the oversized part so the reader knows which knob to turn.
+    /// </summary>
+    internal static string BuildContextExhaustedMessage(
+        int contextWindowTokens,
+        int promptTokens,
+        int toolTokens,
+        int toolCount)
+    {
+        var needed = promptTokens + toolTokens + MinOutputTokens;
+        var message =
+            $"The request needs about {needed:N0} tokens but the loaded model's context is " +
+            $"{contextWindowTokens:N0}. Conversation and instructions account for roughly " +
+            $"{promptTokens:N0} tokens";
+
+        if (toolCount > 0)
+        {
+            message +=
+                $", and the {toolCount} advertised tool definitions add about {toolTokens:N0} more";
+        }
+
+        message += ". ";
+
+        // Point at whichever part is actually the problem.
+        if (toolTokens >= contextWindowTokens / 2 && toolCount > 0)
+        {
+            message +=
+                $"The tool definitions alone take up most of the context, so no reply can fit. " +
+                $"Load the model with a larger context length, or reduce the number of enabled tools.";
+        }
+        else
+        {
+            message +=
+                "Load the model with a larger context length, or start a new conversation to shorten the history.";
+        }
+
+        return message;
+    }
+
+    /// <summary>
+    /// Extracts the context length from a llama.cpp / LM Studio overflow error.
+    /// The body looks like:
+    /// <c>The number of tokens to keep from the initial prompt is greater than
+    /// the context length (n_keep: 11553&gt;= n_ctx: 8192)</c>.
+    /// </summary>
+    internal static bool TryParseContextOverflow(string? errorBody, out int contextWindowTokens)
+    {
+        contextWindowTokens = 0;
+        if (string.IsNullOrWhiteSpace(errorBody)) return false;
+
+        var match = System.Text.RegularExpressions.Regex.Match(
+            errorBody,
+            @"n_ctx:\s*(\d+)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+            TimeSpan.FromSeconds(1));
+        return match.Success
+            && int.TryParse(match.Groups[1].Value, out contextWindowTokens)
+            && contextWindowTokens > 0;
+    }
+
     private IReadOnlyList<ChatMessage> ApplyPromptBudget(
         IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ToolDefinition>? tools,
         LlmRequestContext requestContext)
     {
         var options = GetOptionsSnapshot();
-        var softCap = Math.Max(256, options.MaxInputTokensSoftCap);
+        // The configured soft cap is an intent; the context window is a hard
+        // wall. Trim against whichever binds first, leaving room for a minimum
+        // reply and for the tool schemas, which occupy the same window and are
+        // not something trimming messages can reclaim.
+        var contextCap = ResolveContextWindowTokens(options)
+            - EstimateToolTokens(tools)
+            - MinOutputTokens
+            - ContextSafetyMarginTokens;
+        var softCap = Math.Max(256, Math.Min(options.MaxInputTokensSoftCap, contextCap));
         var estimated = EstimateTokens(messages);
         if (estimated <= softCap)
             return messages;
@@ -1214,6 +1454,52 @@ public sealed class LmStudioClient : IConfigurableLlmClient
 
     private static int EstimateTokens(IReadOnlyList<ChatMessage> messages)
         => Math.Max(1, messages.Sum(EstimateMessageChars) / 4);
+
+    /// <summary>
+    /// Estimates the tokens the advertised tool definitions occupy.
+    /// </summary>
+    /// <remarks>
+    /// Tool schemas travel in the same request body as the messages and count
+    /// against the same context window, but they are a separate argument — so a
+    /// messages-only estimate silently omits them. With a full MCP tool set
+    /// that omission is thousands of tokens, which is how the client came to
+    /// send requests it should have known could not fit.
+    ///
+    /// <para>Serialized JSON tokenizes far denser than prose (braces, quotes,
+    /// and punctuation are mostly one token each), so this deliberately uses a
+    /// tighter chars-per-token ratio than <see cref="EstimateTokens"/>.
+    /// Overestimating costs a slightly shorter completion; underestimating
+    /// costs the entire turn.</para>
+    /// </remarks>
+    private int EstimateToolTokens(IReadOnlyList<ToolDefinition>? tools)
+    {
+        if (tools is not { Count: > 0 }) return 0;
+
+        // Serializing on every request is wasteful when the tool set rarely
+        // changes, so memoize against the last list instance we measured.
+        var cached = _toolTokenEstimate;
+        if (cached is not null && ReferenceEquals(cached.Value.Tools, tools))
+            return cached.Value.Tokens;
+
+        int tokens;
+        try
+        {
+            tokens = JsonSerializer.Serialize(tools, _json).Length / 3;
+        }
+        catch (NotSupportedException)
+        {
+            // A schema that won't serialize here would fail the request anyway;
+            // fall back to a coarse structural estimate rather than throwing
+            // from a budgeting helper.
+            tokens = tools.Sum(t =>
+                ((t.Function?.Name?.Length ?? 0) + (t.Function?.Description?.Length ?? 0)) / 3 + 64);
+        }
+
+        _toolTokenEstimate = (tools, tokens);
+        return tokens;
+    }
+
+    private (IReadOnlyList<ToolDefinition> Tools, int Tokens)? _toolTokenEstimate;
 
     private static int EstimateMessageChars(ChatMessage message)
     {

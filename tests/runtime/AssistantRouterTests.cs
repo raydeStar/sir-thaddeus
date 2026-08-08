@@ -138,6 +138,77 @@ public class AssistantRouterTests : IDisposable
     }
 
     [Fact]
+    public async Task RespondAsync_transport_error_reply_names_the_failure_instead_of_echoing()
+    {
+        // Echoing the user's own words back through the development stub reads
+        // as a real answer, which is a false success: the user believes they
+        // were served when nothing ran. The fallback must say what broke.
+        var (stub, store) = NewDeps();
+        var settings = new InMemorySettings(DocWith("ollama"));
+        var lm = new TaggedAssistant("LM") { Throw = new HttpRequestException("offline") };
+        using var router = new AssistantRouter(settings, stub, _ => lm, NullLogger<AssistantRouter>.Instance);
+        var thread = await store.CreateAsync("t", CancellationToken.None);
+
+        var msg = await router.RespondAsync(thread.Id, "what is the capital of France", CancellationToken.None);
+
+        Assert.DoesNotContain("stubbed reply", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("later phase", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("what is the capital of France", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Nothing was sent anywhere", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not reach", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Retry", msg.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RespondAsync_rejected_request_is_not_reported_as_an_unreachable_provider()
+    {
+        // A provider that answers with 4xx/5xx is running fine. Telling the
+        // user "I could not reach the model" sends them to restart a healthy
+        // server while the real complaint — which the provider stated plainly —
+        // never reaches them.
+        var (stub, store) = NewDeps();
+        var settings = new InMemorySettings(DocWith("lmstudio"));
+        var lm = new TaggedAssistant("LM")
+        {
+            Throw = new HttpRequestException(
+                "LLM returned 400 (Bad Request): n_keep: 11553 >= n_ctx: 8192 SECRET-PROVIDER-TEXT",
+                inner: null,
+                statusCode: System.Net.HttpStatusCode.BadRequest),
+        };
+        using var router = new AssistantRouter(settings, stub, _ => lm, NullLogger<AssistantRouter>.Instance);
+        var thread = await store.CreateAsync("t", CancellationToken.None);
+
+        var msg = await router.RespondAsync(thread.Id, "hello", CancellationToken.None);
+
+        Assert.DoesNotContain("could not reach", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("received the request", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("400", msg.Text, StringComparison.Ordinal);
+        Assert.Contains("context window", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Retry", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SECRET-PROVIDER-TEXT", msg.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Nothing was sent anywhere", msg.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RespondAsync_factory_failure_reply_names_the_failure_instead_of_echoing()
+    {
+        var (stub, store) = NewDeps();
+        var settings = new InMemorySettings(DocWith("ollama"));
+        using var router = new AssistantRouter(settings, stub,
+            _ => throw new InvalidOperationException("bad config SECRET-FACTORY-TEXT"),
+            NullLogger<AssistantRouter>.Instance);
+        var thread = await store.CreateAsync("t", CancellationToken.None);
+
+        var msg = await router.RespondAsync(thread.Id, "summarize my notes", CancellationToken.None);
+
+        Assert.DoesNotContain("stubbed reply", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("summarize my notes", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not be initialized", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Retry", msg.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SECRET-FACTORY-TEXT", msg.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RespondAsync_falls_back_to_stub_when_factory_throws()
     {
         var (stub, store) = NewDeps();

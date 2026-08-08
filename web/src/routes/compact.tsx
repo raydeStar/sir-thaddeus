@@ -1,6 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect } from 'react';
-import { useRuntimeStore } from '../stores/runtimeStore';
 import { RuntimeStateBadge } from '../components/RuntimeStateBadge';
 import { KillAppButton } from '../components/KillAppButton';
 
@@ -13,14 +11,6 @@ export const Route = createFileRoute('/compact')({
  * idle pill; the full transcript stream and PTT controls land in Phase 2.
  */
 function CompactRoute() {
-  const connect = useRuntimeStore((s) => s.connect);
-  const disconnect = useRuntimeStore((s) => s.disconnect);
-
-  useEffect(() => {
-    connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
-
   return (
     <section data-testid="route-compact" className="flex h-full items-center justify-center bg-canvas-sunken p-4">
       <div className="w-full max-w-md rounded-2xl border border-line bg-canvas-raised p-6">

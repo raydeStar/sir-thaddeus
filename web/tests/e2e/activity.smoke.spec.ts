@@ -36,13 +36,13 @@ test.describe('activity smoke', () => {
     await expect(page.getByTestId('chat-message-list')).toContainText('activity smoke', {
       timeout: 10_000,
     });
-    // The user bubble renders optimistically *before* the chat POST returns,
-    // so racing to /activity right now sometimes beats the server's
-    // activity.Append in ChatApi.cs:133. Wait for the assistant bubble to
-    // appear — that only happens once chat.turn.start has fired, which the
-    // server only emits after the activity entry is appended.
+    // The user bubble AND the queued assistant row both render optimistically
+    // before the chat POST returns, so racing to /activity right now sometimes
+    // beats the server's activity.Append in ChatApi.cs:133. Wait for the turn to
+    // reach `streaming` — that transition is driven by chat.turn.start, which
+    // the server only emits after the activity entry is appended.
     await expect(
-      page.getByTestId('chat-message-list').locator('[data-role="assistant"]'),
+      page.getByTestId('chat-message-list').locator('[data-turn-state="streaming"]'),
     ).toBeVisible({ timeout: 30_000 });
 
     // Navigate to the activity log and wait for the row.
@@ -60,10 +60,6 @@ test.describe('activity smoke', () => {
 
     // Drill into the detail view and confirm the metadata renders.
     await firstRow.locator('a').click();
-    console.log('after click url:', page.url());
-    console.log('PAGE_CONTENT_START');
-    console.log(await page.content());
-    console.log('PAGE_CONTENT_END');
     await expect(page.getByTestId('route-activity-entry')).toBeVisible({ timeout: 5_000 });
     await expect(page.getByTestId('activity-entry-detail')).toBeVisible();
     await expect(page.getByTestId('activity-entry-kind')).toHaveText('ChatTurn');

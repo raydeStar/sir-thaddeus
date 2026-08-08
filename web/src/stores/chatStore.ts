@@ -14,16 +14,17 @@ import type {
 import { ChatTurnEventTypes } from '@thaddeus/shared-types';
 import * as api from '../lib/chatApi';
 import type { WikiChatContextInput, WikiMutationTargetInput } from '../lib/chatApi';
-import { buildRuntimeWebSocketUrl, readRuntimeMetadata } from '../lib/runtime';
+import { ensureRuntimeSocket, subscribeRuntimeReconnect } from '../lib/runtimeSocket';
+import { subscribeWsEvents } from '../lib/wsEvents';
 import { useMemoryRecallStore } from './memoryRecallStore';
 import { useToolActivityStore } from './toolActivityStore';
 
 /**
  * Single-threaded (one active conversation at a time) chat store. Reads thread
- * metadata via REST, then subscribes to /ws turn events to render the assistant
- * reply incrementally. The active reply is tracked separately from persisted
- * messages so the UI can render in-progress text without mutating the durable
- * messages array.
+ * metadata via REST, then consumes /ws turn events off the shared runtime event
+ * bus to render the assistant reply incrementally. The active reply is tracked
+ * separately from persisted messages so the UI can render in-progress text
+ * without mutating the durable messages array.
  */
 
 interface ActiveTurn {
@@ -41,6 +42,12 @@ interface ChatStoreState {
   loading: boolean;
   error: string | null;
   sending: boolean;
+  /**
+   * Epoch ms of the local submit, set synchronously so the progress surface can
+   * render on the same frame the user hits Send instead of waiting a round-trip
+   * for `chat.turn.start`. Cleared when the turn completes or fails.
+   */
+  pendingSince: number | null;
 
   loadThreads: () => Promise<void>;
   openThread: (id: string) => Promise<void>;
@@ -60,33 +67,32 @@ interface ChatStoreState {
   redirectActiveRun: (instruction: string) => Promise<void>;
   approveActivePlan: () => Promise<void>;
   editActivePlan: (steps: import('@thaddeus/shared-types').WorkPlanStep[]) => Promise<void>;
+  /**
+   * Re-reads the active thread and its runs from REST. Called after a socket
+   * reconnect so a turn that finished while the socket was down can't leave the
+   * UI stuck on a progress card forever.
+   */
+  resyncActiveThread: () => Promise<void>;
   destroy: () => void;
   ingestEvent: (evt: RuntimeEvent<unknown>) => void;
 }
 
-let socket: WebSocket | null = null;
+let unsubscribeBus: (() => void) | null = null;
+let unsubscribeReconnect: (() => void) | null = null;
 
-function ensureSocket(onMessage: (evt: RuntimeEvent<unknown>) => void): void {
-  if (socket) return;
-  const { token } = readRuntimeMetadata();
-  const url = buildRuntimeWebSocketUrl(token);
-  if (!url) return;
-  try {
-    socket = new WebSocket(url);
-  } catch {
-    return;
-  }
-  socket.addEventListener('message', (msg) => {
-    try {
-      const evt = JSON.parse(msg.data as string) as RuntimeEvent<unknown>;
-      onMessage(evt);
-    } catch {
-      /* ignore malformed frames */
-    }
+/**
+ * Attaches to the shared runtime event bus (idempotent) and starts the socket.
+ * Returns a promise that resolves once the socket is actually open, so callers
+ * that are about to trigger server-side work can avoid racing the turn events.
+ */
+function ensureSubscribed(): Promise<boolean> {
+  unsubscribeBus ??= subscribeWsEvents((evt) => {
+    useChatStore.getState().ingestEvent(evt as RuntimeEvent<unknown>);
   });
-  socket.addEventListener('close', () => {
-    socket = null;
+  unsubscribeReconnect ??= subscribeRuntimeReconnect(() => {
+    void useChatStore.getState().resyncActiveThread();
   });
+  return ensureRuntimeSocket();
 }
 
 export const useChatStore = create<ChatStoreState>((set, get) => ({
@@ -98,6 +104,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   loading: false,
   error: null,
   sending: false,
+  pendingSince: null,
 
   loadThreads: async () => {
     set({ loading: true, error: null });
@@ -110,17 +117,32 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   },
 
   openThread: async (id: string) => {
-    set({ loading: true, activeThreadId: id, activeThread: null, activeTurn: null, activeRun: null });
+    // Subscribe and dial before the REST reads. The socket handshake then
+    // overlaps the thread fetch instead of starting after it, so a send that
+    // immediately follows an open (the new-conversation flow) finds the socket
+    // already up rather than racing `chat.turn.start`.
+    const connecting = ensureSubscribed();
+    set({
+      loading: true,
+      activeThreadId: id,
+      activeThread: null,
+      activeTurn: null,
+      activeRun: null,
+      pendingSince: null,
+    });
     try {
       const [thread, runs] = await Promise.all([api.getThread(id), api.listRuns(id)]);
       const activeRun = runs.find((run) => !isTerminalRun(run.state)) ?? null;
       set({ activeThread: thread, activeRun, loading: false });
+      // Case-insensitive: the wire format is "Assistant", so the obvious
+      // `m.role === 'assistant'` matched nothing and every reopened thread came
+      // back with its tool pills and memory chips missing.
       const assistantMessageIds = thread.messages
-        .filter((m) => m.role === 'assistant')
+        .filter((m) => isRole(m.role, 'assistant'))
         .map((m) => m.id);
       void useMemoryRecallStore.getState().hydrateFromTraces(assistantMessageIds);
       void useToolActivityStore.getState().hydrateFromTraces(assistantMessageIds);
-      ensureSocket((evt) => get().ingestEvent(evt));
+      await connecting;
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
@@ -204,10 +226,14 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       createdAt,
     };
 
+    // Paint the user's bubble and the "working" surface synchronously. The
+    // network round-trip and the socket handshake both happen after this, so
+    // Send never looks like it did nothing.
     set((s) => {
       const thread = s.activeThread;
       return {
         sending: true,
+        pendingSince: Date.now(),
         error: null,
         activeThread: thread && s.activeThreadId === id
           ? {
@@ -218,14 +244,26 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           : thread,
       };
     });
-    ensureSocket((evt) => get().ingestEvent(evt));
+    // Wait for the socket before asking the runtime to start a turn — the
+    // broadcaster has no replay buffer, so a `chat.turn.start` emitted before
+    // the handshake completes is lost and the turn renders no streamed text.
+    await ensureSubscribed();
     try {
       const result = await api.appendMessage(id, trimmed, wikiContext, options);
-      set({ activeThread: result.thread, activeRun: result.run, sending: false });
+      set((s) => s.activeThreadId === id
+        ? {
+            activeThread: adoptServerThread(s.activeThread, result.thread),
+            activeRun: result.run,
+            sending: false,
+          }
+        // The user navigated to another conversation while the append was in
+        // flight. Applying this snapshot would show them the wrong thread.
+        : { sending: false });
     } catch (e) {
       set((s) => ({
         error: (e as Error).message,
         sending: false,
+        pendingSince: null,
         activeThread: removeOptimisticMessage(s.activeThread, optimisticId),
       }));
     }
@@ -234,13 +272,19 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   retryLatestResponse: async (options) => {
     const id = get().activeThreadId;
     if (!id || get().sending || get().activeTurn) return;
-    set({ sending: true, error: null });
-    ensureSocket((evt) => get().ingestEvent(evt));
+    set({ sending: true, pendingSince: Date.now(), error: null });
+    await ensureSubscribed();
     try {
       const result = await api.retryLatestResponse(id, options);
-      set({ activeThread: result.thread, activeRun: result.run, sending: false });
+      set((s) => s.activeThreadId === id
+        ? {
+            activeThread: adoptServerThread(s.activeThread, result.thread),
+            activeRun: result.run,
+            sending: false,
+          }
+        : { sending: false });
     } catch (e) {
-      set({ error: (e as Error).message, sending: false });
+      set({ error: (e as Error).message, sending: false, pendingSince: null });
     }
   },
 
@@ -293,9 +337,36 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     set({ activeRun: updated });
   },
 
+  resyncActiveThread: async () => {
+    const id = get().activeThreadId;
+    if (!id) return;
+    try {
+      const [thread, runs] = await Promise.all([api.getThread(id), api.listRuns(id)]);
+      const activeRun = runs.find((run) => !isTerminalRun(run.state)) ?? null;
+      set((s) => {
+        // Nothing still running server-side means any progress surface we're
+        // showing is stale — the completion event arrived while we were
+        // disconnected. Clear it and take the persisted messages as truth.
+        const stillWorking = activeRun !== null;
+        return {
+          activeThread: adoptServerThread(s.activeThread, thread),
+          activeRun,
+          activeTurn: stillWorking ? s.activeTurn : null,
+          pendingSince: stillWorking ? s.pendingSince : null,
+          sending: stillWorking ? s.sending : false,
+        };
+      });
+    } catch {
+      // Best effort: the socket just came back, so the next event or the next
+      // user action will resolve state anyway.
+    }
+  },
+
   destroy: () => {
-    if (socket) socket.close();
-    socket = null;
+    unsubscribeBus?.();
+    unsubscribeBus = null;
+    unsubscribeReconnect?.();
+    unsubscribeReconnect = null;
     set({
       activeThreadId: null,
       activeThread: null,
@@ -305,6 +376,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       loading: false,
       error: null,
       sending: false,
+      pendingSince: null,
     });
   },
 
@@ -319,6 +391,12 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       set((state) => {
         if (state.activeRun?.runId === normalized.runId &&
             state.activeRun.version > normalized.version) return {};
+        // A run that fails (rather than completing) never emits
+        // `chat.turn.complete`, so without this the work surface would spin
+        // forever on a failed turn.
+        if (isTerminalRun(normalized.state) && !state.activeTurn) {
+          return { activeRun: normalized, pendingSince: null, sending: false };
+        }
         return { activeRun: normalized };
       });
       return;
@@ -341,7 +419,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           createdAt: p.createdAt,
         };
         const withoutMatchingOptimistic = thread.messages.filter((m) =>
-          !(m.id.startsWith('optimistic-') && m.role === 'user' && m.text === p.text),
+          !(m.id.startsWith('optimistic-') && isRole(m.role, 'user') && m.text === p.text),
         );
         return {
           activeThread: {
@@ -356,14 +434,29 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     if (evt.type === ChatTurnEventTypes.Start) {
       const p = evt.payload as ChatTurnStart;
       if (p.threadId !== get().activeThreadId) return;
-      set({ activeTurn: { messageId: p.messageId, text: '', cancelled: false } });
+      set((s) => ({
+        activeTurn: { messageId: p.messageId, text: '', cancelled: false },
+        // The turn is real now; keep the original submit time so the elapsed
+        // counter reflects the user's wait, not the server's start.
+        pendingSince: s.pendingSince ?? Date.now(),
+      }));
       return;
     }
     if (evt.type === ChatTurnEventTypes.Delta) {
       const p = evt.payload as ChatTurnDelta;
       if (p.threadId !== get().activeThreadId) return;
       set((s) => {
-        if (!s.activeTurn || s.activeTurn.messageId !== p.messageId) return {};
+        // A delta with no active turn means we missed `chat.turn.start` (socket
+        // still connecting, or a reconnect landed mid-turn). Adopt the turn from
+        // the delta rather than dropping the text — silently discarding here is
+        // what made replies appear all at once with no streaming.
+        if (!s.activeTurn) {
+          return {
+            activeTurn: { messageId: p.messageId, text: p.text, cancelled: false },
+            pendingSince: s.pendingSince ?? Date.now(),
+          };
+        }
+        if (s.activeTurn.messageId !== p.messageId) return {};
         return { activeTurn: { ...s.activeTurn, text: s.activeTurn.text + p.text } };
       });
       return;
@@ -380,7 +473,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       };
       set((s) => {
         const thread = s.activeThread;
-        if (!thread) return { activeTurn: null };
+        if (!thread) return { activeTurn: null, pendingSince: null, sending: false };
         const alreadyHasIt = thread.messages.some((m) => m.id === finalMessage.id);
         const messages = alreadyHasIt
           ? thread.messages.map((m) =>
@@ -392,11 +485,26 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         return {
           activeThread: { ...thread, messages, updatedAt: p.completedAt },
           activeTurn: null,
+          pendingSince: null,
+          sending: false,
         };
       });
     }
   },
 }));
+
+/**
+ * Compares a message role case-insensitively.
+ *
+ * `ChatRole` is declared as `"user" | "assistant" | "system"`, but the runtime
+ * serializes the C# enum as `"User"` / `"Assistant"` / `"System"`. TypeScript
+ * therefore accepts `m.role === 'user'` while it silently never matches on real
+ * data — which is why the render path spells out `String(m.role).toLowerCase()`
+ * everywhere. Route every role check through here instead of trusting the type.
+ */
+function isRole(role: ChatMessage['role'], expected: 'user' | 'assistant' | 'system'): boolean {
+  return String(role || '').toLowerCase() === expected;
+}
 
 function isTerminalRun(state: TurnRunSnapshot['state']): boolean {
   return state === 'cancelled' || state === 'completed' || state === 'failed';
@@ -404,6 +512,34 @@ function isTerminalRun(state: TurnRunSnapshot['state']): boolean {
 
 function isAwaitingApproval(state: TurnRunSnapshot['state']): boolean {
   return state === 'awaitingapproval' || state === 'awaiting_approval';
+}
+
+/**
+ * Folds a server thread snapshot into what we already have on screen.
+ *
+ * A plain overwrite loses messages when the turn outruns its own HTTP response:
+ * the assistant can finish (appending its message via `chat.turn.complete`)
+ * before `POST /messages` resolves, and that response body predates the reply.
+ * Union by id, server order first, and drop any optimistic user bubble the
+ * server has now persisted under a real id.
+ */
+function adoptServerThread(local: ChatThread | null, server: ChatThread): ChatThread {
+  if (!local || local.id !== server.id) return server;
+
+  const serverIds = new Set(server.messages.map((m) => m.id));
+  const serverUserTexts = new Set(
+    server.messages.filter((m) => isRole(m.role, 'user')).map((m) => m.text),
+  );
+  const extras = local.messages.filter((m) => {
+    if (serverIds.has(m.id)) return false;
+    if (m.id.startsWith('optimistic-') && isRole(m.role, 'user')) {
+      return !serverUserTexts.has(m.text);
+    }
+    return true;
+  });
+
+  if (extras.length === 0) return server;
+  return { ...server, messages: [...server.messages, ...extras] };
 }
 
 function removeOptimisticMessage(thread: ChatThread | null, messageId: string): ChatThread | null {
