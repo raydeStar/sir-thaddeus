@@ -1,12 +1,10 @@
 # Current Evidence
 
-**Evidence cutoff:** August 7, 2026
+**Evidence cutoff:** August 8, 2026
 
-**Production baseline before the current promotion:** `69caf87`; the retained
-typed selected-target Wiki operation candidate is `8478531` and has cleared
-development, exact repeat, disjoint validation, focused tests, full local tests,
-browser E2E, and a real headless conversation smoke. Protected delivery is
-tracked in product PR `#307`.
+**Current production baseline:** `88a81759`; `master` and `dev` are synchronized.
+The latest product change adds authenticated OpenAI-compatible provider support
+without changing prompts, orchestration, tool policy, or local-provider defaults.
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -21,6 +19,36 @@ The evidence does not support a broad claim that prompt scaffolds, extra
 reasoning calls, routing, or a larger comparison model reliably improve the
 closed-book capacity of a fixed small model. Those mechanisms have often added
 calls and latency while tying or losing to unchanged Thaddeus.
+
+### August 8 WebArena closure and frontier cross-control gate
+
+- A mechanically selected untouched WebArena standard task compared unchanged
+  Sir with an evaluator-owned, answer-blind compact browser-state projection.
+  Both valid episodes failed the official verifier `0/1`. Unchanged Sir used
+  seven model turns, eight tool calls, and 125,088 tokens; the oracle activated
+  once, then stopped after one turn and one tool call with 17,883 tokens. The
+  lower candidate cost is early termination, not a latency or capability win.
+- The state projection was rejected at development with zero paired wins and
+  zero paired losses. The proxy and Sir wiring were removed. Pinned Chromium in
+  the shared evaluator image remains as symmetric infrastructure. Together with
+  the failed gold action-shape oracle, this closes separate action-shape and
+  compact-state remedies for the frozen local-model WebArena boundary.
+- A provider-neutral authentication gap was then closed without changing
+  assistant behavior. Product PR `#325` carries an optional bearer token from
+  settings through the production and headless LLM client. Evaluator PR `#193`
+  lets both MCPMark scaffolds use the same authenticated OpenAI-compatible
+  endpoint, keeps secret values out of command arguments, and fails before
+  Docker when the named credential is absent.
+- One frontier ceiling-localization control is predeclared on a different,
+  mechanically selected untouched WebArena standard task. Its task files are
+  hash-locked without opening their contents. It will compare upstream MCPMark
+  and unchanged Sir under the same `gpt-5.6-sol` endpoint and task; native
+  scaffold turn budgets remain disclosed as part of the harness comparison.
+- The frontier control is **blocked before provider calls** because no
+  `OPENAI_API_KEY` exists in process, user, or machine scope. No transport
+  sentinel or benchmark episode ran, no task contents were consumed, and no
+  score is inferred. A stronger-model result will be reported only as a ceiling
+  or scaffold diagnostic, never as fixed-model harness uplift.
 
 ### Model-panel calibration
 
