@@ -57,6 +57,24 @@ calls and latency while tying or losing to unchanged Thaddeus.
   failed-click give-up, round-envelope exhaustion), not source acquisition.
   Evaluator verdict:
   `experiments/verdicts/2026-08-07-mcpmark-webarena-shopping-admin-v1.md`.
+- The same-day WebArena escalation probe was rejected: Gemma 4 26B-A4B
+  Q4_K_S under unchanged Sir scored `0/3` official on the exact three paired
+  tasks. Behavioral depth improved (login forms filled, successful typing
+  where Qwen stopped after navigation), but no episode completed a sustained
+  admin workflow. Two local model families now show the same boundary on
+  identical untouched tasks. Evaluator verdict:
+  `experiments/verdicts/2026-08-07-mcpmark-webarena-escalation-probe-v1.md`.
+- A predeclared gold-action-shape oracle on untouched
+  `shopping_admin/ny_expansion_analysis_easy` was rejected: the answer-blind
+  skeleton (URL paths, menu labels, and operation shape observed with a
+  zero-model script; no data values; `verify.py` never read) activated
+  exactly and still scored `0/1` where the unchanged baseline also failed
+  `0/1`. Action knowledge is not the bottleneck; sustained action
+  execution/perception is. This reproduces the filesystem gold-action-
+  skeleton lesson on a second benchmark family and closes MCPMark mechanism
+  work absent a materially new perception/grounding-class hypothesis.
+  Evaluator verdict:
+  `experiments/verdicts/2026-08-07-mcpmark-webarena-gold-action-shape-v1.md`.
 - Two evaluator-envelope/invocation defects were fixed mid-session without
   product changes: the pinned image's misleading `--k 4` default is pinned
   to 1, and the assistant envelope now carries `status: completed` as the
@@ -65,11 +83,14 @@ calls and latency while tying or losing to unchanged Thaddeus.
   provider call; a bounded post-run quiescence wait mitigates orphaned
   generations at the single-slot provider.
 - Combined reading: filesystem-standard, public-web Playwright, and
-  locally-hosted WebArena now agree on one boundary for the frozen Qwen
-  configuration — evidence reachability works, isolated actions are partial,
-  sustained state-changing workflows fail. No harness machinery is added from
-  this; visible qualification/escalation and oracle-proven capability
-  mechanisms remain the documented candidate paths. Full session handoff:
+  locally-hosted WebArena now agree on one boundary, confirmed across two
+  local model families and an action-shape oracle — evidence reachability
+  works, isolated actions are partial, sustained state-changing workflows
+  fail, and the constraint is action execution/perception rather than action
+  knowledge or source access. No harness machinery is added from this;
+  visible qualification/escalation as a product-quality feature and
+  materially new perception/grounding mechanisms remain the documented
+  candidate paths. Full session handoff:
   `experiments/handoffs/2026-08-07-benchmark-continuation-handoff.md` in the
   evaluator repository.
 
