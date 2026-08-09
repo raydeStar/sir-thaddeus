@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using SirThaddeus.McpServer.Tools;
 
 namespace SirThaddeus.Tests.MCP;
@@ -5,6 +7,162 @@ namespace SirThaddeus.Tests.MCP;
 [Collection(FileToolsEnvironmentCollection.Name)]
 public sealed class FileToolsAccessPolicyTests
 {
+    [Fact]
+    public void FileWrite_WritesExactUtf8AndReturnsVerifiedReceipt()
+    {
+        var root = CreateTempDirectory();
+        using var env = AllowedFileEnvironment(root);
+        const string content = "Owner: D'Arcy\nToken: ${API_KEY}\nPath: D:\\Ops Tools\n";
+
+        var result = FileTools.FileWrite("nested/effect.txt", content);
+
+        using var document = JsonDocument.Parse(result);
+        var receipt = document.RootElement;
+        Assert.True(receipt.GetProperty("ok").GetBoolean());
+        Assert.True(receipt.GetProperty("verified").GetBoolean());
+        Assert.Equal(content, receipt.GetProperty("post_content").GetString());
+        Assert.False(receipt.GetProperty("post_content_truncated").GetBoolean());
+        Assert.Equal(Encoding.UTF8.GetByteCount(content), receipt.GetProperty("bytes").GetInt32());
+        Assert.Equal(
+            content,
+            File.ReadAllText(Path.Combine(root, "nested", "effect.txt"), new UTF8Encoding(false, true)));
+    }
+
+    [Fact]
+    public void FileReplace_ReplacesOneExactSpanAndReturnsVerifiedReceipt()
+    {
+        var root = CreateTempDirectory();
+        var path = Path.Combine(root, "service.txt");
+        File.WriteAllText(path, "MODE=old\nTOKEN=$HOME\nTAIL=keep\n", new UTF8Encoding(false));
+        using var env = AllowedFileEnvironment(root);
+
+        var result = FileTools.FileReplace(
+            "service.txt",
+            "MODE=old\nTOKEN=$HOME",
+            "MODE=sealed\nTOKEN=${SERVICE_KEY}");
+
+        using var document = JsonDocument.Parse(result);
+        var receipt = document.RootElement;
+        Assert.True(receipt.GetProperty("ok").GetBoolean());
+        Assert.True(receipt.GetProperty("verified").GetBoolean());
+        Assert.Equal(1, receipt.GetProperty("replacements").GetInt32());
+        Assert.Equal(
+            "MODE=sealed\nTOKEN=${SERVICE_KEY}\nTAIL=keep\n",
+            receipt.GetProperty("post_content").GetString());
+    }
+
+    [Fact]
+    public void FileReplace_AmbiguousSpanFailsWithoutChangingFile()
+    {
+        var root = CreateTempDirectory();
+        var path = Path.Combine(root, "values.txt");
+        File.WriteAllText(path, "same same", new UTF8Encoding(false));
+        using var env = AllowedFileEnvironment(root);
+
+        var result = FileTools.FileReplace("values.txt", "same", "new");
+
+        Assert.Contains("old_text_must_occur_exactly_once", result, StringComparison.Ordinal);
+        Assert.Equal("same same", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void FileWrite_DeniesTraversalWithoutCreatingOutsideFile()
+    {
+        var root = CreateTempDirectory();
+        var outside = Path.Combine(Directory.GetParent(root)!.FullName, "escaped.txt");
+        if (File.Exists(outside))
+            File.Delete(outside);
+        using var env = AllowedFileEnvironment(root);
+
+        var result = FileTools.FileWrite("../escaped.txt", "blocked");
+
+        Assert.Contains("access_denied", result, StringComparison.Ordinal);
+        Assert.False(File.Exists(outside));
+    }
+
+    [Fact]
+    public void FileWrite_DeniesWhenFileAccessIsDisabled()
+    {
+        var root = CreateTempDirectory();
+        using var env = new EnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ST_DOCUMENT_READER_DISABLE_FILE_ACCESS"] = "true",
+            ["ST_DOCUMENT_READER_ALLOWED_ROOTS"] = root,
+            ["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] = ".txt"
+        });
+
+        var result = FileTools.FileWrite("blocked.txt", "blocked");
+
+        Assert.Contains("file_access_disabled", result, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, "blocked.txt")));
+    }
+
+    [Fact]
+    public void FileWrite_DeniesDisallowedExtensionWithoutCreatingFile()
+    {
+        var root = CreateTempDirectory();
+        using var env = AllowedFileEnvironment(root);
+
+        var result = FileTools.FileWrite("blocked.exe", "blocked");
+
+        Assert.Contains("extension_not_allowed", result, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, "blocked.exe")));
+    }
+
+    [Fact]
+    public void FileWrite_DeniesOversizedContentWithoutCreatingFile()
+    {
+        var root = CreateTempDirectory();
+        using var env = AllowedFileEnvironment(root);
+
+        var result = FileTools.FileWrite("oversized.txt", new string('x', (1024 * 1024) + 1));
+
+        Assert.Contains("file_too_large", result, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, "oversized.txt")));
+    }
+
+    [Fact]
+    public void FileWrite_DeniesMalformedUnicodeWithoutCreatingFile()
+    {
+        var root = CreateTempDirectory();
+        using var env = AllowedFileEnvironment(root);
+
+        var result = FileTools.FileWrite("malformed.txt", "prefix\ud800suffix");
+
+        Assert.Contains("content_is_not_valid_utf8", result, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, "malformed.txt")));
+    }
+
+    [Fact]
+    public void FileWrite_DeniesSymbolicLinkPathWithoutChangingTarget()
+    {
+        var root = CreateTempDirectory();
+        var outside = CreateTempDirectory();
+        var link = Path.Combine(root, "linked");
+        try
+        {
+            Directory.CreateSymbolicLink(link, outside);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+        catch (IOException)
+        {
+            return;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return;
+        }
+
+        using var env = AllowedFileEnvironment(root);
+        var result = FileTools.FileWrite("linked/escape.txt", "blocked");
+
+        Assert.Contains("reparse_point_not_allowed", result, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(outside, "escape.txt")));
+    }
+
     [Fact]
     public async Task FileRead_DeniesWhenFileAccessDisabled()
     {

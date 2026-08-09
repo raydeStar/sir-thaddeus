@@ -409,6 +409,26 @@ public static class ToolManifest
         },
         new()
         {
+            Name        = "file_replace",
+            Aliases     = ["FileReplace"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Replaces one exact uniquely occurring UTF-8 text span and returns a verified post-state receipt.",
+            Limits      = "Allowed roots and extensions only; 1 MiB maximum; reparse points rejected."
+        },
+        new()
+        {
+            Name        = "file_write",
+            Aliases     = ["FileWrite"],
+            Category    = "file",
+            ReadWrite   = "write",
+            Permission  = "required",
+            Description = "Atomically writes exact UTF-8 content and returns a verified post-state receipt.",
+            Limits      = "Allowed roots and extensions only; 1 MiB maximum; reparse points rejected."
+        },
+        new()
+        {
             Name        = "wiki_roots_list",
             Aliases     = ["WikiRootsList"],
             Category    = "file",

@@ -51,6 +51,10 @@ public static class ToolCallRedactor
             // File list: log the path
             "filelist" or "file_list"
                 => Truncate(argumentsJson, 200),
+            "filewrite" or "file_write"
+                => SummarizeFileMutationInput(argumentsJson, isReplace: false),
+            "filereplace" or "file_replace"
+                => SummarizeFileMutationInput(argumentsJson, isReplace: true),
 
             // System execute: never log full command text.
             // Keep only executable + arg count + hash.
@@ -122,6 +126,8 @@ public static class ToolCallRedactor
                 => $"[File content: {output.Length} chars, sha256={ShortHash(output)}]",
             "documentread" or "document_read"
                 => $"[Document content: {output.Length} chars, sha256={ShortHash(output)}]",
+            "filewrite" or "file_write" or "filereplace" or "file_replace"
+                => SummarizeFileMutationOutput(output),
 
             // Browser navigate: log title + content length, not full body
             "browsernavigate" or "browser_navigate"
@@ -268,6 +274,69 @@ public static class ToolCallRedactor
         }
 
         return "[Clipboard write request]";
+    }
+
+    private static string SummarizeFileMutationInput(string argumentsJson, bool isReplace)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(argumentsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                throw new JsonException();
+
+            var path = GetStringProperty(doc.RootElement, "path");
+            if (!isReplace)
+            {
+                var content = GetStringProperty(doc.RootElement, "content");
+                return $"[file_write: path={Truncate(path, 160)}, " +
+                       $"content_chars={content.Length}, content_sha256={ShortHash(content)}]";
+            }
+
+            var oldText = GetStringProperty(doc.RootElement, "oldText");
+            var newText = GetStringProperty(doc.RootElement, "newText");
+            return $"[file_replace: path={Truncate(path, 160)}, " +
+                   $"old_chars={oldText.Length}, old_sha256={ShortHash(oldText)}, " +
+                   $"new_chars={newText.Length}, new_sha256={ShortHash(newText)}]";
+        }
+        catch
+        {
+            var operation = isReplace ? "file_replace" : "file_write";
+            return $"[{operation}: unparsed_args_sha256={ShortHash(argumentsJson)}]";
+        }
+    }
+
+    private static string SummarizeFileMutationOutput(string output)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(output);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                throw new JsonException();
+
+            var root = doc.RootElement;
+            var ok = root.TryGetProperty("ok", out var okNode) &&
+                     okNode.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? okNode.GetBoolean().ToString().ToLowerInvariant()
+                : "unknown";
+            var verified = root.TryGetProperty("verified", out var verifiedNode) &&
+                           verifiedNode.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? verifiedNode.GetBoolean().ToString().ToLowerInvariant()
+                : "unknown";
+            var bytes = root.TryGetProperty("bytes", out var bytesNode) &&
+                        bytesNode.TryGetInt64(out var byteCount)
+                ? byteCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : "unknown";
+            var error = GetStringProperty(root, "error");
+            var errorSuffix = string.IsNullOrWhiteSpace(error)
+                ? ""
+                : $", error={Truncate(error, 100)}";
+            return $"[File mutation: ok={ok}, verified={verified}, bytes={bytes}{errorSuffix}, " +
+                   $"receipt_sha256={ShortHash(output)}]";
+        }
+        catch
+        {
+            return $"[File mutation result: {output.Length} chars, sha256={ShortHash(output)}]";
+        }
     }
 
     private static string SummarizeClipboardWriteOutput(string output)

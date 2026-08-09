@@ -43,6 +43,8 @@ public class ToolManifestTests
         Assert.Contains(all, t => t.Name == "holidays_is_today");
         Assert.Contains(all, t => t.Name == "feed_fetch");
         Assert.Contains(all, t => t.Name == "status_check_url");
+        Assert.Contains(all, t => t.Name == "file_write");
+        Assert.Contains(all, t => t.Name == "file_replace");
     }
 
     [Fact]
@@ -116,6 +118,8 @@ public class ToolManifestTests
         Assert.Contains("get_active_window", requiresPermission);
         Assert.Contains("file_read", requiresPermission);
         Assert.Contains("file_list", requiresPermission);
+        Assert.Contains("file_write", requiresPermission);
+        Assert.Contains("file_replace", requiresPermission);
         Assert.Contains("system_execute", requiresPermission);
         Assert.Contains("web_search", requiresPermission);
         Assert.Contains("browser_navigate", requiresPermission);

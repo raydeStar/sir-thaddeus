@@ -182,8 +182,12 @@ public static class PolicyGate
             [
                 "file_read",
                 "file_list",
+                "file_write",
+                "file_replace",
                 "FileRead",
-                "FileList"
+                "FileList",
+                "FileWrite",
+                "FileReplace"
             ],
             ForbiddenTools =
             [
