@@ -513,10 +513,6 @@ public static class FileTools
 
     private static string? ValidateWritableExtension(string fullPath)
     {
-        var allowlistRaw = Environment.GetEnvironmentVariable("ST_DOCUMENT_READER_ALLOWED_EXTENSIONS");
-        if (string.IsNullOrWhiteSpace(allowlistRaw))
-            return null;
-
         var allowedExtensions = ParseAllowedExtensionsEnv(
             "ST_DOCUMENT_READER_ALLOWED_EXTENSIONS",
             [".json", ".yaml", ".yml", ".toml", ".ini", ".env", ".md", ".txt"]);

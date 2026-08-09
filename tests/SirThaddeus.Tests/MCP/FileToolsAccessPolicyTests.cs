@@ -110,6 +110,42 @@ public sealed class FileToolsAccessPolicyTests
     }
 
     [Fact]
+    public void FileWrite_MissingExtensionPolicyFailsClosedForExecutableFile()
+    {
+        var root = CreateTempDirectory();
+        using var env = new EnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ST_DOCUMENT_READER_DISABLE_FILE_ACCESS"] = "false",
+            ["ST_DOCUMENT_READER_ALLOWED_ROOTS"] = root,
+            ["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] = null
+        });
+
+        var result = FileTools.FileWrite("blocked.exe", "blocked");
+
+        Assert.Contains("extension_not_allowed", result, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, "blocked.exe")));
+    }
+
+    [Fact]
+    public void FileWrite_MissingExtensionPolicyUsesConservativeTextDefault()
+    {
+        var root = CreateTempDirectory();
+        using var env = new EnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ST_DOCUMENT_READER_DISABLE_FILE_ACCESS"] = "false",
+            ["ST_DOCUMENT_READER_ALLOWED_ROOTS"] = root,
+            ["ST_DOCUMENT_READER_ALLOWED_EXTENSIONS"] = null
+        });
+
+        var result = FileTools.FileWrite("allowed.md", "safe text");
+
+        using var document = JsonDocument.Parse(result);
+        Assert.True(document.RootElement.GetProperty("ok").GetBoolean());
+        Assert.True(document.RootElement.GetProperty("verified").GetBoolean());
+        Assert.Equal("safe text", File.ReadAllText(Path.Combine(root, "allowed.md")));
+    }
+
+    [Fact]
     public void FileWrite_DeniesOversizedContentWithoutCreatingFile()
     {
         var root = CreateTempDirectory();
