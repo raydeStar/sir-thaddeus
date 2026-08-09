@@ -45,12 +45,16 @@ Desktop and headless chat use the same ordered responsibilities:
 3. Narrow tool exposure through the footman and freshness policies.
 4. Run the primary model/tool loop through the audited MCP permission boundary.
 5. Sanitize the draft while preserving explicit safe response contracts.
-6. For explicit answer-only contracts, project one uniquely shared verbatim
+6. Remove malformed provider channel wrappers. Replace a protocol-only Wiki
+   update artifact with a receipt only when typed target state and one successful
+   versioned update independently prove the exact requested mutation.
+7. For explicit answer-only contracts, project one uniquely shared verbatim
    scalar from the sanitized draft and successful tool evidence when provable;
    otherwise validate completion and perform at most the configured bounded
    repair.
-7. Apply search fallback only when search is available and applicable.
-8. Persist automatic memory asynchronously and compose the final response.
+8. Apply search fallback only when search is available and applicable, then
+   sanitize and normalize that draft through the same response boundary.
+9. Persist automatic memory asynchronously and compose the final response.
 
 The canonical stage order is owned by
 `packages/agent/SirThaddeus.Agent/Pipeline/ProductionChatPipelineFactory.cs`.
@@ -189,6 +193,22 @@ grounded postcondition, so the pipeline skips the later LLM completion-validator
 call for that turn. When it does not succeed, the existing completion validation
 and bounded repair path is unchanged. This is a narrow response-contract seam,
 not a router, retriever, benchmark path, or global validation removal.
+
+## Malformed provider protocol normalization
+
+After sanitization, the shared desktop/headless response boundary removes
+recognized malformed channel-control wrappers while preserving their nonempty
+human-readable body. Quoted and fenced examples, ordinary conversation, and
+unrecognized protocol-like text remain unchanged.
+
+A response made entirely of malformed tool-call protocol may become the short
+receipt `Updated the selected Wiki page.` only when the turn carries one typed
+selected page-update target, exactly one successful `wiki_page_update_by_name`
+call matches that target, the result reports a positive page version, and the
+returned Markdown exactly matches the requested Markdown. Failed, missing,
+ambiguous, mismatched, or multiple updates fail closed. The normalizer makes no
+model or tool call, does not infer task completion from prose, and emits only
+content-free activation telemetry.
 
 ## Semantic tool-result success
 

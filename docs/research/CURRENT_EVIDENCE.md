@@ -1155,6 +1155,31 @@ calls and latency while tying or losing to unchanged Thaddeus.
   positives moved `2/8`, `3/8`, and `1/6`. No stable narrow date layer remained.
   Close this family until ordinary labeled outcomes independently reopen it.
 
+## Malformed provider protocol normalization v1
+
+- On frozen Gemma 4 31B Q3_K_M, the answer-blind oracle projected the public
+  development slice from `0/5` to `3/5` with three wins and zero losses. The
+  implemented response-boundary mechanism then scored `3/5` twice with the
+  same case outcomes, `5/5` validity, and zero protocol-marker leakage.
+- The exact frozen candidate scored `3/5` on the disjoint sealed five-case
+  holdout with `5/5` validity, zero leaked markers, 19 model calls, seven tool
+  calls, 20,042 input tokens, 703 output tokens, and 23,859 MiB peak VRAM. It
+  activated on four malformed-artifact turns and stayed inactive on the
+  no-action control.
+- The two holdout failures were not response-boundary failures: one omitted a
+  required Wiki verification reread and one omitted the required multi-source
+  calculation path. Both remained strict failures; the candidate did not turn
+  either into false success.
+- The mechanism is model-ID-blind, adds no inference or tool call, and fails
+  closed unless one typed selected Wiki page update is exactly corroborated by
+  one successful versioned tool result. Ordinary, quoted, fenced, failed,
+  mismatched, ambiguous, and multiple-update negatives are covered
+  deterministically.
+- Validation did not include a separately executed unchanged-harness holdout
+  arm. Generalization is established against the frozen development control
+  plus candidate-only disjoint validation, so do not claim a paired holdout
+  uplift.
+
 ## What remains uncertain
 
 - Whether continued labeled outcome accumulation reveals a repeated,
