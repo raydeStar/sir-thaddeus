@@ -41,6 +41,47 @@ public class ToolCallRedactorTests
     }
 
     [Fact]
+    public void RedactInput_FileWrite_DoesNotLeakContent()
+    {
+        const string secret = "SERVICE_TOKEN=ultra-secret-value";
+        var arguments = $$"""{"path":"service.env","content":"{{secret}}"}""";
+
+        var redacted = ToolCallRedactor.RedactInput("file_write", arguments);
+
+        Assert.DoesNotContain(secret, redacted, StringComparison.Ordinal);
+        Assert.Contains("service.env", redacted, StringComparison.Ordinal);
+        Assert.Contains("content_sha256=", redacted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RedactInput_FileReplace_DoesNotLeakOldOrNewText()
+    {
+        const string oldSecret = "TOKEN=old-secret";
+        const string newSecret = "TOKEN=new-secret";
+        var arguments = $$"""{"path":"service.env","oldText":"{{oldSecret}}","newText":"{{newSecret}}"}""";
+
+        var redacted = ToolCallRedactor.RedactInput("file_replace", arguments);
+
+        Assert.DoesNotContain(oldSecret, redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain(newSecret, redacted, StringComparison.Ordinal);
+        Assert.Contains("old_sha256=", redacted, StringComparison.Ordinal);
+        Assert.Contains("new_sha256=", redacted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RedactOutput_FileMutation_DoesNotLeakVerifiedContent()
+    {
+        const string secret = "SERVICE_TOKEN=verified-secret";
+        var output = $$"""{"ok":true,"verified":true,"bytes":37,"post_content":"{{secret}}"}""";
+
+        var redacted = ToolCallRedactor.RedactOutput("file_write", output);
+
+        Assert.DoesNotContain(secret, redacted, StringComparison.Ordinal);
+        Assert.Contains("ok=true", redacted, StringComparison.Ordinal);
+        Assert.Contains("verified=true", redacted, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RedactOutput_ToolCapabilities_PreservesManifestGroupsAndBoundedNames()
     {
         const string manifest = """

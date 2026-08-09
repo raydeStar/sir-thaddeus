@@ -60,6 +60,8 @@ public static class ToolGroupPolicy
         ["file_read_apply"]      = "files",
         ["file_list_preview"]    = "files",
         ["file_list_apply"]      = "files",
+        ["file_write"]           = "files",
+        ["file_replace"]         = "files",
         ["wiki_roots_list"] = "files",
         ["wiki_tree_get"] = "files",
         ["wiki_page_read"] = "files",

@@ -21,6 +21,8 @@ public class FootmanToolFilterTests
         Def("browser_navigate"),
         Def("file_read"),
         Def("file_list"),
+        Def("file_write"),
+        Def("file_replace"),
         Def("screen_capture"),
         Def("memory_retrieve"),
         Def("propose_automation"),
@@ -92,6 +94,8 @@ public class FootmanToolFilterTests
         var names = result.Select(t => t.Function.Name).ToList();
         Assert.Contains("file_read", names);
         Assert.Contains("file_list", names);
+        Assert.Contains("file_write", names);
+        Assert.Contains("file_replace", names);
         Assert.DoesNotContain("screen_capture", names);
         Assert.DoesNotContain("browser_navigate", names);
     }

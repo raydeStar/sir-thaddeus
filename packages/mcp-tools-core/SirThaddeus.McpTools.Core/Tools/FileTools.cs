@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Server;
 using SirThaddeus.DocumentReader;
@@ -8,11 +10,18 @@ namespace SirThaddeus.McpServer.Tools;
 
 /// <summary>
 /// File system tools exposed via MCP.
-/// Provides read access to local files with basic safety checks.
+/// Provides scoped reads plus exact, permission-gated UTF-8 writes with
+/// independently verified post-state receipts.
 /// </summary>
 [McpServerToolType]
 public static class FileTools
 {
+    private const int MaxWritableBytes = 1_048_576;
+    private const int VerifiedReceiptContentChars = 8_192;
+    private static readonly UTF8Encoding StrictUtf8 = new(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+
     private sealed record FilePreview(string Tool, string FullPath, DateTimeOffset ExpiresAtUtc);
 
     private static readonly ConcurrentDictionary<string, FilePreview> PreviewCache = new();
@@ -296,6 +305,323 @@ public static class FileTools
             tool = "file_list",
             result
         }, JsonOpts);
+    }
+
+    [McpServerTool(
+        Name = "file_write",
+        ReadOnly = false,
+        Idempotent = true,
+        Destructive = true,
+        OpenWorld = false),
+     Description(
+         "Write exact UTF-8 content to a file inside a configured allowed folder. " +
+         "Creates parent directories, caps the file at 1 MiB, and writes atomically. " +
+         "A successful result independently rereads the file and returns verified=true, " +
+         "its byte count, SHA-256, and bounded exact post-write content; no separate readback is needed.")]
+    public static string FileWrite(
+        [Description("Absolute path, or a path relative to the single configured allowed folder")] string path,
+        [Description("Exact UTF-8 content to write; include a final newline when required")] string content)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return BuildError("path_required");
+
+        if (content is null)
+            return BuildError("content_required");
+
+        try
+        {
+            var fullPath = ResolveWritablePath(path, mustExist: false, out var resolutionError);
+            if (resolutionError is not null)
+                return resolutionError;
+
+            var validationError = ValidateWritableTarget(fullPath!);
+            if (validationError is not null)
+                return validationError;
+
+            var bytes = StrictUtf8.GetBytes(content);
+            if (bytes.Length > MaxWritableBytes)
+                return BuildError("file_too_large", fullPath);
+
+            return WriteAtomicallyAndBuildReceipt(fullPath!, bytes, replacements: null);
+        }
+        catch (EncoderFallbackException)
+        {
+            return BuildError("content_is_not_valid_utf8");
+        }
+        catch (Exception ex)
+        {
+            return BuildError($"write_failed: {ex.Message}");
+        }
+    }
+
+    [McpServerTool(
+        Name = "file_replace",
+        ReadOnly = false,
+        Idempotent = false,
+        Destructive = true,
+        OpenWorld = false),
+     Description(
+         "Replace one exact text span that occurs exactly once in an existing UTF-8 file " +
+         "inside a configured allowed folder. Ambiguous or absent spans fail without writing. " +
+         "A successful result independently rereads the file and returns verified=true, its " +
+         "byte count, SHA-256, and bounded exact post-write content; no separate readback is needed.")]
+    public static string FileReplace(
+        [Description("Absolute path, or an existing file path resolvable inside an allowed folder")] string path,
+        [Description("Non-empty exact text that must occur exactly once")] string oldText,
+        [Description("Exact replacement text, which may be empty")] string newText)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return BuildError("path_required");
+
+        if (string.IsNullOrEmpty(oldText))
+            return BuildError("old_text_required");
+
+        if (newText is null)
+            return BuildError("new_text_required");
+
+        try
+        {
+            var fullPath = ResolveWritablePath(path, mustExist: true, out var resolutionError);
+            if (resolutionError is not null)
+                return resolutionError;
+
+            var validationError = ValidateWritableTarget(fullPath!);
+            if (validationError is not null)
+                return validationError;
+
+            if (!File.Exists(fullPath))
+                return BuildError("file_not_found", fullPath);
+
+            var info = new FileInfo(fullPath);
+            if (info.Length > MaxWritableBytes)
+                return BuildError("file_too_large", fullPath);
+
+            var existing = File.ReadAllText(fullPath, StrictUtf8);
+            var occurrences = CountOccurrences(existing, oldText);
+            if (occurrences != 1)
+            {
+                return JsonSerializer.Serialize(new
+                {
+                    ok = false,
+                    error = "old_text_must_occur_exactly_once",
+                    path = fullPath,
+                    occurrences
+                }, JsonOpts);
+            }
+
+            var updated = existing.Replace(oldText, newText, StringComparison.Ordinal);
+            var bytes = StrictUtf8.GetBytes(updated);
+            if (bytes.Length > MaxWritableBytes)
+                return BuildError("file_too_large", fullPath);
+
+            return WriteAtomicallyAndBuildReceipt(fullPath, bytes, replacements: 1);
+        }
+        catch (DecoderFallbackException)
+        {
+            return BuildError("existing_file_is_not_valid_utf8");
+        }
+        catch (EncoderFallbackException)
+        {
+            return BuildError("replacement_is_not_valid_utf8");
+        }
+        catch (Exception ex)
+        {
+            return BuildError($"replace_failed: {ex.Message}");
+        }
+    }
+
+    private static string? ResolveWritablePath(
+        string path,
+        bool mustExist,
+        out string? error)
+    {
+        error = null;
+        var trimmed = path.Trim().Trim('"', '\'');
+        var allowedRoots = ParseAllowedRootsEnv("ST_DOCUMENT_READER_ALLOWED_ROOTS");
+
+        if (allowedRoots.Count == 0)
+        {
+            error = BuildError("no_allowed_folders_configured");
+            return null;
+        }
+
+        try
+        {
+            if (Path.IsPathRooted(trimmed))
+                return NormalizePath(trimmed);
+
+            if (mustExist &&
+                AllowedRootFileResolver.TryResolveUniqueSuffix(trimmed, allowedRoots, out var suffixMatch))
+            {
+                return NormalizePath(suffixMatch!);
+            }
+
+            if (allowedRoots.Count != 1)
+            {
+                error = BuildError("relative_path_requires_one_allowed_folder", trimmed);
+                return null;
+            }
+
+            return NormalizePath(Path.Combine(allowedRoots[0], trimmed));
+        }
+        catch (Exception ex)
+        {
+            error = BuildError($"invalid_path: {ex.Message}", path);
+            return null;
+        }
+    }
+
+    private static string? ValidateWritableTarget(string fullPath)
+    {
+        if (ParseBooleanEnv("ST_DOCUMENT_READER_DISABLE_FILE_ACCESS"))
+            return BuildError("file_access_disabled", fullPath);
+
+        var allowedRoots = ParseAllowedRootsEnv("ST_DOCUMENT_READER_ALLOWED_ROOTS");
+        var allowedRoot = allowedRoots.FirstOrDefault(root => IsPathUnderAnyRoot(fullPath, [root]));
+        if (allowedRoot is null)
+            return BuildError("access_denied", fullPath);
+
+        if (string.Equals(NormalizePath(fullPath), NormalizePath(allowedRoot), StringComparison.OrdinalIgnoreCase))
+            return BuildError("target_must_be_a_file", fullPath);
+
+        if (Directory.Exists(fullPath))
+            return BuildError("target_is_directory", fullPath);
+
+        var extensionError = ValidateWritableExtension(fullPath);
+        if (extensionError is not null)
+            return extensionError;
+
+        var rootInfo = new DirectoryInfo(allowedRoot);
+        if (rootInfo.Exists && rootInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            return BuildError("reparse_point_not_allowed", allowedRoot);
+
+        var relative = Path.GetRelativePath(allowedRoot, fullPath);
+        var current = allowedRoot;
+        foreach (var part in relative.Split(
+                     [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                     StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, part);
+            if (!File.Exists(current) && !Directory.Exists(current))
+                continue;
+
+            if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+                return BuildError("reparse_point_not_allowed", current);
+        }
+
+        return null;
+    }
+
+    private static string? ValidateWritableExtension(string fullPath)
+    {
+        var allowedExtensions = ParseAllowedExtensionsEnv(
+            "ST_DOCUMENT_READER_ALLOWED_EXTENSIONS",
+            [".json", ".yaml", ".yml", ".toml", ".ini", ".env", ".md", ".txt"]);
+        var extension = Path.GetExtension(fullPath).ToLowerInvariant();
+        return allowedExtensions.Contains(extension)
+            ? null
+            : BuildError("extension_not_allowed", fullPath);
+    }
+
+    private static string WriteAtomicallyAndBuildReceipt(
+        string fullPath,
+        byte[] bytes,
+        int? replacements)
+    {
+        var parent = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(parent))
+            return BuildError("parent_directory_required", fullPath);
+
+        Directory.CreateDirectory(parent);
+        var validationError = ValidateWritableTarget(fullPath);
+        if (validationError is not null)
+            return validationError;
+
+        var existed = File.Exists(fullPath);
+        var originalBytes = existed ? File.ReadAllBytes(fullPath) : null;
+        var tempPath = Path.Combine(parent, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
+        var committed = false;
+        try
+        {
+            File.WriteAllBytes(tempPath, bytes);
+            File.Move(tempPath, fullPath, overwrite: true);
+            committed = true;
+
+            var observed = File.ReadAllBytes(fullPath);
+            if (!observed.AsSpan().SequenceEqual(bytes))
+            {
+                RestoreOriginalFile(fullPath, originalBytes);
+                committed = false;
+                return BuildError("post_write_verification_failed", fullPath);
+            }
+
+            var content = StrictUtf8.GetString(observed);
+            var receipt = JsonSerializer.Serialize(new
+            {
+                ok = true,
+                verified = true,
+                path = fullPath,
+                bytes = observed.Length,
+                sha256 = Convert.ToHexString(SHA256.HashData(observed)).ToLowerInvariant(),
+                post_content = content[..Math.Min(content.Length, VerifiedReceiptContentChars)],
+                post_content_truncated = content.Length > VerifiedReceiptContentChars,
+                replacements
+            }, JsonOpts);
+            committed = false;
+            return receipt;
+        }
+        catch
+        {
+            if (committed)
+                RestoreOriginalFile(fullPath, originalBytes);
+
+            throw;
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    private static void RestoreOriginalFile(string fullPath, byte[]? originalBytes)
+    {
+        if (originalBytes is null)
+        {
+            File.Delete(fullPath);
+            return;
+        }
+
+        var parent = Path.GetDirectoryName(fullPath)
+            ?? throw new InvalidOperationException("Cannot restore a file without a parent directory.");
+        var restorePath = Path.Combine(parent, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.restore");
+        try
+        {
+            File.WriteAllBytes(restorePath, originalBytes);
+            File.Move(restorePath, fullPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(restorePath))
+                File.Delete(restorePath);
+        }
+    }
+
+    private static int CountOccurrences(string content, string value)
+    {
+        var count = 0;
+        var offset = 0;
+        while (offset <= content.Length - value.Length)
+        {
+            var index = content.IndexOf(value, offset, StringComparison.Ordinal);
+            if (index < 0)
+                break;
+
+            count++;
+            offset = index + value.Length;
+        }
+
+        return count;
     }
 
     private static string CreatePreview(string tool, string fullPath)

@@ -94,6 +94,10 @@ public class ToolGroupResolutionTests
     [InlineData("file_read", "files")]
     [InlineData("FileList", "files")]
     [InlineData("file_list", "files")]
+    [InlineData("FileWrite", "files")]
+    [InlineData("file_write", "files")]
+    [InlineData("FileReplace", "files")]
+    [InlineData("file_replace", "files")]
     public void FileTools_MapToFilesGroup(string toolName, string expected)
     {
         var canonical = AuditedMcpToolClient.Canonicalize(toolName);
