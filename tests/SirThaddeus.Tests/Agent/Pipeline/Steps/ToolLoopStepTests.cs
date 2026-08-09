@@ -537,6 +537,64 @@ public class ToolLoopStepTests
     }
 
     [Fact]
+    public async Task Verified_file_write_returns_receipt_without_model_summary_round()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("file_write", "{\"path\":\"notes.txt\",\"content\":\"hello\\n\"}"),
+            LlmReply.Final("This model response must not be requested."));
+        var mcp = new StubMcp((_, _) =>
+            "{\"ok\":true,\"verified\":true,\"path\":\"C:/allowed/notes.txt\"," +
+            "\"bytes\":6,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"," +
+            "\"post_content\":\"hello\\n\"}");
+        var logs = new List<(string Event, string Message)>();
+        var step = BuildStep(llm, mcp: mcp, log: (eventName, message) => logs.Add((eventName, message)));
+        var request = "Create `notes.txt` now with exactly the supplied content.";
+        var context = NewContext() with
+        {
+            UserText = request,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(request)],
+            ToolDefs = [ToolDefinitionFor("file_write")],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Equal("Done - I wrote and verified `notes.txt`.", next.AssistantDraft);
+        Assert.Single(next.ToolCallsMade);
+        Assert.Single(llm.ForcedToolNames);
+        Assert.Contains(logs, entry =>
+            entry.Event == "EXPERIMENT_ACTIVATION" &&
+            entry.Message.Contains("event=verified_file_final_projection", StringComparison.Ordinal) &&
+            entry.Message.Contains("decision=activated", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Verified_file_write_with_explanation_request_keeps_model_summary_round()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("file_write", "{\"path\":\"notes.txt\",\"content\":\"hello\\n\"}"),
+            LlmReply.Final("I created the file. The note records the requested greeting."));
+        var mcp = new StubMcp((_, _) =>
+            "{\"ok\":true,\"verified\":true,\"path\":\"C:/allowed/notes.txt\"," +
+            "\"bytes\":6,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"," +
+            "\"post_content\":\"hello\\n\"}");
+        var step = BuildStep(llm, mcp: mcp);
+        var request = "Create `notes.txt`, then explain what it records.";
+        var context = NewContext() with
+        {
+            UserText = request,
+            LlmMessages = [ChatMessage.System("sys"), ChatMessage.User(request)],
+            ToolDefs = [ToolDefinitionFor("file_write")],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var next = Assert.IsType<StepResult.Continue>(result).Next;
+        Assert.Equal("I created the file. The note records the requested greeting.", next.AssistantDraft);
+        Assert.Equal(2, llm.ForcedToolNames.Count);
+    }
+
+    [Fact]
     public async Task Interceptor_claims_call_and_MCP_is_not_invoked()
     {
         // An interceptor that owns the tool name short-circuits MCP —
