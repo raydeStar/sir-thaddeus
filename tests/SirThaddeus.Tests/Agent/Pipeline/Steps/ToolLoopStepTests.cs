@@ -760,6 +760,228 @@ public class ToolLoopStepTests
     }
 
     [Fact]
+    public async Task Near_deadline_returns_truthful_terminal_receipt_without_second_model_call()
+    {
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var llm = new FakeLlm(
+            LlmReply.Tool("system_execute", "{\"command\":\"python3 /app/work.py\"}"),
+            LlmReply.Final("should not run"));
+        var logs = new List<(string Action, string Message)>();
+        var resultJson = JsonSerializer.Serialize(new
+        {
+            exit_code = 0,
+            stdout = "{\"status\":\"ready\"}",
+            stderr = "",
+            timed_out = false,
+            truncated = false,
+        });
+        var step = BuildStep(
+            llm,
+            new StubMcp(_ => resultJson),
+            log: (action, message) => logs.Add((action, message)));
+        var context = NewContext() with
+        {
+            WorkflowDeadlineUtc = DateTimeOffset.UtcNow.AddSeconds(10),
+            ToolDefs = [ToolDefinitionFor("system_execute")],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var term = Assert.IsType<StepResult.Terminate>(result);
+        Assert.Contains("last terminal command completed successfully", term.Response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("last observed output", term.Response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("{\"status\":\"ready\"}", term.Response.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("task completed", term.Response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(llm.ReceivedMessages);
+        Assert.Contains(logs, item =>
+            item.Action == "TOOL_LOOP_DEADLINE_RECEIPT" &&
+            item.Message.Contains("outcome=terminal_evidence_receipt", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Adaptive_reserve_uses_observed_provider_latency_before_next_model_call()
+    {
+        using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 9, 12, 0, 0, TimeSpan.Zero));
+        var llm = new FakeLlm(
+            LlmReply.Tool("system_execute", "{}"),
+            LlmReply.Final("should not run"))
+        {
+            OnCall = callNumber =>
+            {
+                if (callNumber == 1)
+                    clock.Advance(TimeSpan.FromSeconds(25));
+            },
+        };
+        var logs = new List<(string Action, string Message)>();
+        var step = BuildStep(
+            llm,
+            new StubMcp(_ => SuccessfulTerminalResult("observed")),
+            log: (action, message) => logs.Add((action, message)),
+            timeProvider: clock);
+        var context = NewContext() with
+        {
+            WorkflowDeadlineUtc = clock.GetUtcNow().AddSeconds(55),
+            ToolDefs = [ToolDefinitionFor("system_execute")],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        Assert.IsType<StepResult.Terminate>(result);
+        Assert.Single(llm.ReceivedMessages);
+        Assert.Contains(logs, item =>
+            item.Action == "TOOL_LOOP_DEADLINE_RECEIPT" &&
+            item.Message.Contains("remaining_ms=30000", StringComparison.Ordinal) &&
+            item.Message.Contains("reserve_ms=40000", StringComparison.Ordinal) &&
+            item.Message.Contains("max_provider_call_ms=25000", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Adaptive_reserve_stays_inactive_when_measured_call_still_fits()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 9, 12, 0, 0, TimeSpan.Zero));
+        var llm = new FakeLlm(
+            LlmReply.Tool("system_execute", "{}"),
+            LlmReply.Final("normal summary"))
+        {
+            OnCall = callNumber =>
+            {
+                if (callNumber == 1)
+                    clock.Advance(TimeSpan.FromSeconds(25));
+            },
+        };
+        var step = BuildStep(
+            llm,
+            new StubMcp(_ => SuccessfulTerminalResult("observed")),
+            timeProvider: clock);
+        var context = NewContext() with
+        {
+            WorkflowDeadlineUtc = clock.GetUtcNow().AddSeconds(70),
+            ToolDefs = [ToolDefinitionFor("system_execute")],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("normal summary", cont.Next.AssistantDraft);
+        Assert.Equal(2, llm.ReceivedMessages.Count);
+    }
+
+    [Fact]
+    public async Task Adaptive_provider_latency_resets_between_turns()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 9, 12, 0, 0, TimeSpan.Zero));
+        var llm = new FakeLlm(
+            LlmReply.Tool("system_execute", "{}"),
+            LlmReply.Tool("system_execute", "{}"),
+            LlmReply.Final("second turn summary"))
+        {
+            OnCall = callNumber =>
+            {
+                if (callNumber == 1)
+                    clock.Advance(TimeSpan.FromSeconds(25));
+            },
+        };
+        var step = BuildStep(
+            llm,
+            new StubMcp(_ => SuccessfulTerminalResult("observed")),
+            timeProvider: clock);
+        var first = NewContext() with
+        {
+            WorkflowDeadlineUtc = clock.GetUtcNow().AddSeconds(30),
+            ToolDefs = [ToolDefinitionFor("system_execute")],
+        };
+
+        Assert.IsType<StepResult.Terminate>(
+            await step.ExecuteAsync(first, CancellationToken.None));
+
+        var second = NewContext() with
+        {
+            WorkflowDeadlineUtc = clock.GetUtcNow().AddSeconds(20),
+            ToolDefs = [ToolDefinitionFor("system_execute")],
+        };
+        var result = await step.ExecuteAsync(second, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("second turn summary", cont.Next.AssistantDraft);
+        Assert.Equal(3, llm.ReceivedMessages.Count);
+    }
+
+    [Fact]
+    public async Task Ample_deadline_keeps_normal_second_model_call()
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool("system_execute", "{\"command\":\"echo ok\"}"),
+            LlmReply.Final("normal summary"));
+        var step = BuildStep(
+            llm,
+            new StubMcp(_ => SuccessfulTerminalResult("ok")));
+        var context = NewContext() with
+        {
+            WorkflowDeadlineUtc = DateTimeOffset.UtcNow.AddMinutes(1),
+            ToolDefs = [ToolDefinitionFor("system_execute")],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("normal summary", cont.Next.AssistantDraft);
+        Assert.Equal(2, llm.ReceivedMessages.Count);
+    }
+
+    [Theory]
+    [MemberData(nameof(IneligibleDeadlineReceiptResults))]
+    public async Task Near_deadline_rejects_ineligible_terminal_results(string toolName, string resultJson)
+    {
+        var llm = new FakeLlm(
+            LlmReply.Tool(toolName, "{}"),
+            LlmReply.Final("normal summary"));
+        var step = BuildStep(llm, new StubMcp(_ => resultJson));
+        var context = NewContext() with
+        {
+            WorkflowDeadlineUtc = DateTimeOffset.UtcNow.AddSeconds(10),
+            ToolDefs = [ToolDefinitionFor(toolName)],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal(2, llm.ReceivedMessages.Count);
+    }
+
+    [Fact]
+    public async Task Deadline_receipt_bounds_output_and_escapes_nested_fence()
+    {
+        var stdout = "prefix```" + new string('x', 5000);
+        var llm = new FakeLlm(LlmReply.Tool("system_execute", "{}"));
+        var step = BuildStep(llm, new StubMcp(_ => SuccessfulTerminalResult(stdout)));
+        var context = NewContext() with
+        {
+            WorkflowDeadlineUtc = DateTimeOffset.UtcNow.AddSeconds(10),
+            ToolDefs = [ToolDefinitionFor("system_execute")],
+        };
+
+        var result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        var text = Assert.IsType<StepResult.Terminate>(result).Response.Text;
+        Assert.Contains("``\u200B`", text, StringComparison.Ordinal);
+        Assert.Contains("[output bounded to 4000 characters]", text, StringComparison.Ordinal);
+        Assert.True(text.Length < 4400);
+    }
+
+    public static IEnumerable<object[]> IneligibleDeadlineReceiptResults()
+    {
+        yield return ["system_execute", "not-json"];
+        yield return ["system_execute", SuccessfulTerminalResult("")];
+        yield return ["system_execute", SuccessfulTerminalResult("bad", exitCode: 1)];
+        yield return ["system_execute", SuccessfulTerminalResult("late", timedOut: true)];
+        yield return ["system_execute", SuccessfulTerminalResult("cut", truncated: true)];
+        yield return ["system_execute", "{\"exit_code\":0,\"stdout\":\"missing flags\"}"];
+        yield return ["system_execute", "{\"error\":\"permission denied\"}"];
+        yield return ["web_search", SuccessfulTerminalResult("result")];
+    }
+
+    [Fact]
     public async Task Caps_llm_output_budget_for_tool_loop_rounds()
     {
         var llm = new FakeLlm(
@@ -1690,7 +1912,8 @@ public class ToolLoopStepTests
         IEnumerable<IToolCallInterceptor>? interceptors = null,
         IEnumerable<IToolArgsRewriter>? argsRewriters = null,
         int maxRoundTrips = 6,
-        Action<string, string>? log = null)
+        Action<string, string>? log = null,
+        TimeProvider? timeProvider = null)
         => new(
             llm,
             mcp ?? new StubMcp(_ => ""),
@@ -1700,7 +1923,8 @@ public class ToolLoopStepTests
             interceptors,
             argsRewriters,
             maxRoundTrips,
-            log: log);
+            log: log,
+            timeProvider: timeProvider);
 
     private static TurnContext NewContext() => new()
     {
@@ -1754,6 +1978,20 @@ public class ToolLoopStepTests
             Volume = 1_000_000 + index,
         }));
 
+    private static string SuccessfulTerminalResult(
+        string stdout,
+        int exitCode = 0,
+        bool timedOut = false,
+        bool truncated = false) =>
+        JsonSerializer.Serialize(new
+        {
+            exit_code = exitCode,
+            stdout,
+            stderr = "",
+            timed_out = timedOut,
+            truncated,
+        });
+
     private sealed class FakeLlm : ILlmClient
     {
         private readonly Queue<LlmReply> _replies;
@@ -1761,6 +1999,7 @@ public class ToolLoopStepTests
         public List<string?> ForcedToolNames { get; } = new();
         public List<IReadOnlyList<ChatMessage>> ReceivedMessages { get; } = new();
         public List<IReadOnlyList<ToolDefinition>?> ReceivedTools { get; } = new();
+        public Action<int>? OnCall { get; init; }
 
         public FakeLlm(params LlmReply[] replies) => _replies = new(replies);
 
@@ -1800,8 +2039,25 @@ public class ToolLoopStepTests
 
         private LlmResponse Record(IReadOnlyList<ChatMessage> messages, LlmResponse response)
         {
+            OnCall?.Invoke(ReceivedMessages.Count + 1);
             ReceivedMessages.Add(messages.ToArray());
             return response;
+        }
+    }
+
+    private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+        private long _timestamp;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+        public override long GetTimestamp() => _timestamp;
+
+        public void Advance(TimeSpan elapsed)
+        {
+            _utcNow += elapsed;
+            _timestamp += elapsed.Ticks;
         }
     }
 

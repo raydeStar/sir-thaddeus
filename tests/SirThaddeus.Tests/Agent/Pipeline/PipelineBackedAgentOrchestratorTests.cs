@@ -191,6 +191,20 @@ public class PipelineBackedAgentOrchestratorTests
         Assert.Equal("default", observed!.ThreadId);
     }
 
+    [Fact]
+    public async Task Workflow_deadline_is_threaded_into_turn_context()
+    {
+        TurnContext? observed = null;
+        var step = new ObservingStep(ctx => { observed = ctx; return new AgentResponse { Text = "ok" }; });
+        var orch = NewOrchestrator(step);
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
+
+        orch.SetWorkflowDeadline(deadline);
+        await orch.ProcessAsync("hi");
+
+        Assert.Equal(deadline, observed!.WorkflowDeadlineUtc);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────
 
     private static PipelineBackedAgentOrchestrator NewOrchestrator(
