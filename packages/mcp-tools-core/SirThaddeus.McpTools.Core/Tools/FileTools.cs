@@ -10,7 +10,8 @@ namespace SirThaddeus.McpServer.Tools;
 
 /// <summary>
 /// File system tools exposed via MCP.
-/// Provides read access to local files with basic safety checks.
+/// Provides scoped reads plus exact, permission-gated UTF-8 writes with
+/// independently verified post-state receipts.
 /// </summary>
 [McpServerToolType]
 public static class FileTools
