@@ -684,6 +684,32 @@ public sealed class ToolLoopStep : ITurnStep
                     });
                 }
 
+                if (VerifiedFileEffectFinalProjection.IsMutationTool(toolName))
+                {
+                    var fileProjection = VerifiedFileEffectFinalProjection.Project(
+                        context.UserText,
+                        toolCallsMade,
+                        responseToolCalls.Count);
+                    _log?.Invoke(
+                        "EXPERIMENT_ACTIVATION",
+                        $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+                        "event=verified_file_final_projection " +
+                        $"decision={(fileProjection.Applied ? "activated" : "not_activated")} " +
+                        $"reason={fileProjection.Reason}");
+                    if (fileProjection.Applied)
+                    {
+                        var updated = context with
+                        {
+                            LlmMessages = messages,
+                            ToolCallsMade = toolCallsMade,
+                            AssistantDraft = fileProjection.Text,
+                            VerifiedFileEffectCompletion =
+                                new VerifiedFileEffectCompletionAttestation(fileProjection.Text),
+                        };
+                        return new StepResult.Continue(updated);
+                    }
+                }
+
                 if (explicitReadBinding.Active &&
                     explicitReadBinding.Allowed &&
                     WikiExplicitReadOperationContract.TryBuildVerifiedReceipt(

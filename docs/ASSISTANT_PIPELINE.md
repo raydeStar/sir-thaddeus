@@ -194,6 +194,27 @@ call for that turn. When it does not succeed, the existing completion validation
 and bounded repair path is unchanged. This is a narrow response-contract seam,
 not a router, retriever, benchmark path, or global validation removal.
 
+## Attested verified file-effect completions
+
+After exactly one successful `file_write` or `file_replace`, the tool loop may
+render a short deterministic completion only when the result carries an
+independently verified readback receipt, the explicit requested and observed
+filenames match, and the request has no explanation, format, conditional,
+hypothetical, deferred, or multi-effect contract. The reply reports only the
+operation and filename; it never includes content, an absolute path, or a hash.
+
+That draft carries typed runtime-owned provenance through the ordinary
+post-processing pipeline. `CompletionValidationStep` rechecks the exact draft,
+request contract, tool identity, and verified receipt before skipping its LLM
+validation and repair calls. If the draft changes or any proof is absent, the
+attestation is rejected and the existing validation path remains authoritative.
+Sanitization, protocol normalization, memory extraction, response composition,
+permissions, auditing, and failed-tool behavior are unchanged.
+
+This is not a text-matched validation bypass or a general completion shortcut.
+It is a narrow product-efficiency postcondition for one externally verified
+file effect.
+
 ## Malformed provider protocol normalization
 
 After sanitization, the shared desktop/headless response boundary removes
