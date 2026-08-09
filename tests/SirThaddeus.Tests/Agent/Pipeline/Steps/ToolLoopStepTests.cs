@@ -560,6 +560,10 @@ public class ToolLoopStepTests
 
         var next = Assert.IsType<StepResult.Continue>(result).Next;
         Assert.Equal("Done - I wrote and verified `notes.txt`.", next.AssistantDraft);
+        Assert.Equal(
+            next.AssistantDraft,
+            Assert.IsType<VerifiedFileEffectCompletionAttestation>(
+                next.VerifiedFileEffectCompletion).Text);
         Assert.Single(next.ToolCallsMade);
         Assert.Single(llm.ForcedToolNames);
         Assert.Contains(logs, entry =>

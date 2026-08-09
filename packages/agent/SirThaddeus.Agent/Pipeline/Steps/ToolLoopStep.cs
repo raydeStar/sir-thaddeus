@@ -703,6 +703,8 @@ public sealed class ToolLoopStep : ITurnStep
                             LlmMessages = messages,
                             ToolCallsMade = toolCallsMade,
                             AssistantDraft = fileProjection.Text,
+                            VerifiedFileEffectCompletion =
+                                new VerifiedFileEffectCompletionAttestation(fileProjection.Text),
                         };
                         return new StepResult.Continue(updated);
                     }

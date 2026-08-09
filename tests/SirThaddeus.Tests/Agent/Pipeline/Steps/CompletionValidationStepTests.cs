@@ -148,6 +148,60 @@ public class CompletionValidationStepTests
     }
 
     [Fact]
+    public async Task Valid_verified_file_effect_attestation_skips_llm_validation()
+    {
+        const string draft = "Done - I wrote and verified `notes.txt`.";
+        var llm = new CountingLlm();
+        var events = new List<(string Action, string Message)>();
+        var step = new CompletionValidationStep(
+            new CompletionValidator(llm),
+            null,
+            (action, message) => events.Add((action, message)));
+        var ctx = WithDraft("Create `notes.txt` now with the supplied text.", draft) with
+        {
+            ToolCallsMade = [VerifiedWriteCall()],
+            VerifiedFileEffectCompletion = new VerifiedFileEffectCompletionAttestation(draft),
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Same(ctx, cont.Next);
+        Assert.Equal(0, llm.CallCount);
+        Assert.Contains(events, item =>
+            item.Action == "EXPERIMENT_ACTIVATION" &&
+            item.Message.Contains("event=verified_file_completion_attestation", StringComparison.Ordinal) &&
+            item.Message.Contains("decision=validated", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Changed_attested_draft_keeps_normal_validator_path()
+    {
+        const string attested = "Done - I wrote and verified `notes.txt`.";
+        var llm = new CountingLlm();
+        var events = new List<(string Action, string Message)>();
+        var step = new CompletionValidationStep(
+            new CompletionValidator(llm),
+            null,
+            (action, message) => events.Add((action, message)));
+        var ctx = WithDraft("Create `notes.txt` now with the supplied text.", "Changed draft") with
+        {
+            ToolCallsMade = [VerifiedWriteCall()],
+            VerifiedFileEffectCompletion = new VerifiedFileEffectCompletionAttestation(attested),
+        };
+
+        var result = await step.ExecuteAsync(ctx, CancellationToken.None);
+
+        var cont = Assert.IsType<StepResult.Continue>(result);
+        Assert.Equal("Changed draft", cont.Next.AssistantDraft);
+        Assert.Equal(1, llm.CallCount);
+        Assert.Contains(events, item =>
+            item.Action == "EXPERIMENT_ACTIVATION" &&
+            item.Message.Contains("decision=rejected", StringComparison.Ordinal) &&
+            item.Message.Contains("reason=draft_changed", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Repair_trace_attributes_identical_generation_without_logging_content()
     {
         using var trace = new EnvironmentScope("ST_ROUTING_LATENCY_TRACE", "1");
@@ -196,6 +250,15 @@ public class CompletionValidationStepTests
             UserText = userText,
             AssistantDraft = draft,
         };
+
+    private static ToolCallRecord VerifiedWriteCall() => new()
+    {
+        ToolName = "file_write",
+        Arguments = "{\"path\":\"notes.txt\",\"content\":\"hello\\n\"}",
+        Result = "{\"ok\":true,\"verified\":true,\"path\":\"C:/allowed/notes.txt\"," +
+                 "\"bytes\":6,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+        Success = true,
+    };
 
     private sealed class CountingLlm : ILlmClient
     {

@@ -74,6 +74,14 @@ public sealed record TurnContext
     /// post-processing. Null before the tool loop completes.</summary>
     public string? AssistantDraft { get; init; }
 
+    /// <summary>
+    /// Runtime-owned provenance for a deterministic completion produced from
+    /// one independently verified file effect. Later pipeline steps may trust
+    /// it only while <see cref="AssistantDraft"/> still exactly matches the
+    /// attested text and the underlying receipt still validates.
+    /// </summary>
+    public VerifiedFileEffectCompletionAttestation? VerifiedFileEffectCompletion { get; init; }
+
     /// <summary>Tool calls executed during this turn, in order. Grows as the
     /// tool-loop step appends calls; final <see cref="AgentResponse"/>
     /// inherits this list.</summary>
@@ -105,6 +113,12 @@ public sealed record TurnContext
     /// </summary>
     public string? ForcedTool { get; init; }
 }
+
+/// <summary>
+/// Typed provenance for a verified single-file-effect completion. This is
+/// deliberately not a general validation-bypass flag.
+/// </summary>
+public sealed record VerifiedFileEffectCompletionAttestation(string Text);
 
 public enum TurnMemoryAccess
 {

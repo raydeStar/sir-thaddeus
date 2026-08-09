@@ -92,6 +92,43 @@ public static partial class VerifiedFileEffectFinalProjection
         string.Equals(toolName, FileWrite, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, FileReplace, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Revalidates both the typed provenance and its underlying verified tool
+    /// receipt at the completion-validation boundary. A changed or forged
+    /// draft follows the ordinary validator path.
+    /// </summary>
+    public static bool IsValidAttestedCompletion(TurnContext context, out string reason)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var attestation = context.VerifiedFileEffectCompletion;
+        if (attestation is null)
+        {
+            reason = "missing_attestation";
+            return false;
+        }
+        if (!string.Equals(context.AssistantDraft, attestation.Text, StringComparison.Ordinal))
+        {
+            reason = "draft_changed";
+            return false;
+        }
+
+        var projection = Project(context.UserText, context.ToolCallsMade, currentBatchCallCount: 1);
+        if (!projection.Applied)
+        {
+            reason = $"receipt_{projection.Reason}";
+            return false;
+        }
+        if (!string.Equals(projection.Text, attestation.Text, StringComparison.Ordinal))
+        {
+            reason = "projection_mismatch";
+            return false;
+        }
+
+        reason = "verified_attestation";
+        return true;
+    }
+
     private static string RequestLead(string? userRequest)
     {
         if (string.IsNullOrWhiteSpace(userRequest))

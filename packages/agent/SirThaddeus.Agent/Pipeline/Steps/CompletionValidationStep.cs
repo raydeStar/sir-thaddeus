@@ -51,6 +51,20 @@ public sealed class CompletionValidationStep : ITurnStep
         if (string.IsNullOrWhiteSpace(context.AssistantDraft))
             return new StepResult.Continue(context);
 
+        if (context.VerifiedFileEffectCompletion is not null)
+        {
+            var attested = VerifiedFileEffectFinalProjection.IsValidAttestedCompletion(
+                context,
+                out var attestationReason);
+            _log?.Invoke(
+                "EXPERIMENT_ACTIVATION",
+                $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+                "event=verified_file_completion_attestation " +
+                $"decision={(attested ? "validated" : "rejected")} reason={attestationReason}");
+            if (attested)
+                return new StepResult.Continue(context);
+        }
+
         var projection = EvidenceBackedAnswerOnlyProjection.Project(
             context.UserText,
             context.AssistantDraft,
