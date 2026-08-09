@@ -48,11 +48,31 @@ public class RouterTests
 
         Assert.Equal(Intents.SystemTask, route.Intent);
         Assert.Contains(ToolCapability.SystemExecute, route.RequiredCapabilities);
+        Assert.Contains(ToolCapability.FileWrite, route.RequiredCapabilities);
 
         // Router contract stays capability-first: no tool-name output fields.
         var propertyNames = typeof(RouterOutput).GetProperties().Select(p => p.Name).ToList();
         Assert.DoesNotContain("AllowedTools", propertyNames);
         Assert.DoesNotContain("ToolNames", propertyNames);
+    }
+
+    [Fact]
+    public async Task RouteAsync_FilePrompt_RequiresReadAndVerifiedWriteCapabilities()
+    {
+        var llm = new FakeLlmClient((messages, tools) =>
+            new LlmResponse { IsComplete = true, Content = "tool", FinishReason = "stop" });
+
+        var router = new DefaultRouter(llm, new DeterministicUtilityEngineAdapter());
+        var route = await router.RouteAsync(new RouterRequest
+        {
+            UserMessage = "read the file and update the requested value",
+            HasRecentFirstPrinciplesRationale = false,
+            HasRecentSearchResults = false
+        });
+
+        Assert.Equal(Intents.FileTask, route.Intent);
+        Assert.Contains(ToolCapability.FileRead, route.RequiredCapabilities);
+        Assert.Contains(ToolCapability.FileWrite, route.RequiredCapabilities);
     }
 
     [Fact]

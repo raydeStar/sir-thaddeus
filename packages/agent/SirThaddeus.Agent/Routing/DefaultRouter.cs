@@ -394,11 +394,19 @@ public sealed class DefaultRouter : IRouter
         if (needsMemoryWrite)
             capabilities.Add(ToolCapability.MemoryWrite);
         if (needsFile)
+        {
             capabilities.Add(ToolCapability.FileRead);
+            if (intent.Equals(Intents.FileTask, StringComparison.OrdinalIgnoreCase))
+                capabilities.Add(ToolCapability.FileWrite);
+        }
         if (needsScreen)
             capabilities.Add(ToolCapability.ScreenCapture);
         if (needsSystem)
+        {
             capabilities.Add(ToolCapability.SystemExecute);
+            if (intent.Equals(Intents.SystemTask, StringComparison.OrdinalIgnoreCase))
+                capabilities.Add(ToolCapability.FileWrite);
+        }
 
         return capabilities.ToList();
     }

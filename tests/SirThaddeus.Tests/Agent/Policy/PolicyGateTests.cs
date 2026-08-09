@@ -214,7 +214,7 @@ public class PolicyGateTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void SystemTask_ExposesSystemAndClipboardTools()
+    public void SystemTask_ExposesSystemClipboardAndVerifiedFileEffectTools()
     {
         var policy = PolicyGate.Evaluate(Route(Intents.SystemTask));
         var filtered = PolicyGate.FilterTools(AllTools, policy);
@@ -223,7 +223,10 @@ public class PolicyGateTests
         Assert.Contains("system_execute", names);
         Assert.Contains("clipboard_read", names);
         Assert.Contains("clipboard_write", names);
+        Assert.Contains("file_write", names);
+        Assert.Contains("file_replace", names);
         Assert.DoesNotContain("file_read", names);
+        Assert.DoesNotContain("audit_export_bundle", names);
     }
 
     // ─────────────────────────────────────────────────────────────────

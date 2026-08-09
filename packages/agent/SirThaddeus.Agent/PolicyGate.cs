@@ -209,8 +209,16 @@ public static class PolicyGate
         // ── System task: execute a command ────────────────────────────
         [Intents.SystemTask] = new PolicyDecision
         {
-            AllowedCapabilities = [ToolCapability.SystemExecute],
+            AllowedCapabilities = [ToolCapability.SystemExecute, ToolCapability.FileWrite],
             ForbiddenCapabilities = [ToolCapability.ScreenCapture, ToolCapability.WebSearch, ToolCapability.FileRead, ToolCapability.MemoryWrite],
+            AllowedTools =
+            [
+                "system_execute", "SystemExecute",
+                "clipboard_read", "ClipboardRead",
+                "clipboard_write", "ClipboardWrite",
+                "file_write", "FileWrite",
+                "file_replace", "FileReplace"
+            ],
             RequiredPermissions = ["SystemExecute"]
         },
 
