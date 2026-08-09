@@ -24,6 +24,12 @@ public sealed class TimeBudgetedAgentOrchestrator : IAgentOrchestrator
     {
         _runTimeBudget = timeBudget;
         _runStopwatch = runStopwatch;
+        if (_inner is IWorkflowDeadlineAwareAgent deadlineAware)
+        {
+            var remaining = timeBudget - runStopwatch.Elapsed;
+            deadlineAware.SetWorkflowDeadline(
+                DateTimeOffset.UtcNow + (remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero));
+        }
     }
 
     public async Task<AgentResponse> ProcessAsync(

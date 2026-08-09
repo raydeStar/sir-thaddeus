@@ -39,6 +39,8 @@ namespace SirThaddeus.Agent.Pipeline.Steps;
 public sealed class ToolLoopStep : ITurnStep
 {
     private const int DefaultMaxOutputTokens = 1024;
+    private const int MaximumDeadlineReceiptOutputChars = 4000;
+    private static readonly TimeSpan DeterministicFinalizationReserve = TimeSpan.FromSeconds(15);
 
     private readonly ILlmClient _llm;
     private readonly IMcpToolClient _mcp;
@@ -51,6 +53,7 @@ public sealed class ToolLoopStep : ITurnStep
     private readonly int _maxOutputTokens;
     private readonly Action<string, string>? _log;
     private readonly ITurnExecutionControl _executionControl;
+    private readonly TimeProvider _timeProvider;
 
     public ToolLoopStep(
         ILlmClient llm,
@@ -63,7 +66,8 @@ public sealed class ToolLoopStep : ITurnStep
         int maxRoundTrips = 6,
         int maxOutputTokens = DefaultMaxOutputTokens,
         Action<string, string>? log = null,
-        ITurnExecutionControl? executionControl = null)
+        ITurnExecutionControl? executionControl = null,
+        TimeProvider? timeProvider = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _mcp = mcp ?? throw new ArgumentNullException(nameof(mcp));
@@ -80,6 +84,7 @@ public sealed class ToolLoopStep : ITurnStep
         _maxOutputTokens = maxOutputTokens;
         _log = log;
         _executionControl = executionControl ?? NullTurnExecutionControl.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public string Name => "ToolLoop";
@@ -123,6 +128,7 @@ public sealed class ToolLoopStep : ITurnStep
         var useDefaultWikiRootLocationContract = false;
         var boundEffectAttempted = false;
         var explicitReadAttempted = false;
+        var maxProviderCallDuration = TimeSpan.Zero;
 
         if (ShouldAddCalculatorSetupHint(context))
         {
@@ -152,6 +158,30 @@ public sealed class ToolLoopStep : ITurnStep
             {
                 messages.Add(ChatMessage.System(
                     $"[USER STEERING]\n{roundSteering.Trim()}\nFollow this correction for all remaining work."));
+            }
+
+            if (round > 0 &&
+                TryBuildDeadlineToolReceipt(
+                    context,
+                    toolCallsMade,
+                    maxProviderCallDuration,
+                    _timeProvider.GetUtcNow(),
+                    out var receipt,
+                    out var remaining,
+                    out var adaptiveReserve))
+            {
+                LogDeadlineToolReceipt(
+                    context,
+                    remaining,
+                    adaptiveReserve,
+                    maxProviderCallDuration);
+                return new StepResult.Terminate(new AgentResponse
+                {
+                    Text = receipt,
+                    Success = true,
+                    ToolCallsMade = toolCallsMade,
+                    LlmRoundTrips = round,
+                });
             }
 
             if (round > 0 &&
@@ -316,11 +346,15 @@ public sealed class ToolLoopStep : ITurnStep
                     $"elapsed_ms={elapsedMs:0.###}");
             }
             LlmResponse response;
+            var providerCallStarted = _timeProvider.GetTimestamp();
             try
             {
                 response = await _llm
                     .ChatAsync(messages, tools, _maxOutputTokens, forcedToolChoice, cancellationToken)
                     .ConfigureAwait(false);
+                var providerCallDuration = _timeProvider.GetElapsedTime(providerCallStarted);
+                if (providerCallDuration > maxProviderCallDuration)
+                    maxProviderCallDuration = providerCallDuration;
             }
             catch (OperationCanceledException)
                 when (TryBuildPlacesDiscoverDraftFromRecords(toolCallsMade, context.UserText) is { Text.Length: > 0 })
@@ -863,6 +897,95 @@ public sealed class ToolLoopStep : ITurnStep
                string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void LogDeadlineToolReceipt(
+        TurnContext context,
+        TimeSpan remaining,
+        TimeSpan adaptiveReserve,
+        TimeSpan maxProviderCallDuration)
+    {
+        if (!IsLatencyTracingEnabled() || _log is null)
+            return;
+
+        _log(
+            "TOOL_LOOP_DEADLINE_RECEIPT",
+            $"thread_id={context.ThreadId} turn_id={context.MessageId} " +
+            "outcome=terminal_evidence_receipt " +
+            $"remaining_ms={Math.Max(0, remaining.TotalMilliseconds):0.###} " +
+            $"reserve_ms={adaptiveReserve.TotalMilliseconds:0.###} " +
+            $"max_provider_call_ms={maxProviderCallDuration.TotalMilliseconds:0.###}");
+    }
+
+    private static bool TryBuildDeadlineToolReceipt(
+        TurnContext context,
+        IReadOnlyList<ToolCallRecord> toolCallsMade,
+        TimeSpan maxProviderCallDuration,
+        DateTimeOffset nowUtc,
+        out string receipt,
+        out TimeSpan remaining,
+        out TimeSpan adaptiveReserve)
+    {
+        receipt = string.Empty;
+        remaining = TimeSpan.MaxValue;
+        adaptiveReserve = DeterministicFinalizationReserve + maxProviderCallDuration;
+        if (context.WorkflowDeadlineUtc is not { } deadline)
+            return false;
+
+        remaining = deadline - nowUtc;
+        if (remaining > adaptiveReserve || toolCallsMade.Count == 0)
+            return false;
+
+        var latest = toolCallsMade[^1];
+        if (!latest.Success ||
+            !string.Equals(latest.ToolName, "system_execute", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(latest.Result))
+        {
+            return false;
+        }
+
+        string? stdout;
+        try
+        {
+            using var document = JsonDocument.Parse(latest.Result);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("exit_code", out var exitCode) ||
+                exitCode.ValueKind != JsonValueKind.Number ||
+                exitCode.GetInt32() != 0 ||
+                !root.TryGetProperty("timed_out", out var timedOut) ||
+                timedOut.ValueKind != JsonValueKind.False ||
+                !root.TryGetProperty("truncated", out var truncated) ||
+                truncated.ValueKind != JsonValueKind.False ||
+                !root.TryGetProperty("stdout", out var stdoutElement) ||
+                stdoutElement.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            stdout = stdoutElement.GetString();
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(stdout))
+            return false;
+
+        var observed = stdout.Trim();
+        var wasBounded = observed.Length > MaximumDeadlineReceiptOutputChars;
+        if (wasBounded)
+            observed = observed[..MaximumDeadlineReceiptOutputChars];
+        observed = observed.Replace("```", "``\u200B`", StringComparison.Ordinal);
+
+        receipt =
+            "The last terminal command completed successfully. There is not enough measured time left " +
+            "in this turn for another model pass before the response deadline, so here is the last observed output:\n\n" +
+            "```text\n" + observed +
+            (wasBounded ? "\n[output bounded to 4000 characters]" : string.Empty) +
+            "\n```";
+        return true;
     }
 
     private void LogToolLoopDecision(

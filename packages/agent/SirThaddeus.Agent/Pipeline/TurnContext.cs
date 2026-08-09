@@ -50,6 +50,12 @@ public sealed record TurnContext
     /// </summary>
     public WikiMutationTarget? WikiMutationTarget { get; init; }
 
+    /// <summary>
+    /// Optional absolute workflow deadline supplied by a budget-owning host.
+    /// It never overrides the caller's cancellation token.
+    /// </summary>
+    public DateTimeOffset? WorkflowDeadlineUtc { get; init; }
+
     /// <summary>Deterministic heuristic signals over the user message.
     /// Populated by a feature-extractor step. Null before that step runs.</summary>
     public RoutingFeatures? Features { get; init; }

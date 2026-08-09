@@ -24,13 +24,14 @@ namespace SirThaddeus.Agent.Pipeline;
 /// consistent view of history. The pipeline itself can be long-lived and
 /// shared across orchestrator instances.</para>
 /// </summary>
-public sealed class PipelineBackedAgentOrchestrator : IHeadlessAgent, IDisposable
+public sealed class PipelineBackedAgentOrchestrator : IHeadlessAgent, IWorkflowDeadlineAwareAgent, IDisposable
 {
     private readonly ChatPipeline _pipeline;
     private readonly IMcpToolClient _mcp;
     private readonly string _systemPrompt;
     private readonly SemaphoreSlim _turnGate = new(1, 1);
     private readonly List<ChatMessage> _history = new();
+    private DateTimeOffset? _workflowDeadlineUtc;
 
     public PipelineBackedAgentOrchestrator(
         ChatPipeline pipeline,
@@ -71,6 +72,7 @@ public sealed class PipelineBackedAgentOrchestrator : IHeadlessAgent, IDisposabl
                 UserText = userMessage,
                 LlmMessages = llmMessages,
                 ToolDefs = toolDefs,
+                WorkflowDeadlineUtc = _workflowDeadlineUtc,
             };
 
             var response = await _pipeline.RunAsync(context, cancellationToken).ConfigureAwait(false);
@@ -103,6 +105,9 @@ public sealed class PipelineBackedAgentOrchestrator : IHeadlessAgent, IDisposabl
             _turnGate.Release();
         }
     }
+
+    public void SetWorkflowDeadline(DateTimeOffset? deadlineUtc) =>
+        _workflowDeadlineUtc = deadlineUtc;
 
     public void SeedHistory(IEnumerable<(string Role, string Content)> messages)
     {
