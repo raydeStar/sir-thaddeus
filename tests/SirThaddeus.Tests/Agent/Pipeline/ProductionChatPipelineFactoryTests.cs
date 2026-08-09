@@ -23,9 +23,11 @@ public sealed class ProductionChatPipelineFactoryTests
         "FreshnessRouter",
         "ToolLoop",
         "PostProcess:Sanitize",
+        "PostProcess:ProtocolArtifactNormalize",
         "CompletionValidation",
         "SearchFallback",
         "PostProcess:SearchFallbackSanitize",
+        "PostProcess:SearchFallbackProtocolArtifactNormalize",
         "AutoMemoryExtract",
         "ResponseComposer",
     ];

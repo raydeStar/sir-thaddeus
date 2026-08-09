@@ -100,6 +100,7 @@ public static class ProductionChatPipelineFactory
             new FreshnessRouterStep(),
             options.ToolLoop,
             new PostProcessStep(options.Sanitize, "PostProcess:Sanitize"),
+            new ProtocolArtifactNormalizationStep(log: options.LogEvent),
             new CompletionValidationStep(
                 options.CompletionValidator,
                 options.CompletionRepairLoop,
@@ -108,6 +109,9 @@ public static class ProductionChatPipelineFactory
                 options.SearchFallbackExecutor,
                 BuildSearchFallbackRequest),
             new PostProcessStep(options.Sanitize, "PostProcess:SearchFallbackSanitize"),
+            new ProtocolArtifactNormalizationStep(
+                "PostProcess:SearchFallbackProtocolArtifactNormalize",
+                options.LogEvent),
             new AutoMemoryExtractStep(
                 options.AutoMemoryExtractor,
                 options.ActiveProfileIdGetter),
