@@ -139,3 +139,5 @@ test-results/
 # The publish pipeline regenerates them; don't track the bundles.
 src/Thaddeus.Runtime/wwwroot/assets/
 src/Thaddeus.Runtime/wwwroot/index.html
+# Codex desktop transient attachments
+.codex-remote-attachments/

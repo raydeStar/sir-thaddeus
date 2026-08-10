@@ -1,10 +1,12 @@
 # Current Evidence
 
-**Evidence cutoff:** August 8, 2026
+**Evidence cutoff:** August 10, 2026
 
-**Current production baseline:** `88a81759`; `master` and `dev` are synchronized.
-The latest product change adds authenticated OpenAI-compatible provider support
-without changing prompts, orchestration, tool policy, or local-provider defaults.
+**Current production baseline:** `3a7b7031`; `master` and `dev` are synchronized.
+The latest product sequence normalizes malformed provider protocol artifacts,
+preserves truthful receipts at adaptive deadlines, mechanically verifies exact
+file effects, and avoids redundant model-authored completion after verified
+file state.
 **Authoritative ledger:** sibling `local-benchmark-runner` repository
 
 ## Executive read
@@ -19,6 +21,38 @@ The evidence does not support a broad claim that prompt scaffolds, extra
 reasoning calls, routing, or a larger comparison model reliably improve the
 closed-book capacity of a fixed small model. Those mechanisms have often added
 calls and latency while tying or losing to unchanged Thaddeus.
+
+### August 10 consolidation and matched-scaffold checkpoint
+
+- Product PR `#327` normalized malformed provider channel/protocol artifacts.
+  Frozen Gemma development improved `0/5 -> 3/5`; the exact repeat and sealed
+  holdout candidate each retained `3/5`.
+- Product PR `#328` added a truthful adaptive-deadline receipt. Verified state
+  was preserved and fresh response validity added one paired win.
+- Product PR `#329` added exact verified file-effect handling. Development,
+  exact repeat, and disjoint validation each produced four paired wins and zero
+  losses; fresh validation improved `4/8 -> 8/8`. This is a harness-capability
+  gain, not an efficiency claim.
+- Product PR `#330` removed redundant model completion only after verified file
+  effects. Both arms retained `8/8`; provider calls fell `30 -> 18`, measured
+  tokens fell roughly 32 percent, and measured work time fell roughly 33
+  percent. This is product-quality uplift with capability held constant.
+- The same frozen Gemma artifact then ran eight fresh Terminal-Bench 2.1 tasks
+  under three scaffolds. Sir scored `1/8`; Terminus2 and mini-SWE-agent each
+  scored `2/8`. The reference scaffolds prove same-model headroom on two tasks,
+  but five tasks were common failures and both references used materially more
+  tokens and wall time. Treat this as trajectory-localization evidence, not a
+  large leaderboard gap or a product promotion result.
+- Requirement-grounded verification v1 is `INVALID`, not rejected. Typed state
+  construction worked in isolation, but nominal verification and execution
+  calls did not reach the live MCP runtime; the campaign stopped after 5 of 9
+  planned evaluations. A future v2 must first certify one real action and one
+  real verification through the unchanged scaffold on new development cases.
+- The governing research method now distinguishes exploration from
+  confirmation, validates the benchmark before the candidate, requires an
+  immutable registration, reports paired uncertainty, treats exact reruns as
+  repeatability rather than independent reproducibility, and retires consumed
+  validation data explicitly.
 
 ### August 8 WebArena closure and frontier cross-control gate
 

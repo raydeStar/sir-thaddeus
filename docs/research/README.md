@@ -32,6 +32,9 @@ folder is the deeper living record rather than the project pitch.
    defines the current forward plan and stop rules.
 8. [../EXPERIMENTATION.md](../EXPERIMENTATION.md) defines the experiment
    protocol; [../BENCHMARKING.md](../BENCHMARKING.md) defines the scorecards.
+9. The sibling evaluator's `docs/SCIENTIFIC_METHOD.md` is the authoritative
+   registered sequential experiment contract, including benchmark validity,
+   uncertainty, adaptive-data protection, and reproducibility terminology.
 
 ## Product-quality research
 
@@ -58,11 +61,16 @@ wins. Correct this folder in the next documentation PR.
 
 ## How to keep it current
 
-Every completed experiment must leave one of four explicit dispositions:
+Every experiment must leave one precise disposition:
 
 - **Promoted:** demonstrated behavior merged through protected CI.
 - **Rejected:** mechanism failed a predeclared gate; implementation removed.
 - **Inconclusive:** evidence cannot support promotion or rejection.
+- **Invalid:** the mechanism was not exercised or attribution was impossible.
+- **Retained:** promising evidence remains incomplete and unmerged.
+- **Cancelled:** intentionally stopped before a valid scored result.
+- **Blocked:** an external prerequisite prevented the registered run.
+- **Superseded:** a later record corrects or replaces this one.
 - **Infrastructure:** measurement improved, but no product capability claim is
   allowed.
 
