@@ -160,3 +160,40 @@ Lead with the verdict: promoted, rejected, inconclusive, or blocked. Include the
 baseline SHA, model/configuration, exact commands, artifact locations, paired
 results, resource costs, regressions, and remaining uncertainty. Be explicit
 when a result is historical, estimated, or not independently verified.
+
+## Scientific research protocol
+
+The evaluator repository owns the complete research method and experiment
+artifacts. Before any benchmark-driven behavior change, read:
+
+- `..\\local-benchmark-runner\\docs\\SCIENTIFIC_METHOD.md`;
+- `..\\local-benchmark-runner\\docs\\EXPERIMENT_PROMOTION_FUNNEL.md`;
+- `..\\local-benchmark-runner\\docs\\EVALUATION_PAVED_ROAD.md`.
+
+Treat research as two explicitly different modes:
+
+- **Exploration** may inspect development failures, compare trajectories, and
+  test oracles. Its scores do not support promotion.
+- **Confirmation** starts only after an immutable registration is pushed. It
+  freezes the candidate, planned looks, stop rules, task roles, paired
+  analysis, and resource guardrails before scored execution.
+
+Validate the measuring instrument before testing a candidate. Require a live
+transport/activation sentinel, scorer positive and negative controls, usable
+model/task-tier dynamic range, and an answer-blind selection fingerprint.
+
+Use precise terminal states: `INVALID`, `REJECTED`, `INCONCLUSIVE`,
+`RETAINED`, `CANCELLED`, `BLOCKED`, `SUPERSEDED`, or `PROMOTED`.
+No activation is invalid, not a negative efficacy result. An exact rerun is
+repeatability evidence; disjoint untouched validation tests generalization;
+independent reproduction and replication are stronger, separate claims.
+
+Report paired gains and losses, effect size and uncertainty, invalid episodes,
+false successes, negative activations, trials, calls, tokens, latency, and
+resource cost. When small score changes matter, predeclare enough independent
+runs to distinguish them from stochastic agent variance.
+
+A task becomes consumed as soon as its result influences candidate design.
+Never reuse consumed evidence as fresh validation. Maintain a visible record of
+all attempted candidates, including clean rejections and invalid runs, so the
+published success rate is not selected from hidden experimentation.
