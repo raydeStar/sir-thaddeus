@@ -2,7 +2,8 @@
 
 **Evidence cutoff:** August 10, 2026
 
-**Current production baseline:** `3a7b7031`; `master` and `dev` are synchronized.
+**Current behavior baseline:** `3a7b7031`. Repository `master` and `dev` are
+synchronized at documentation-only consolidation commit `40bb152b`.
 The latest product sequence normalizes malformed provider protocol artifacts,
 preserves truthful receipts at adaptive deadlines, mechanically verifies exact
 file effects, and avoids redundant model-authored completion after verified
