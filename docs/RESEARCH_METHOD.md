@@ -103,31 +103,45 @@ presenting the surviving winner as if it had been the original hypothesis.
 
 ```mermaid
 flowchart TD
-    B["BENCHMARK-VALIDATED<br/>Can this instrument measure the claimed effect?"]
-    P["PROPOSED<br/>One failure class, hypothesis, and mechanism"]
-    E["VETTED<br/>Prior evidence, headroom, alternatives, falsifier"]
-    R["REGISTERED<br/>Immutable candidate and analysis contract"]
-    A["ACTIVATED<br/>Live runtime evidence that the mechanism ran"]
-    T["TRIAGE-PASSED<br/>Small balanced reject-only test"]
-    D["DEVELOPMENT-PASSED<br/>Paired effect on inspectable cases"]
-    X["EXACT-REPEATED<br/>Same sealed candidate, same cases"]
-    V["VALIDATED<br/>Disjoint untouched cases"]
-    G["PRODUCT-GATED<br/>Safety, no-action, quality, and resources"]
-    M["PROMOTED<br/>Protected merge and preserved artifacts"]
-    Z["Terminal verdict<br/>INVALID / REJECTED / INCONCLUSIVE / RETAINED<br/>CANCELLED / BLOCKED / SUPERSEDED"]
+    subgraph EX["EXPLORATION - adaptive discovery, not promotion evidence"]
+        O["Observed failure"] --> Q["Trajectory decomposition and research"]
+        Q --> H["Oracle or reference-scaffold headroom"]
+        H --> C["One generalized candidate"]
+    end
 
-    B --> P --> E --> R --> A --> T --> D --> X --> V --> G --> M
-    B -. "invalid instrument" .-> Z
-    A -. "not exercised" .-> Z
-    T -. "gate missed" .-> Z
-    D -. "gate missed" .-> Z
-    X -. "did not repeat" .-> Z
-    V -. "did not generalize" .-> Z
-    G -. "product regression" .-> Z
+    C --> R["REGISTERED<br/>Seal mechanism, hashes, tasks, looks, and stop rules"]
+
+    subgraph CF["CONFIRMATION - the candidate is frozen"]
+        R --> B{"BENCHMARK VALID?<br/>Controls, transport, dynamic range"}
+        B -- "yes" --> A{"ACTIVATED?<br/>Live runtime-owned evidence"}
+        A -- "yes" --> T{"TRIAGE PASS?<br/>Small balanced reject-only test"}
+        T -- "yes" --> D{"PAIRED DEVELOPMENT WIN?<br/>Gains, losses, false success, cost"}
+        D -- "yes" --> X{"EXACT REPEAT?<br/>Same sealed candidate"}
+        X -- "yes" --> V{"FRESH VALIDATION?<br/>Disjoint untouched tasks"}
+        V -- "yes" --> G{"PRODUCT GATES?<br/>Conversation, safety, permissions, resources"}
+        G -- "yes" --> P["PROMOTED<br/>Protected merge and preserved artifacts"]
+    end
+
+    B -- "no" --> I["INVALID<br/>The instrument cannot support the claim"]
+    A -- "no" --> I2["INVALID<br/>The mechanism was not exercised"]
+    T -- "no" --> J
+    D -- "clear loss" --> J["REJECTED<br/>Valid evidence missed a declared gate"]
+    D -- "uncertain" --> N["INCONCLUSIVE<br/>Valid evidence cannot decide"]
+    X -- "no" --> N
+    V -- "no" --> J
+    G -- "no" --> K["RETAINED or REJECTED<br/>Promising evidence is not shippable"]
+
+    I --> L["APPEND-ONLY EVIDENCE LEDGER"]
+    I2 --> L
+    J --> L
+    N --> L
+    K --> L
+    P --> L
 ```
 
 Each gate earns only the next expense. Early tests can reject a candidate but
-cannot promote it.
+cannot promote it. `CANCELLED`, `BLOCKED`, and `SUPERSEDED` remain available
+for administrative exits that do not answer the efficacy question.
 
 ### Gate A: validate the measuring instrument
 
@@ -603,7 +617,7 @@ own sake; it is that each rule was purchased by a real failure:
 Methods formed this way are often more useful than an abstract checklist
 because every gate has an operational reason to exist.
 
-The most original and valuable idea is **activation before efficacy**, embedded
+The most distinctive and valuable idea is **activation before efficacy**, embedded
 inside a registered promotion funnel. In an agent system, “the candidate did
 not run” and “the candidate ran and did not help” are fundamentally different
 scientific outcomes. Much evaluation practice still collapses them into one
