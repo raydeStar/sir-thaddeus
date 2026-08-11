@@ -12,6 +12,14 @@ public sealed class CompletionReasonResolver : ICompletionReasonResolver
             return CompletionReason.Failed;
         }
 
+        // A registered completion contract is authoritative. Transport-level
+        // success or a high confidence band cannot turn an explicitly partial
+        // result into a terminal success.
+        if (response.IsPartial)
+        {
+            return CompletionReason.Failed;
+        }
+
         if (elapsed > workflowState.Envelope.TimeBudget)
         {
             return CompletionReason.Timeout;

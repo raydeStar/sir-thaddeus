@@ -23,6 +23,19 @@ public sealed class RetryGateEvaluator : IRetryGateEvaluator
                 "The available retry strategies require live tools, but this request is direct-answer only.");
         }
 
+        // A workflow retry re-enters the complete agent pipeline with its
+        // mutation tools available. Once an attempt has successfully changed
+        // external state, replaying the request is not a safe confidence
+        // repair: it can duplicate or undo already-completed work. The active
+        // tool loop remains free to continue and verify before it returns;
+        // this guard applies only at the cross-attempt boundary.
+        if (state.HasSuccessfulMutation)
+        {
+            return BuildBlocked(
+                "mutating_attempt_not_retry_safe",
+                "Automatic retry skipped because the completed attempt changed external state.");
+        }
+
         if (remainingRetries <= 0)
         {
             return BuildBlocked("retry_budget_exhausted", "Retry budget exhausted.");

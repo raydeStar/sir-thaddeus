@@ -92,6 +92,25 @@ public sealed class WorkflowRetryGateEvaluatorTests
         Assert.Equal("search_retry_not_applicable", decision.ReasonCode);
     }
 
+    [Fact]
+    public void Evaluate_BlocksCrossAttemptRetry_AfterSuccessfulMutation()
+    {
+        var evaluator = new RetryGateEvaluator();
+        var state = CreateState(
+            maxRetries: 2,
+            retriesUsed: 0,
+            maxToolCalls: 8,
+            toolCallsUsed: 2,
+            timeBudgetSec: 30);
+        state.HasSuccessfulMutation = true;
+        var confidence = new ConfidenceSnapshot { ShouldRetry = true };
+
+        var decision = evaluator.Evaluate(state, confidence, TimeSpan.FromSeconds(5));
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal("mutating_attempt_not_retry_safe", decision.ReasonCode);
+    }
+
     private static TaskRunState CreateState(
         int maxRetries,
         int retriesUsed,
