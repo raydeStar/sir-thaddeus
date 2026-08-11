@@ -18,7 +18,7 @@ Getting Sir Thaddeus running and understanding what it will and won't do.
 
 Building, testing, and understanding the system.
 
-- [RESEARCH_METHOD.md](RESEARCH_METHOD.md) — the concise public case for fixed-small-model improvement, the scientific loop, representative findings, and integrity boundary.
+- [RESEARCH_METHOD.md](RESEARCH_METHOD.md) — the full public case for Registered Sequential Agent-Harness Experiments, including its lineage, lifecycle, limitations, strengthening roadmap, representative findings, and integrity boundary.
 - [BENCHMARKING.md](BENCHMARKING.md) — separate model-capacity, harness-capability, and product-quality scorecards, the general reasoning portfolio, and safe benchmark customization.
 - [ASSISTANT_PIPELINE.md](ASSISTANT_PIPELINE.md) — the active chat pipeline, supported diagnostics, retired experiments, and promotion rules.
 - [EXPERIMENTATION.md](EXPERIMENTATION.md) — the one-mechanism branch loop, benchmark-integrity boundary, controls, and promotion gates.

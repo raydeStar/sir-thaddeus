@@ -5,9 +5,9 @@ research. It exists so future experiments start from established evidence
 rather than conversation history, an old branch, or an attractive mechanism
 that has already failed.
 
-For a shorter public explanation of the method and its representative results,
-start with [The Small-Model Improvement Method](../RESEARCH_METHOD.md). This
-folder is the deeper living record rather than the project pitch.
+For the public explanation of the method and its representative results, start
+with [Registered Sequential Agent-Harness Experiments](../RESEARCH_METHOD.md).
+This folder is the deeper living record rather than the project pitch.
 
 ## Start here
 
