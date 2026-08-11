@@ -79,7 +79,7 @@ a benchmark fluctuation is not evidence until the exact candidate repeats on
 unseen inputs.
 
 That distinction is the research contribution. Read
-[The Small-Model Improvement Method](docs/RESEARCH_METHOD.md) for the complete
+[Registered Sequential Agent-Harness Experiments](docs/RESEARCH_METHOD.md) for the complete
 public protocol, representative findings, anti-benchmaxxing boundary, and a
 template for reproducing the work.
 
