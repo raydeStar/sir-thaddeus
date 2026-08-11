@@ -87,6 +87,7 @@ internal sealed class WorkflowChatRunCoordinator
         CaptureEvidence(workflowState, firstResponse, "primary");
         workflowState.DraftAnswer = firstResponse.Text;
         workflowState.ToolCallsUsed = totalToolCallsUsed;
+        workflowState.HasSuccessfulMutation = WorkflowRetrySafety.HasSuccessfulMutation(firstResponse);
 
         if (workflowState.Envelope.ShowChecklist)
         {

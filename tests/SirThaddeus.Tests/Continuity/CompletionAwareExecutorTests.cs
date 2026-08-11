@@ -157,6 +157,46 @@ public sealed class CompletionAwareExecutorTests
         Assert.Equal(1, ctx.RepairCount);
     }
 
+    [Fact]
+    public async Task SuccessfulButPartialMutation_RetainsBoundedInLoopRecovery()
+    {
+        var inner = new FakeToolLoopExecutor();
+
+        // A successful mutation is not itself terminal evidence for this
+        // registered multi-field contract. The completion decorator must keep
+        // its existing bounded recovery before the attempt returns to the
+        // outer workflow boundary.
+        inner.EnqueueResponse(new AgentResponse
+        {
+            Text = "Updated one part.",
+            ToolCallsMade =
+            [
+                OkResult("wiki_page_update", """{"version":2}"""),
+                OkResult("places_lookup", """{"address":"123 Main","url":"https://x.com"}""")
+            ]
+        });
+        inner.EnqueueResponse(new AgentResponse
+        {
+            Text = "Joe's Bakery is at 123 Main St.",
+            ToolCallsMade =
+            [
+                OkResult("wiki_page_update", """{"version":2}"""),
+                OkResult("places_lookup", """{"name":"Joe's Bakery","address":"123 Main","url":"https://x.com"}""")
+            ]
+        });
+
+        var ctx = RunContext.New(maxRepairs: 1);
+        ctx.Intent = Intents.LookupFact;
+        var executor = new CompletionAwareToolLoopExecutor(inner);
+
+        var response = await executor.ExecuteAsync(MakeRequest(Intents.LookupFact, ctx));
+
+        Assert.False(response.IsPartial);
+        Assert.Equal("complete", response.CompletionStopReason);
+        Assert.Equal(2, inner.ExecutionCount);
+        Assert.Equal(1, ctx.RepairCount);
+    }
+
     // ── Repair budget exhausted: returns partial ──────────────────────
 
     [Fact]

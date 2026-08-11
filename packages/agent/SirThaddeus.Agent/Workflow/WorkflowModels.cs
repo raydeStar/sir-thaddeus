@@ -104,6 +104,12 @@ public sealed class TaskRunState
     public List<ProgressEvent> Events { get; init; } = [];
     public List<EvidenceRecord> Evidence { get; init; } = [];
     public int ToolCallsUsed { get; set; }
+    /// <summary>
+    /// True once the current attempt has successfully executed a tool whose
+    /// declared effect may mutate external state. Cross-attempt retries must
+    /// not replay that work automatically.
+    /// </summary>
+    public bool HasSuccessfulMutation { get; set; }
     public int RetriesUsed { get; set; }
     public DateTimeOffset StartedAt { get; init; } = DateTimeOffset.UtcNow;
     public ConfidenceSnapshot? LatestConfidence { get; set; }

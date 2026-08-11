@@ -67,6 +67,26 @@ public sealed class WorkflowCompletionReasonResolverTests
         Assert.Equal(CompletionReason.SuccessHighConfidence, reason);
     }
 
+    [Fact]
+    public void Resolve_DoesNotReportSuccess_WhenRegisteredCompletionContractIsPartial()
+    {
+        var resolver = new CompletionReasonResolver();
+        var state = CreateState();
+        var response = CreateSuccessResponse() with
+        {
+            IsPartial = true,
+            MissingFields = ["second_requirement"]
+        };
+
+        var reason = resolver.Resolve(
+            response,
+            state,
+            new ConfidenceSnapshot { Band = "High" },
+            TimeSpan.FromSeconds(2));
+
+        Assert.Equal(CompletionReason.Failed, reason);
+    }
+
     private static TaskRunState CreateState()
     {
         return new TaskRunState
