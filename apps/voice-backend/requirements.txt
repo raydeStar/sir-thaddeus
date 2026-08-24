@@ -2,7 +2,7 @@
 # Install: pip install -r requirements.txt
 # Keep deployable from the immutable offline wheelhouse in assets-v2.
 fastapi>=0.139.0
-uvicorn[standard]>=0.51.0
+uvicorn[standard]>=0.52.4
 python-multipart>=0.0.32
 # The bundled runtime is Python 3.11; NumPy 2.5+ requires Python 3.12.
 numpy>=2.4.6,<2.5
