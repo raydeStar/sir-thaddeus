@@ -9,5 +9,5 @@ numpy>=2.4.6,<2.5
 faster-whisper>=1.2.1
 # Ensures VC++ runtime DLLs are available on fresh Windows machines where
 # ctranslate2/faster-whisper can otherwise crash the process during model load.
-msvc-runtime>=14.44.35112; platform_system == "Windows"
+msvc-runtime>=14.51.36231; platform_system == "Windows"
 yt-dlp
