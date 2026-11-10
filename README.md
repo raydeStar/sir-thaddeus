@@ -32,6 +32,14 @@
   </p>
 </div>
 
+## At a glance
+
+- **What it does:** gives a small local model a permissioned workspace (MCP tools behind Off/Ask/Always policy, durable memory, a Markdown wiki, per-turn traces) and measures whether that makes it more useful.
+- **Headline result:** on a fresh 20-task verified-outcome scorecard, the same 1.2B model scored **4 / 20 raw and 15 / 20 inside Sir Thaddeus**. That is a harness-capability result, not a closed-book intelligence claim; [full tables below](#measured-not-guessed).
+- **See it:** the [permission-flow capture](assets/images/permission-flow-demo.gif) is the actual UI asking before geolocation and web search.
+- **Run it (Windows 10/11 only):** download the [latest release](https://github.com/raydeStar/sir-thaddeus/releases/latest) and run `Launch Sir Thaddeus.cmd`, then point it at LM Studio, Ollama or any OpenAI-compatible `/v1` endpoint.
+- **How changes ship:** one mechanism per experiment against a frozen baseline, repeated and validated on unseen tasks; losers are deleted ([method](docs/RESEARCH_METHOD.md)).
+
 ![The private study of Sir Thaddeus, with the pixel-authentic application on the monitor, local compute, a memory vault, permission controls, evidence, and a watchful raven familiar](assets/images/local-first-workspace-final.png)
 
 <p align="center"><em>Your model. Your memory. Your permission.</em></p>
